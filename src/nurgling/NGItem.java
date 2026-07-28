@@ -6,6 +6,7 @@ import static haven.Inventory.sqsz;
 import haven.res.ui.stackinv.ItemStack;
 import haven.res.ui.tt.slots.ISlots;
 import haven.res.ui.tt.stackn.StackName;
+import haven.res.ui.tt.wear.Wear;
 import monitoring.ItemWatcher;
 import nurgling.iteminfo.NCuriosity;
 import nurgling.iteminfo.NFoodInfo;
@@ -234,6 +235,12 @@ public class NGItem extends GItem
     @Override
     public void wdgmsg(String msg, Object... args)
     {
+        if (msg.equals("take") && (Boolean) NConfig.get(NConfig.Key.autoSaveTableware) && isFoodTakeBlockedByWornTableware())
+        {
+            if (NUtils.getGameUI() != null)
+                NUtils.getGameUI().error("Tableware is almost broken. Replace it before continuing to eat.");
+            return;
+        }
         if (name != null)
         {
             if (msg.equals("take") || (msg.equals("iact")))
@@ -463,6 +470,46 @@ public class NGItem extends GItem
         System.out.println("NGItem.cache: ADDED: " + name + " q=" + q + " iis.size=" + inv.iis.size());
     }
     
+    /**
+     * True if this item sits in the food grid of an open Symbel/feast table and some
+     * piece of tableware in that table's 3x3 or 1x2 grid is one hit from breaking.
+     * Blocking "take" here (rather than pulling the worn item out) leaves it in its
+     * slot, still contributing its bonus, until the player swaps or repairs it.
+     */
+    private boolean isFoodTakeBlockedByWornTableware() {
+        if (!(parent instanceof NInventory)) return false;
+        NInventory myInv = (NInventory) parent;
+        // Don't block picking up the tableware itself -- the player must still be able
+        // to grab a worn piece out in order to replace it.
+        if (myInv.isz != null && (myInv.isz.x * myInv.isz.y == 9 || myInv.isz.x * myInv.isz.y == 2))
+            return false;
+        Window wnd = myInv.getparent(Window.class);
+        if (wnd == null || wnd.cap == null || !wnd.cap.contains("Table")) return false;
+
+        boolean hasFeast = false;
+        NInventory tableware = null, small = null;
+        for (Widget w : wnd.children()) {
+            if (w instanceof NInventory) {
+                NInventory cand = (NInventory) w;
+                int area = cand.isz.x * cand.isz.y;
+                if (area == 9) tableware = cand;
+                else if (area == 2) small = cand;
+            } else if (w instanceof Button && "Feast!".equals(((Button) w).text.text)) {
+                hasFeast = true;
+            }
+        }
+        if (!hasFeast) return false;
+
+        for (NInventory inv : new NInventory[]{tableware, small}) {
+            if (inv == null) continue;
+            for (WItem wi : inv.getTopLevelItems()) {
+                Wear w = ((NGItem) wi.item).getInfo(Wear.class);
+                if (w != null && (w.m - w.d) <= 1) return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Find the parent NInventory for this item (handles items inside stacks)
      */

@@ -19,6 +19,20 @@ public class NFightsess extends Fightsess {
         updatepos();
     }
 
+    /**
+     * Sends a use request for the given action-bar slot through the exact
+     * same protocol path normal keyboard combat input uses (see
+     * {@link Fightsess#requestUse}). Used by nurgling.combat's reactor.
+     */
+    public void requestAction(int slot) {
+        requestUse(slot);
+    }
+
+    /** Releases whatever action is currently held, same as a physical key-up. */
+    public void releaseAction() {
+        releaseHeld();
+    }
+
     public class NFightsessBuffsAndInfo extends Widget {
         private final Fightsess parent;
 

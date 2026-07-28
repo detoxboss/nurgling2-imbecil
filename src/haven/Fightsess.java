@@ -435,6 +435,49 @@ public class Fightsess extends Widget {
 
     private UI.Grab holdgrab = null;
     private int held = -1;
+
+    /*
+     * Extracted so NFightsess.requestAction/releaseAction (used by
+     * nurgling.combat's reactor) can drive the exact same use/rel protocol
+     * sequence normal keyboard combat input uses, instead of reimplementing
+     * it. Behavior for real keyboard input is unchanged.
+     */
+    protected void requestUse(int slot) {
+	if((slot < 0) || (slot >= actions.length))
+	    return;
+	MapView map = getparent(GameUI.class).map;
+	Coord mvc = map.rootxlate(ui.mc);
+	if(held >= 0) {
+	    new Release(held);
+	    held = -1;
+	}
+	if(mvc.isect(Coord.z, map.sz)) {
+	    map.new Maptest(mvc) {
+		    protected void hit(Coord pc, Coord2d mc) {
+			wdgmsg("use", slot, 1, ui.modflags(), mc.floor(OCache.posres));
+		    }
+
+		    protected void nohit(Coord pc) {
+			wdgmsg("use", slot, 1, ui.modflags());
+		    }
+		}.run();
+	}
+	if(holdgrab == null)
+	    holdgrab = ui.grabkeys(this);
+	held = slot;
+    }
+
+    protected void releaseHeld() {
+	if(held < 0)
+	    return;
+	new Release(held);
+	if(holdgrab != null) {
+	    holdgrab.remove();
+	    holdgrab = null;
+	}
+	held = -1;
+    }
+
     public boolean globtype(GlobKeyEvent ev) {
 	// ev = new KeyEvent((java.awt.Component)ev.getSource(), ev.getID(), ev.getWhen(), ev.getModifiersEx(), ev.getKeyCode(), ev.getKeyChar(), ev.getKeyLocation());
 	{
@@ -445,28 +488,8 @@ public class Fightsess extends Widget {
 		    break;
 		}
 	    }
-	    int fn = n;
 	    if((n >= 0) && (n < actions.length)) {
-		MapView map = getparent(GameUI.class).map;
-		Coord mvc = map.rootxlate(ui.mc);
-		if(held >= 0) {
-		    new Release(held);
-		    held = -1;
-		}
-		if(mvc.isect(Coord.z, map.sz)) {
-		    map.new Maptest(mvc) {
-			    protected void hit(Coord pc, Coord2d mc) {
-				wdgmsg("use", fn, 1, ui.modflags(), mc.floor(OCache.posres));
-			    }
-
-			    protected void nohit(Coord pc) {
-				wdgmsg("use", fn, 1, ui.modflags());
-			    }
-			}.run();
-		}
-		if(holdgrab == null)
-		    holdgrab = ui.grabkeys(this);
-		held = n;
+		requestUse(n);
 		return(true);
 	    }
 	}
@@ -496,11 +519,7 @@ public class Fightsess extends Widget {
 
     public boolean keyup(KeyUpEvent ev) {
 	if(ev.grabbed && (kb_acts[held].key().match(ev.awt, KeyMatch.MODS))) {
-	    MapView map = getparent(GameUI.class).map;
-	    new Release(held);
-	    holdgrab.remove();
-	    holdgrab = null;
-	    held = -1;
+	    releaseHeld();
 	    return(true);
 	}
 	return(false);

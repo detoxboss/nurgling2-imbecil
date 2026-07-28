@@ -205,6 +205,8 @@ public class NConfig
         autoLogoutThreshold,
         autoLogoutCountdown,
         autoLogoutDelay,
+        // Combat reactor settings
+        combatReactorEnabled,
         // Bot path display
         showBotPathOnMinimap,
         showBotPathOnGround,
@@ -562,6 +564,9 @@ public class NConfig
         conf.put(Key.autoLogoutThreshold, 0);    // Energy threshold (0 = disabled)
         conf.put(Key.autoLogoutCountdown, 30);   // Countdown seconds before logout
         conf.put(Key.autoLogoutDelay, 60);       // Delay seconds when user clicks delay
+
+        // Combat reactor settings
+        conf.put(Key.combatReactorEnabled, false);
 
         // Bot path display
         conf.put(Key.showBotPathOnMinimap, false);

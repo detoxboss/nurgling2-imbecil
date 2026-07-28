@@ -300,28 +300,30 @@ public class NCore extends Widget
             }
         }
 
-        if(autoSaveTableware == null && (Boolean)NConfig.get(NConfig.Key.autoSaveTableware))
-        {
-            autoSaveTableware = new AutoSaveTableware();
-            BotExecutor.runTask("AutoSaveTableware", () -> {
-                try {
-                    NGameUI gui = NUtils.getGameUI();
-                    if (gui != null) {
-                        autoSaveTableware.run(gui);
-                    }
-                } catch (InterruptedException ignored) {
-                } finally {
-                    autoSaveTableware = null;
-                }
-            });
-        }
-        else
-        {
-            if(autoSaveTableware != null && !(Boolean)NConfig.get(NConfig.Key.autoSaveTableware))
-            {
-                autoSaveTableware.stop.set(true);
-            }
-        }
+        // Superseded by NGItem.wdgmsg's "take" block on worn tableware (passive,
+        // no background task needed) -- kept here for reference/rollback.
+        // if(autoSaveTableware == null && (Boolean)NConfig.get(NConfig.Key.autoSaveTableware))
+        // {
+        //     autoSaveTableware = new AutoSaveTableware();
+        //     BotExecutor.runTask("AutoSaveTableware", () -> {
+        //         try {
+        //             NGameUI gui = NUtils.getGameUI();
+        //             if (gui != null) {
+        //                 autoSaveTableware.run(gui);
+        //             }
+        //         } catch (InterruptedException ignored) {
+        //         } finally {
+        //             autoSaveTableware = null;
+        //         }
+        //     });
+        // }
+        // else
+        // {
+        //     if(autoSaveTableware != null && !(Boolean)NConfig.get(NConfig.Key.autoSaveTableware))
+        //     {
+        //         autoSaveTableware.stop.set(true);
+        //     }
+        // }
         super.tick(dt);
         
         // Save global config (UI settings, credentials, etc.)

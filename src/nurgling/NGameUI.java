@@ -29,6 +29,7 @@ public class NGameUI extends GameUI
     public NAlarmWdg alarmWdg;
     public StarvationAlertWidget starvationAlertWidget;
     public AutoLogoutWidget autoLogoutWidget;
+    public NCombatReactor combatReactor;
     public NQuestInfo questinfo;
     public NGUIInfo guiinfo;
     public NSearchItem itemsForSearch = null;
@@ -169,6 +170,8 @@ public class NGameUI extends GameUI
         add(starvationAlertWidget = new StarvationAlertWidget());
         // Auto-logout widget - logs out when energy is critically low
         add(autoLogoutWidget = new AutoLogoutWidget());
+        // Combat reactor - reads Fightview/Fightsess directly for defense automation + attack recommendation
+        add(new NDraggableWidget(combatReactor = new NCombatReactor(), "CombatReactor", combatReactor.sz.add(NDraggableWidget.delta)));
         nep = new NEquipProxy(getEquipProxySlotsFromConfig());
         add(new NDraggableWidget(nep, "EquipProxy", nep.sz.add(NDraggableWidget.delta)));
         add(new NDraggableWidget(nbp = new NBeltProxy(), "BeltProxy", UI.scale(825, 55)));
@@ -1129,6 +1132,9 @@ public class NGameUI extends GameUI
 
     @Override
     public boolean globtype(GlobKeyEvent ev) {
+        if(combatReactor != null && combatReactor.handleGlobalKey(ev))
+            return true;
+
         nurgling.sessions.SessionManager sm = nurgling.sessions.SessionManager.getInstance();
 
         // Check session switching keybindings
