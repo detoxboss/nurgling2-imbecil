@@ -17,6 +17,7 @@ public class Fishing extends Window implements Checkable {
     Label targLab;
     CheckBox noPilesCheck;
     CheckBox useInventoryToolsCheck;
+    CheckBox collectJunkCheck;
     public NFishingSettings prop;
     private FishingTarget fishwnd = null;
     public Fishing() {
@@ -86,6 +87,12 @@ public class Fishing extends Window implements Checkable {
         {
             {
                 a = finalFishSet.useInventoryTools;
+            }
+        }, prev.pos("bl").add(UI.scale(0,5)));
+        prev = add(collectJunkCheck = new CheckBox(L10n.get("fishing.collect_junk"))
+        {
+            {
+                a = finalFishSet.collectJunk;
             }
         }, prev.pos("bl").add(UI.scale(0,5)));
         prev = add(new Label(L10n.get("fishing.fishline")), prev.pos("bl").add(UI.scale(0,5)));
@@ -179,6 +186,7 @@ public class Fishing extends Window implements Checkable {
                     prop.targets = fishwnd.settings.targets;
                     prop.noPiles = noPilesCheck.a;
                     prop.useInventoryTools = useInventoryToolsCheck.a;
+                    prop.collectJunk = collectJunkCheck.a;
                     NFishingSettings.set(prop);
                 }
                 isReady = true;

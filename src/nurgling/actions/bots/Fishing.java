@@ -1,7 +1,9 @@
 package nurgling.actions.bots;
 
 import haven.*;
+import nurgling.NGItem;
 import nurgling.NGameUI;
+import nurgling.NInventory;
 import nurgling.NUtils;
 import nurgling.actions.*;
 import nurgling.areas.NArea;
@@ -9,8 +11,12 @@ import nurgling.areas.NContext;
 import nurgling.conf.NFishingSettings;
 import nurgling.tasks.*;
 
+import nurgling.tools.Finder;
 import nurgling.tools.NAlias;
+import nurgling.tools.NParser;
 import nurgling.tools.VSpec;
+
+import java.util.ArrayList;
 
 public class Fishing implements Action {
     @Override
@@ -38,6 +44,7 @@ public class Fishing implements Action {
         NArea insaArea = context.goToAreaById(insaId);
         NArea repArea = null;
         NArea baitArea= null;
+        Pair<Coord2d,Coord2d> junkArea = null;
         if(prop.useInventoryTools) {
             // Using tools from inventory - no zone selection needed
             NUtils.getGameUI().msg("Using tools from inventory/equipment");
@@ -49,6 +56,10 @@ public class Fishing implements Action {
             String baitAreaId = context.createArea("Please select area with baits or lures", Resource.loadsimg("baubles/fishingBaits"));
             baitArea = context.goToAreaById(baitAreaId);
 
+            if(prop.collectJunk) {
+                String junkAreaId = context.createArea("Please select area for junk catches", Resource.loadsimg("baubles/outputArea"));
+                junkArea = context.goToAreaById(junkAreaId).getRCArea();
+            }
         }
 
         Pair<Coord2d,Coord2d> outArea = null;
@@ -85,7 +96,8 @@ public class Fishing implements Action {
         
 
         final Pair<Coord2d,Coord2d> finalOutArea = outArea;
-        
+        final Pair<Coord2d,Coord2d> finalJunkArea = junkArea;
+
         while (true)
         {
             FishingTask ft;
@@ -147,10 +159,66 @@ public class Fishing implements Action {
                         return Results.SUCCESS();
                     }
                     new TransferToPiles(finalOutArea, VSpec.getAllFish()).run(gui);
+                    if(finalJunkArea != null) {
+                        if(!depositJunk(gui, prop, finalJunkArea).IsSuccess()) {
+                            NUtils.getGameUI().msg("Junk containers full, stopping fishing");
+                            return Results.FAIL();
+                        }
+                    }
                     startFishing(gui, currentPos, fishPlace);
                 }
             }
         }
+    }
+
+    /**
+     * H&H's world-wide "flotsam" mechanic means a share of fishing catches are random discarded
+     * items rather than fish. Sweep anything that isn't a fish, the rod, the fishline, the hook or
+     * the bait into the junk area so it doesn't slowly fill the inventory and starve out real catches.
+     */
+    private Results depositJunk(NGameUI gui, NFishingSettings prop, Pair<Coord2d, Coord2d> junkArea) throws InterruptedException {
+        ArrayList<WItem> junk = collectJunkItems(prop);
+        if(junk.isEmpty())
+            return Results.SUCCESS();
+
+        NAlias containerNames = new NAlias(new ArrayList<>(NContext.contcaps.keySet()), new ArrayList<>());
+        for(Gob g : Finder.findGobs(junkArea, containerNames)) {
+            junk = collectJunkItems(prop);
+            if(junk.isEmpty())
+                return Results.SUCCESS();
+            if(g.ngob.isContainerFull())
+                continue;
+            String cap = NContext.contcaps.get(g.ngob.name);
+            new PathFinder(g).run(gui);
+            new OpenTargetContainer(cap, g).run(gui);
+            NInventory targetInv = NUtils.getGameUI().getInventory(cap);
+            for(WItem item : junk) {
+                if(targetInv.getFreeSpace() == 0)
+                    break;
+                // Stack-aware transfer: a plain wdgmsg("transfer") on an ItemStack-wrapped
+                // junk item never fires the widget-removal the naive path waits on, which
+                // hung the bot indefinitely instead of moving to the next container.
+                TransferToContainer.transfer(item, targetInv, 1);
+            }
+            new CloseTargetContainer(cap).run(gui);
+        }
+        return collectJunkItems(prop).isEmpty() ? Results.SUCCESS() : Results.FAIL();
+    }
+
+    private ArrayList<WItem> collectJunkItems(NFishingSettings prop) throws InterruptedException {
+        ArrayList<WItem> junk = new ArrayList<>();
+        NAlias fish = VSpec.getAllFish();
+        for(WItem wi : NUtils.getGameUI().getInventory().getItems()) {
+            String name = ((NGItem) wi.item).name();
+            if(name == null)
+                continue;
+            if(NParser.checkName(name, fish))
+                continue;
+            if(NParser.checkName(name, prop.tool, prop.fishline, prop.hook, prop.bait))
+                continue;
+            junk.add(wi);
+        }
+        return junk;
     }
 
     private void startFishing(NGameUI gui, Coord2d currentPos, Coord2d fishPlace) throws InterruptedException {

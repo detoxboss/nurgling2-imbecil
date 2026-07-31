@@ -6,6 +6,13 @@ import nurgling.*;
 import nurgling.areas.NContext;
 import nurgling.conf.NFishingSettings;
 import nurgling.tasks.NTask;
+import nurgling.tools.Container;
+import nurgling.tools.Finder;
+import nurgling.tools.NAlias;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 
 public class RepairFishingRot implements Action {
 
@@ -50,7 +57,7 @@ public class RepairFishingRot implements Action {
         WItem fl = NUtils.getGameUI().getInventory().getItem(item);
         if(fl == null) {
             if(area!=null) {
-                new TakeItems2(context,item,count).run(gui);
+                takeFromArea(gui, item, count, area);
             }
             fl = NUtils.getGameUI().getInventory().getItem(item);
         }
@@ -78,4 +85,37 @@ public class RepairFishingRot implements Action {
         return Results.SUCCESS();
     }
 
+    /**
+     * Scans the given rectangle directly for containers/stockpiles holding {@code item},
+     * bypassing NContext.getInStorages() (which only resolves items registered via
+     * addInItem/inAreas - never true for these ad-hoc "select area with:" prompts).
+     */
+    private void takeFromArea(NGameUI gui, String item, int count, Pair<Coord2d, Coord2d> area) throws InterruptedException {
+        NAlias containerNames = new NAlias(new ArrayList<>(NContext.contcaps.keySet()), new ArrayList<>());
+        for (Gob g : Finder.findGobs(area, containerNames)) {
+            if (haveEnough(item, count)) return;
+            if (g.ngob.isContainerEmpty()) continue;
+            Container cont = new Container(g, NContext.contcaps.get(g.ngob.name), null);
+            new PathFinder(g).run(gui);
+            new OpenTargetContainer(cont).run(gui);
+            TakeItemsFromContainer tifc = new TakeItemsFromContainer(cont, new HashSet<>(Arrays.asList(item)), null);
+            tifc.minSize = count - NUtils.getGameUI().getInventory().getItems(new NAlias(item)).size();
+            tifc.run(gui);
+            new CloseTargetContainer(cont).run(gui);
+        }
+        if (haveEnough(item, count)) return;
+        for (Gob g : Finder.findGobs(area, new NAlias("stockpile"))) {
+            if (haveEnough(item, count)) return;
+            new PathFinder(g).run(gui);
+            new OpenTargetContainer("Stockpile", g).run(gui);
+            if (NUtils.getGameUI().getStockpile() != null) {
+                new TakeItemsFromPile(g, NUtils.getGameUI().getStockpile(), count - NUtils.getGameUI().getInventory().getItems(new NAlias(item)).size()).run(gui);
+            }
+            new CloseTargetWindow(NUtils.getGameUI().getWindow("Stockpile")).run(gui);
+        }
+    }
+
+    private boolean haveEnough(String item, int count) throws InterruptedException {
+        return NUtils.getGameUI().getInventory().getItems(new NAlias(item)).size() >= count;
+    }
 }

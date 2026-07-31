@@ -25,6 +25,7 @@ public class NFishingSettings implements JConf
     public boolean repfromcont = false;
     public boolean noPiles = false;
     public boolean useInventoryTools = false;
+    public boolean collectJunk = false;
 
 
     public NFishingSettings(String username, String chrid) {
@@ -50,6 +51,8 @@ public class NFishingSettings implements JConf
             noPiles = (Boolean) values.get("noPiles");
         if (values.get("useInventoryTools") != null)
             useInventoryTools = (Boolean) values.get("useInventoryTools");
+        if (values.get("collectJunk") != null)
+            collectJunk = (Boolean) values.get("collectJunk");
         if (values.get("targets") != null)
             targets.addAll((Collection<? extends String>)values.get("targets"));
     }
@@ -98,6 +101,7 @@ public class NFishingSettings implements JConf
         jfishSet.put("repfromcont", repfromcont);
         jfishSet.put("noPiles", noPiles);
         jfishSet.put("useInventoryTools", useInventoryTools);
+        jfishSet.put("collectJunk", collectJunk);
         JSONArray fish = new JSONArray();
         for(String key : targets)
         {
