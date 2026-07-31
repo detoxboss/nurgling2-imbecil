@@ -1,8 +1,8 @@
 ---
 doc_id: combat-verification
-revision: 1
+revision: 2
 status: current
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 verified_against: "HEAD 9d7404fa0 + uncommitted worktree"
 canonical_for:
   - "Traceability matrix: which claims/contracts have actually been tested, how, and with what result"
@@ -16,6 +16,9 @@ Statuses used: `PASS`, `FAIL`, `NOT RUN`, `NOT IMPLEMENTED`, `MANUAL PENDING`, `
 
 | ID | Claim/contract | Evidence | Automated test | Manual check | Latest result | Implementation identity |
 |---|---|---|---|---|---|---|
+| `VER-COOLDOWN-GATE` | [BEH-DEF-005](behavior-contract.md#defense-automatic) — no defense send while the shared attack-cooldown window is active | `EV-SRC-COMBAT-PKG`, `EV-USER-TESTING-20260727B` | None exists | Root-caused from the user's live-testing report (highlighted action wavering ~20x per 3s window); fixed by reading `Fightview.atkct` into the snapshot and gating the defense-send loop on it; rebuilt and confirmed `ant jar` passes | **MANUAL PENDING** (fix applied this session; user has not yet re-tested in-client) | HEAD 9d7404fa0 + worktree |
+| `VER-THRESHOLD-001` | [BEH-DEF-001](behavior-contract.md#defense-automatic) — configurable minimum-opening threshold (default 40) instead of `>0` | `EV-SRC-COMBAT-PKG`, `EV-USER-TESTING-20260727B` | None exists | Traced by hand: `CombatDecisionEngine.chooseDefence` now takes `threshold` and requires `max >= threshold`; `CombatReactorController.defenseThreshold()` reads `NConfig.Key.combatReactorDefenseThreshold` (default 40); exposed as a `TextEntry` in `CombatReactorSettings` | **MANUAL PENDING** (fix applied this session; user has not yet re-tested in-client) | HEAD 9d7404fa0 + worktree |
+| `VER-BOTSMENU-001` | [BEH-UI-003](behavior-contract.md#diagnosticsui-approved-minimum) — bots-menu Start/Stop popup with key-capture field, in sync with the Settings-panel enable flag/hotkey | `EV-BOTSMENU-INVESTIGATION`, `EV-USER-TESTING-20260728` | None exists | Traced by hand: `CombatReactorTool.run` follows `CombatDistanceTool`'s exact static-field toggle pattern; `NCombatReactorTool`'s `KeyCapture` writes through to `NCombatReactor.kb_attack`; Start/Stop button and window-close both read/write `NConfig.Key.combatReactorEnabled`. `ant jar` — `BUILD SUCCESSFUL`, including the new `combatreactor` icon resource compiling without error | **MANUAL PENDING** (implemented and built 2026-07-28; user has not yet clicked through it in-client) | HEAD 9d7404fa0 + worktree |
 | `VER-TRUTH-TABLE` | [BEH-ATK-002](behavior-contract.md#attack-recommendation-and-manual-trigger) exact attack truth table (all 8 cases in the port brief §13 acceptance list) | `EV-SRC-COMBAT-PKG` (`CombatDecisionEngine.chooseAttack`) | None exists | Traced by hand against all 8 listed cases during implementation this session (all-zero→Barrage; no-2IP FC>STING→FullCircle; no-2IP FC==STING>0→FullCircle; no-2IP STING>FC→Barrage; 2+IP STING>FC→Sting; 2+IP tie→FullCircle; 2+IP FC==0,STING>0→Sting; unknown IP never→Sting) | PASS (manual code trace only — not exercised in a live fight) | HEAD 9d7404fa0 + worktree |
 | `VER-DEFENSE-TIES` | [BEH-DEF-002](behavior-contract.md#defense-automatic)/[BEH-DEF-003](behavior-contract.md#defense-automatic) tie mapping (red/yellow dedup, green/blue dual-candidate) | `EV-SRC-COMBAT-PKG` (`CombatDecisionEngine.chooseDefence`) | None exists | Traced by hand this session | PASS (manual code trace only) | HEAD 9d7404fa0 + worktree |
 | `VER-STATE-001` | [BEH-FAIL-001](behavior-contract.md#fail-closed-handling) — all seven states distinguishable and fail-closed | `EV-SRC-COMBAT-PKG` (`CombatOpeningState`), `EV-GREP-AUDIT` | None exists | Source-read confirms only 5 of 7 states are ever actually produced (`CONFIRMED_ZERO`, `VALID_NOT_FOUND`, `DISPLAY_ABSENT`, `SEARCH_ERROR`, `UNAVAILABLE`); `UNKNOWN` and `STALE` are declared but never constructed | **FAIL (partial)** — fail-closed *behavior* holds for the states that are produced, but the "keep all seven states distinct" requirement is not fully met. See [UNR-002](unresolved.md#unr-002) | HEAD 9d7404fa0 + worktree |

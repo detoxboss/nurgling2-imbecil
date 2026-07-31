@@ -207,6 +207,7 @@ public class NConfig
         autoLogoutDelay,
         // Combat reactor settings
         combatReactorEnabled,
+        combatReactorDefenseThreshold,
         // Bot path display
         showBotPathOnMinimap,
         showBotPathOnGround,
@@ -567,6 +568,7 @@ public class NConfig
 
         // Combat reactor settings
         conf.put(Key.combatReactorEnabled, false);
+        conf.put(Key.combatReactorDefenseThreshold, 40); // Minimum opening value worth clearing
 
         // Bot path display
         conf.put(Key.showBotPathOnMinimap, false);

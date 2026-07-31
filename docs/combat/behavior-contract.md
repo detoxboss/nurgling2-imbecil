@@ -1,8 +1,8 @@
 ---
 doc_id: combat-behavior-contract
-revision: 1
+revision: 2
 status: current
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 verified_against: "HEAD 9d7404fa0 + uncommitted worktree"
 canonical_for:
   - "Intended/approved automation behavior for the combat reactor, independent of Java implementation"
@@ -34,13 +34,15 @@ Labels:
 ## Defense (automatic)
 
 <a id="beh-def-001"></a>
-- **BEH-DEF-001** `[Approved requirement]` — Defense is automatic; find the player's own highest-value opening (`>0`) and fire its restoring move. Source: port brief §6.2, R3 automation-requirements §"Existing user-approved requirements" #5.
+- **BEH-DEF-001** `[Approved requirement]` — Defense is automatic; find the player's own highest-value opening at or above a minimum threshold and fire its restoring move. Source: port brief §6.2, R3 automation-requirements §"Existing user-approved requirements" #5. **Revised** after live in-client testing: the original `>0` threshold reacted to trivial pressure; the user reported real play doesn't start worrying until roughly 40-60 and set the default at 40, configurable (`NConfig.Key.combatReactorDefenseThreshold`, `CombatReactorSettings`). This is a user-approved revision of the threshold, not a reinterpretation — the `>0` behavior is superseded, not silently discarded (see [changes/CHANGELOG.md](changes/CHANGELOG.md)).
 <a id="beh-def-002"></a>
 - **BEH-DEF-002** `[Approved requirement]` — Red and yellow both map to Zig-Zag Ruse; a red/yellow tie deduplicates to exactly one Zig-Zag request, never two. Source: port brief §6.2 step 7; R3 requirement #8.
 <a id="beh-def-003"></a>
 - **BEH-DEF-003** `[Approved requirement]` — A green/blue tie is preserved as **two separate candidates**, each **revalidated against the freshest snapshot immediately before it is actually sent**, rather than blindly queued. This explicitly *supersedes and replaces* the historical AHK-era "send every tied key with no revalidation" policy that R3 recorded as merely historically compliant, not as a mechanic to preserve. Evidence: user selected "Revalidate before send (Recommended)" when asked directly during this port (this session, prior to implementation) — see [EV-USER-DECISIONS](evidence.md).
 <a id="beh-def-004"></a>
 - **BEH-DEF-004** `[Derived requirement]` — Unknown/stale/unavailable player-opening state authorizes no automatic defense (fail-closed). Derived from [BEH-FAIL-001](#beh-fail-001).
+<a id="beh-def-005"></a>
+- **BEH-DEF-005** `[Approved requirement]` — The reactor must not re-select a different action while the shared/global attack-cooldown window ([MEC-CD-004](mechanics.md#cooldowns-and-action-lifecycle)) is still counting down from a previous use; (re-)evaluate and send at most once per window. Added after the user reported live in-client "wavering" (the highlighted action swapping several times per cooldown, usually landing on a defense move by the time the window closed) — root-caused to the automatic defense loop sending a fresh request every ~100ms tick with no awareness of the shared cooldown, each one overwriting whichever action was previously selected/queued.
 
 ## Attack recommendation and manual trigger
 
@@ -101,6 +103,9 @@ Labels:
 - **BEH-UI-001** `[Approved requirement]` — Expose at minimum: enabled state, current target/relation presence, four player openings, four opponent openings, current IP, recommended attack + reason, last sent action, last rejection reason, a safe stop. Source: port brief §10.
 <a id="beh-ui-002"></a>
 - **BEH-UI-002** `[Derived requirement]` — derived from the user's explicit, emphatic statement that a crash mid-combat is unacceptable in a permadeath game (an approved requirement in substance — "never crash" — even though it was stated as prose reacting to an incident, not a spec bullet); the specific trip-switch mechanism below is Claude's design response to that goal, not something the user specified directly. A repeated-failure trip switch: after 3 consecutive uncaught exceptions from the reactor's own tick/hotkey handling, the reactor **latches itself off** (independent of the config toggle) and shows a persistent on-screen warning until the user explicitly re-toggles the enable setting. The user reviewed and explicitly approved of this hardening after it was implemented ("okay good"), which is retroactive confirmation of the approach, not prior specification of it. See [code-map.md](code-map.md) and [ADR-0003](decisions/ADR-0003-relation-scoped-fail-closed-state.md).
+<a id="beh-ui-003"></a>
+- **BEH-UI-003** `[Approved requirement]` — A second control surface, alongside the Settings-panel one ([BEH-ENABLE-001](#beh-enable-001)): a small popup reachable from the bots-menu sidebar's existing "Combat" category, containing a rebindable key-capture field (bound to the same `NCombatReactor.kb_attack`) and a Start/Stop toggle button (bound to the same `NConfig.Key.combatReactorEnabled`) instead of a checkbox. Closing the popup (via its close button, Esc, or re-clicking its bots-menu icon) also disables the reactor. Both control surfaces read/write the exact same underlying state — this is not a second reactor implementation. Source: user request with reference screenshots, this session, explicitly modeled on the existing "Combat Distance Tool" bots-menu entry.
+  - **Known placeholder:** the bots-menu icon's image/tooltip resource is a duplicate of Combat Distance Tool's (Haven's `.res` icon format is binary and not safely hand-authorable outside the project's normal resource-editing workflow — confirmed by inspection this session). The icon is functional but shows borrowed art and an incorrect tooltip until replaced. See [UNR-015](unresolved.md#unr-015).
 
 ## Known current noncompliance (index)
 

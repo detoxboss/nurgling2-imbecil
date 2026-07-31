@@ -1,6 +1,7 @@
 package nurgling.combat;
 
 import haven.GameUI;
+import nurgling.NConfig;
 
 import java.util.List;
 import java.util.Objects;
@@ -58,7 +59,18 @@ public final class CombatReactorController {
         if(!reactorEnabled || !snap.combatPresent)
             return;
 
-        List<CombatMove> candidates = CombatDecisionEngine.chooseDefence(snap);
+        if(snap.sharedCooldownActive()) {
+            // The client is still counting down the shared "attack window" from a
+            // previous use (Fightview.atkcs/atkct - a real per-use server-supplied
+            // duration, distinct from each move's own per-action cooldown). Re-selecting
+            // a different action every tick while this window is still open is what
+            // caused the reported "wavering" between attacks/defenses several times per
+            // cooldown; only (re-)evaluate and send once the window has actually closed.
+            lastRejectionReason = "shared cooldown active";
+            return;
+        }
+
+        List<CombatMove> candidates = CombatDecisionEngine.chooseDefence(snap, defenseThreshold());
         for(CombatMove candidate : candidates) {
             CombatActionExecutor.Result r = executor.send(candidate, snap);
             if(r.status == CombatActionExecutor.Status.SENT) {
@@ -115,5 +127,13 @@ public final class CombatReactorController {
 
     public CombatMove lastActionAttempted() {
         return lastActionAttempted;
+    }
+
+    /** Minimum opening value (0-100ish) before the reactor bothers clearing it; user-tunable, default 40. */
+    private static int defenseThreshold() {
+        Object v = NConfig.get(NConfig.Key.combatReactorDefenseThreshold);
+        if(v instanceof Number)
+            return ((Number) v).intValue();
+        return 40;
     }
 }

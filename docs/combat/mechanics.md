@@ -1,8 +1,8 @@
 ---
 doc_id: combat-mechanics
-revision: 1
+revision: 2
 status: current
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 verified_against: "HEAD 9d7404fa0 + uncommitted worktree"
 canonical_for:
   - "Haven & Hearth combat-mechanics truth that constrains the reactor (opening/IP/cooldown/move semantics)"
@@ -47,6 +47,7 @@ Labels are preserved exactly as classified in the R3 source documents ([EV-SPEC-
 - **MEC-CD-001** `[Verified game mechanic]` — Move cooldown units convert at 0.06 seconds/unit; the client tracks per-action cooldown (`acool` message → `Fightsess.Action.cs/ct`) separately from a shared/global "opening window" cooldown (`atkc` message → `Fightview.atkcs/atkct`).
 - **MEC-CD-002** `[Verified game mechanic]` — Normal client input releases a previously held combat action (sends `rel`) before sending the next `use`; release is fenced through the render/environment queue rather than sent immediately. Source: `haven.Fightsess` (`Release` inner class, `globtype`/`keyup`), pinned upstream revision [EV-FIGHTSESS-PINNED](evidence.md).
 - **MEC-CD-003** `[Unresolved question]` — Sources conflict on an agility-based attack-cooldown cap; not independently resolved.
+- **MEC-CD-004** `[Verified game mechanic]` — The shared/global "attack window" cooldown (`Fightview.atkcs/atkct`, set by the `atkc` server message) has a duration that varies per use — the server supplies it fresh each time, not a fixed constant. Whatever action is currently selected/highlighted on the action bar when this window elapses is what actually fires. Confirmed both from source (`Fightview.uimsg("atkc", ...)`: `atkct = atkcs + (Utils.dv(args[0]) * 0.06)`, a per-message argument) and corroborated by the user's direct in-client observation (countdown visibly starts at different values per move, e.g. ~2.6-3s reported for Sting). Distinct from each move's own per-action cooldown ([MEC-CD-001](#cooldowns-and-action-lifecycle)) — a move can be off its own cooldown while the shared window from a *different*, previously-used move is still counting down.
 
 ## The automated attack trio
 

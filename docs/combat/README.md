@@ -1,8 +1,8 @@
 ---
 doc_id: combat-readme
-revision: 1
+revision: 2
 status: current
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 verified_against: "HEAD 9d7404fa0 + uncommitted worktree"
 canonical_for:
   - "Discovery index for all combat-reactor documentation"
@@ -56,18 +56,18 @@ Nurgling-native Haven & Hearth combat automation: reads `Fightview`/`Fightsess` 
 
 | Document | Revision | Status | Last verified |
 |---|---|---|---|
-| README.md (this file) | 1 | current | 2026-07-27 |
-| mechanics.md | 1 | current | 2026-07-27 |
-| behavior-contract.md | 1 | current | 2026-07-27 |
+| README.md (this file) | 2 | current | 2026-07-28 |
+| mechanics.md | 2 | current | 2026-07-28 |
+| behavior-contract.md | 2 | current | 2026-07-28 |
 | observable-state.md | 1 | current | 2026-07-27 |
-| code-map.md | 1 | current | 2026-07-27 |
+| code-map.md | 2 | current | 2026-07-28 |
 | rule-system.md | 1 | current | 2026-07-27 |
-| evidence.md | 1 | current | 2026-07-27 |
-| verification.md | 1 | current | 2026-07-27 |
-| unresolved.md | 1 | current | 2026-07-27 |
-| changes/CHANGELOG.md | 1 | current (append-only) | 2026-07-27 |
+| evidence.md | 2 | current | 2026-07-28 |
+| verification.md | 2 | current | 2026-07-28 |
+| unresolved.md | 2 | current | 2026-07-28 |
+| changes/CHANGELOG.md | 2 | current (append-only) | 2026-07-28 |
 | decisions/README.md + ADR-0001..0006 | 1 | current (ADR-0006 Proposed, all others Accepted) | 2026-07-27 |
 
 ## Last cross-document audit
 
-2026-07-27 — full link/path/ID/contradiction pass performed at initial authoring (see this session's final report for the checklist covered). Next audit should run after any combat-related change, per [`.claude/rules/combat-automation.md`](../../.claude/rules/combat-automation.md).
+2026-07-28 — second pass, covering the shared-cooldown-gate fix, the configurable defense threshold, and the new bots-menu control surface ([BEH-DEF-005](behavior-contract.md#defense-automatic), [BEH-UI-003](behavior-contract.md#diagnosticsui-approved-minimum)). `observable-state.md`, `rule-system.md`, and the ADRs were not touched this pass (nothing in their scope changed) and keep their 2026-07-27 verification date. Initial full pass was 2026-07-27 (see that date's changelog entries for the checklist covered). Next audit should run after any combat-related change, per [`.claude/rules/combat-automation.md`](../../.claude/rules/combat-automation.md).

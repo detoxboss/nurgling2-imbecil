@@ -58,11 +58,13 @@ public final class CombatSnapshot {
     public final Map<CombatMove, ActionState> actions;
     public final int heldSlot;
     public final double timestamp;
+    public final double sharedCooldownEnd;
 
     public CombatSnapshot(boolean reactorEnabled, boolean combatPresent, long relationRevision, Long relationGobId,
                            Value playerGreen, Value playerBlue, Value playerYellow, Value playerRed,
                            Value targetGreen, Value targetBlue, Value targetYellow, Value targetRed,
-                           Value ip, Map<CombatMove, ActionState> actions, int heldSlot, double timestamp) {
+                           Value ip, Map<CombatMove, ActionState> actions, int heldSlot, double timestamp,
+                           double sharedCooldownEnd) {
         this.reactorEnabled = reactorEnabled;
         this.combatPresent = combatPresent;
         this.relationRevision = relationRevision;
@@ -79,11 +81,17 @@ public final class CombatSnapshot {
         this.actions = new EnumMap<>(actions);
         this.heldSlot = heldSlot;
         this.timestamp = timestamp;
+        this.sharedCooldownEnd = sharedCooldownEnd;
     }
 
     public ActionState action(CombatMove move) {
         ActionState st = actions.get(move);
         return st == null ? ActionState.UNAVAILABLE : st;
+    }
+
+    /** Whether the shared/global attack-cooldown window (Fightview.atkcs/atkct) is still counting down. */
+    public boolean sharedCooldownActive() {
+        return timestamp < sharedCooldownEnd;
     }
 
     /** True if this snapshot and {@code other} describe the same relation and reactor-relevant values. */
@@ -103,6 +111,8 @@ public final class CombatSnapshot {
         if(!valueEq(ip, other.ip))
             return false;
         if(heldSlot != other.heldSlot)
+            return false;
+        if(sharedCooldownActive() != other.sharedCooldownActive())
             return false;
         for(CombatMove m : CombatMove.values()) {
             ActionState a = action(m), b = other.action(m);

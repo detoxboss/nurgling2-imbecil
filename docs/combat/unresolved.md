@@ -1,8 +1,8 @@
 ---
 doc_id: combat-unresolved
-revision: 1
+revision: 2
 status: current
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 verified_against: "HEAD 9d7404fa0 + uncommitted worktree"
 canonical_for:
   - "Open questions and known gaps for the combat reactor, with stable IDs"
@@ -120,6 +120,16 @@ Tombstoned here as pointers only; full detail lives in [mechanics.md](mechanics.
 - **What would resolve it:** The user deliberately repeating the two-session combat + tab-switch scenario and reporting the result.
 - **Affected:** Every `MANUAL PENDING` row in [verification.md](verification.md).
 - **Status:** Open, **blocks calling any manual-check row "passing."** **Owner:** user. **Opened:** 2026-07-27. **Last reviewed:** 2026-07-27.
+
+<a id="unr-015"></a>
+## UNR-015 — Bots-menu icon is a placeholder (borrowed art + wrong tooltip)
+
+- **Question:** When will the "Combat Reactor" bots-menu entry get its own icon art and correct tooltip text?
+- **Why it matters:** `resources/src/nurgling/bots/icons/combatreactor/` is currently a byte-for-byte duplicate of `.../combatdist/`'s `.res` files. The menu entry is fully functional (correct click behavior, correct popup), but visually shows Combat Distance Tool's icon and its tooltip ("Combat Distance Tool" / "Manage combat kiting distance") instead of Combat Reactor's own.
+- **Present evidence:** Confirmed by direct inspection this session that Haven's bots-menu icon format (`{u,d,h}.res`, each with binary `image_0.data`/`.png` and, for `u.res`, binary `tooltip_N.data` layers) is not safely hand-authorable as plain text — it's normally produced by an external resource-editing tool, not written directly in this Java source tree. `ant jar` compiles the duplicated placeholder without error.
+- **What would resolve it:** The user authoring real icon art + tooltip text via their normal resource workflow and replacing the files under `resources/src/nurgling/bots/icons/combatreactor/`.
+- **Affected:** [BEH-UI-003](behavior-contract.md#diagnosticsui-approved-minimum), the "Bots-menu icon (placeholder)" row in [code-map.md](code-map.md).
+- **Status:** Open, cosmetic only (not a functional defect). **Owner:** user. **Opened:** 2026-07-28. **Last reviewed:** 2026-07-28.
 
 ## See also
 

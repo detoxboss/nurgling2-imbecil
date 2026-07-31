@@ -29,9 +29,11 @@ public final class CombatDecisionEngine {
      * Highest-pressure player opening(s) mapped to their restoring move,
      * red/yellow deduplicated to a single Zig-Zag Ruse candidate, green/blue
      * tie preserved as two separate candidates for the caller to revalidate
-     * individually before each is actually sent.
+     * individually before each is actually sent. {@code threshold} is the
+     * minimum opening value worth clearing at all (user-tunable; below this,
+     * do nothing rather than react to trivial pressure).
      */
-    public static List<CombatMove> chooseDefence(CombatSnapshot s) {
+    public static List<CombatMove> chooseDefence(CombatSnapshot s, int threshold) {
         List<CombatMove> out = new ArrayList<>();
         if(!s.reactorEnabled || !s.combatPresent || s.relationGobId == null)
             return out;
@@ -42,7 +44,7 @@ public final class CombatDecisionEngine {
 
         int gv = g.safeAmount(), bv = b.safeAmount(), yv = y.safeAmount(), rv = r.safeAmount();
         int max = Math.max(Math.max(gv, bv), Math.max(yv, rv));
-        if(max <= 0)
+        if(max < threshold)
             return out;
 
         boolean needZigzag = (rv == max) || (yv == max);

@@ -61,11 +61,18 @@ public final class CombatStateAdapter {
 
         Map<CombatMove, CombatSnapshot.ActionState> actions = readActions(fsess, now);
         int heldSlot = (fsess != null) ? fsess.use : -1;
+        // Shared/global "attack window" cooldown: starts on ANY move use, per-use duration
+        // supplied by the server ("atkc" message -> Fightview.atkcs/atkct). Distinct from each
+        // move's own per-action cooldown (Fightsess.Action.cs/ct). Whatever action is currently
+        // selected/highlighted when this window elapses is what actually fires; re-selecting a
+        // different action while the window is still counting down is what caused the reactor's
+        // reported "wavering" (constant reselect every ~100ms) before this field existed.
+        double sharedCooldownEnd = (fv != null) ? fv.atkct : 0.0;
 
         return new CombatSnapshot(reactorEnabled, combatPresent, relationRevision, relationGobId,
             playerGreen, playerBlue, playerYellow, playerRed,
             targetGreen, targetBlue, targetYellow, targetRed,
-            ip, actions, heldSlot, now);
+            ip, actions, heldSlot, now, sharedCooldownEnd);
     }
 
     /**
