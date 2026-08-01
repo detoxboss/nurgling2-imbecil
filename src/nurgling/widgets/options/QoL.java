@@ -40,6 +40,7 @@ public class QoL extends Panel {
     private CheckBox decalsOnTop;
     private CheckBox thinOutlines;
     private CheckBox printpfmap;
+    private CheckBox showPlayerCoords;
     private CheckBox uniformBiomeColors;
     private CheckBox showTerrainName;
     private CheckBox verboseCal;
@@ -333,6 +334,7 @@ public class QoL extends Panel {
         rightPrev = rightColumn.add(new Label("● " + L10n.get("qol.section.debug")), rightPrev.pos("bl").adds(0, 15));
         rightPrev = debug = rightColumn.add(new CheckBox(L10n.get("qol.debug")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = printpfmap = rightColumn.add(new CheckBox(L10n.get("qol.printpfmap")), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = showPlayerCoords = rightColumn.add(new CheckBox(L10n.get("qol.show_player_coords")), rightPrev.pos("bl").adds(0, 5));
 
         rightPrev = rightColumn.add(new Label("● " + L10n.get("qol.section.temp_marks")), rightPrev.pos("bl").adds(0, 15));
         rightPrev = tempmark = rightColumn.add(new CheckBox(L10n.get("qol.save_temp_marks")), rightPrev.pos("bl").adds(0, 5));
@@ -386,6 +388,7 @@ public class QoL extends Panel {
         lpassistent.a = getBool(NConfig.Key.lpassistent);
         debug.a = getBool(NConfig.Key.debug);
         printpfmap.a = getBool(NConfig.Key.printpfmap);
+        showPlayerCoords.a = getBool(NConfig.Key.showPlayerCoords);
         tempmark.a = getBool(NConfig.Key.tempmark);
         tempmarkIgnoreDist.a = getBool(NConfig.Key.tempmarkIgnoreDist);
         shortCupboards.a = getBool(NConfig.Key.shortCupboards);
@@ -568,6 +571,7 @@ public class QoL extends Panel {
         
         NConfig.set(NConfig.Key.debug, debug.a);
         NConfig.set(NConfig.Key.printpfmap, printpfmap.a);
+        NConfig.set(NConfig.Key.showPlayerCoords, showPlayerCoords.a);
         NConfig.set(NConfig.Key.tempmark, tempmark.a);
         NConfig.set(NConfig.Key.tempmarkIgnoreDist, tempmarkIgnoreDist.a);
         

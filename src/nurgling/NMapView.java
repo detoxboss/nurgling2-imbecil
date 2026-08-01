@@ -212,6 +212,27 @@ public class NMapView extends MapView
             }
         }
         
+        // Draw player world coordinates as debug text (Settings > QoL > Debug & Development)
+        // Translated through the minimap's sessloc so these numbers agree with the
+        // persisted MapFile grid coordinates shown by the "Show Grid" overlay - raw
+        // Gob.rc is only a live-session-local coordinate and won't match those.
+        if((Boolean)NConfig.get(NConfig.Key.showPlayerCoords)) {
+            try {
+                Gob pl = player();
+                NGameUI gui = NUtils.getGameUI();
+                MiniMap.Location sessloc = (gui != null && gui.mmap != null) ? gui.mmap.sessloc : null;
+                if(pl != null && sessloc != null) {
+                    Coord2d worldRc = pl.rc.add(new Coord2d(sessloc.tc).mul(MCache.tilesz));
+                    String txt = String.format("World: %.2f, %.2f", worldRc.x, worldRc.y);
+                    g.chcolor(Color.WHITE);
+                    g.text(txt, new Coord(10, 10));
+                    g.chcolor();
+                }
+            } catch (Exception e) {
+                // Silently ignore errors
+            }
+        }
+
         // Draw path line from player to click destination
         if((Boolean)NConfig.get(NConfig.Key.showPathLine)) {
             try {

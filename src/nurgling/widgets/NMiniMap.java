@@ -229,6 +229,7 @@ NMiniMap extends MiniMap {
         drawtempmarks(g);
         drawLabeledMarks(g);
         drawterrainname(g);
+        drawplayercoords(g);
         drawResourceTimers(g);
         drawFishLocations(g);
         drawTreeLocations(g);
@@ -548,41 +549,65 @@ NMiniMap extends MiniMap {
 
     void drawgrid(GOut g) {
         if(dgext == null || dloc == null) return;
-        
+
         int dataLevel = getDataLevel();
+        int levelMul = 1 << dataLevel;
         float scaleFactor = getScaleFactor();
         Coord hsz = sz.div(2);
-        
+
         double width = UI.scale(1f);
         Color col = g.getcolor();
         g.chcolor(Color.RED);
-        
+
         // Draw grid lines at grid boundaries
         // Each grid is cmaps tiles at its data level
-        int gridSizeInTiles = cmaps.x * (1 << dataLevel);
-        
+        int gridSizeInTiles = cmaps.x * levelMul;
+
+        // Cache each line's screen coordinate so the label pass below doesn't
+        // recompute it, and so labels line up exactly with the drawn lines.
+        java.util.Map<Integer, Integer> xScreen = new java.util.HashMap<>();
+        java.util.Map<Integer, Integer> yScreen = new java.util.HashMap<>();
+
         for (int x = dgext.ul.x; x <= dgext.br.x; x++) {
             // Grid coordinate to tile coordinate
             Coord tilePosX = new Coord(x * gridSizeInTiles, 0);
             // Tile coordinate to screen coordinate
             Coord screenPos = UI.scale(tilePosX).mul(currentScale).sub(dloc.tc.div(scalef())).add(hsz);
-            
+            xScreen.put(x, screenPos.x);
+
             if(screenPos.x >= 0 && screenPos.x <= sz.x) {
                 g.line(new Coord(screenPos.x, 0), new Coord(screenPos.x, sz.y), width);
             }
         }
-        
+
         for (int y = dgext.ul.y; y <= dgext.br.y; y++) {
             // Grid coordinate to tile coordinate
             Coord tilePosY = new Coord(0, y * gridSizeInTiles);
             // Tile coordinate to screen coordinate
             Coord screenPos = UI.scale(tilePosY).mul(currentScale).sub(dloc.tc.div(scalef())).add(hsz);
-            
+            yScreen.put(y, screenPos.y);
+
             if(screenPos.y >= 0 && screenPos.y <= sz.y) {
                 g.line(new Coord(0, screenPos.y), new Coord(sz.x, screenPos.y), width);
             }
         }
-        
+
+        g.chcolor(col);
+
+        // Label each visible cell's top-left corner with its world grid coordinate
+        // (the same MCache grid-id space used by NMapView's grid-wall overlay), so the
+        // numbers stay accurate to the player's world position regardless of zoom level.
+        g.chcolor(Color.WHITE);
+        for (int x = dgext.ul.x; x < dgext.br.x; x++) {
+            Integer sx = xScreen.get(x);
+            if(sx == null || sx < 0 || sx > sz.x) continue;
+            for (int y = dgext.ul.y; y < dgext.br.y; y++) {
+                Integer sy = yScreen.get(y);
+                if(sy == null || sy < 0 || sy > sz.y) continue;
+                String label = String.format("(%d,%d)", x * levelMul, y * levelMul);
+                g.text(label, new Coord(sx + 2, sy + 2));
+            }
+        }
         g.chcolor(col);
     }
 
@@ -1011,6 +1036,28 @@ NMiniMap extends MiniMap {
             g.frect(textPos.sub(2, 1), terrainText.sz().add(4, 2));
             g.chcolor();
             g.image(terrainText.tex(), textPos);
+        }
+    }
+
+    private void drawplayercoords(GOut g) {
+        if(!(Boolean) NConfig.get(NConfig.Key.showPlayerCoords)) return;
+        try {
+            if(ui == null || ui.gui == null || ui.gui.map == null) return;
+            Gob player = ui.gui.map.player();
+            if(player == null || sessloc == null) return;
+            // Translate through sessloc so this matches the persisted MapFile grid
+            // coordinates the "Show Grid" overlay labels use, not raw session-local rc.
+            Coord2d worldRc = player.rc.add(new Coord2d(sessloc.tc).mul(tilesz));
+            String txt = String.format("World: %.2f, %.2f", worldRc.x, worldRc.y);
+            Text.Foundry fnd = new Text.Foundry(Text.dfont, 10);
+            Text coordText = fnd.render(txt, Color.WHITE);
+            Coord textPos = new Coord(5, 5);
+            g.chcolor(0, 0, 0, 180);
+            g.frect(textPos.sub(2, 1), coordText.sz().add(4, 2));
+            g.chcolor();
+            g.image(coordText.tex(), textPos);
+        } catch (Exception e) {
+            // Silently ignore errors
         }
     }
 
