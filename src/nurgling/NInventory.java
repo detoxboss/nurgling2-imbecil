@@ -141,6 +141,8 @@ public class NInventory extends Inventory
         nurgling.widgets.StudyDeskInventoryExtension.addPlanButtonIfStudyDesk(this);
         // Add compact base-attribute panel for Table furniture
         nurgling.widgets.TableInventoryExtension.installIfTable(this);
+        // Add "Optimize Eating" button + priority-stat picker for Table furniture
+        nurgling.widgets.TableEatOptimizerUI.installIfTable(this);
         // Add Sort button for container inventories (not main inventory)
         addSortButtonIfContainer();
     }
