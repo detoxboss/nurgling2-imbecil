@@ -60,6 +60,7 @@ public class NConfig
         horseprop,
         goatsprop,
         chopperprop,
+        lpassistantbotprop,
         blueprintplanterprop,
         autofloweractionprop,
         carrierprop,
@@ -1021,6 +1022,9 @@ public class NConfig
                                 break;
                             case "NChopperProp":
                                 res.add(new NChopperProp(obj));
+                                break;
+                            case "NLpAssistantProp":
+                                res.add(new NLpAssistantProp(obj));
                                 break;
                             case "NBoughBeeProp":
                                 res.add(new NBoughBeeProp(obj));
