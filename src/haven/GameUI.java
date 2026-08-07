@@ -334,9 +334,11 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 		    if(srchwnd == null)
 			return;
 		    if(srchwnd.visible() && !srchwnd.hasfocus)
-			this.setfocus(srchwnd);
+			GameUI.this.setfocus(srchwnd);
 		    else
 			togglewnd(srchwnd);
+		    if(srchwnd.visible() && (srchwnd instanceof MenuSearch))
+			GameUI.this.setfocus(((MenuSearch)srchwnd).sbox);
 		}
 	    }, bg.c);
     }
