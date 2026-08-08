@@ -23,9 +23,20 @@ import nurgling.conf.NLpAssistantProp;
  * instead: starts with "Pick ", isn't the leaf petal, and - same safety rule as everywhere else -
  * only resolves if it's the single such petal on the menu.
  *
- * "Take branch" is deliberately NOT a bough candidate despite once being included as one: live
- * testing showed it's a generic, always-present petal unrelated to the discoverable bough curio
- * (selecting it never produced a discovery) - "Take bough" alone is the confirmed real action.
+ * "Take branch" is deliberately NOT a general bough candidate: live testing showed it's a generic,
+ * always-present petal unrelated to the discoverable bough curio on most species (selecting it
+ * never produced a discovery there) - "Take bough" alone is the confirmed real action for those.
+ * Olive is the sole confirmed exception: its bough-equivalent product is actually named "Olive
+ * Branch" (not "Olive Bough" - see LpExplorer.isBoughProduct()), and "Take branch" is genuinely
+ * its harvest petal, so it's listed second in ACTIONS_BOUGH as a fallback tried only when "Take
+ * bough" isn't on the menu at all (which is the case for olive and never for any other BOUGH-
+ * classified species, since classify() only assigns BOUGH when the product name says so).
+ *
+ * OLDTRUNK produces a "Block of <species>" item via the same literal petal as an ordinary log's
+ * BLOCK action - confirmed live 2026-08 (petals were "Open, Chop into blocks"; "Open" unlocks the
+ * trunk as a container and is never the harvest action). It used to fall back to matching the
+ * product's own name as the candidate petal text, which never matches anything real ("Block of
+ * Mirkwood" is never itself a petal label) and always failed with "no matching petal".
  */
 public class LpActionMatcher {
     public enum Category {
@@ -34,7 +45,7 @@ public class LpActionMatcher {
 
     // Confirmed verbatim from the existing bots / live testing named in the class doc above.
     private static final String[] ACTIONS_LEAF = {"Pick leaf", "Pick leaves"};
-    private static final String[] ACTIONS_BOUGH = {"Take bough"};
+    private static final String[] ACTIONS_BOUGH = {"Take bough", "Take branch"};
     private static final String[] ACTIONS_BARK = {"Take bark"};
     private static final String[] ACTIONS_BOARD = {"Make boards"};
     private static final String[] ACTIONS_BLOCK = {"Chop into blocks"};
@@ -58,17 +69,14 @@ public class LpActionMatcher {
         // Tree/bush: same product-name substring rules LpExplorer uses internally.
         if (product.contains("Leaf") || product.contains("Leaves"))
             return Category.LEAF;
-        if (product.contains("Bough"))
+        if (product.contains("Bough") || product.equals("Olive Branch"))
             return Category.BOUGH;
         if (product.equals(HarvestState.getBarkProductName(gobResName)))
             return Category.BARK;
         return Category.SEED;
     }
 
-    /**
-     * The known-good candidate petal strings for every category except SEED (see findSeedPetal)
-     * and OLDTRUNK (no reference bot exists, so it falls back to the product's own name).
-     */
+    /** The known-good candidate petal strings for every category except SEED (see findSeedPetal). */
     public static String[] candidateActions(Category category, String product) {
         switch (category) {
             case LEAF:
@@ -80,12 +88,13 @@ public class LpActionMatcher {
             case BOARD:
                 return ACTIONS_BOARD;
             case BLOCK:
+                // OLDTRUNK shares this literal petal too - see class doc.
+            case OLDTRUNK:
                 return ACTIONS_BLOCK;
             case STONE:
                 return ACTIONS_STONE;
-            case OLDTRUNK:
             default:
-                return new String[]{product};
+                return new String[0];
         }
     }
 
@@ -141,17 +150,34 @@ public class LpActionMatcher {
         return found;
     }
 
+    // Free-text tool-name settings occasionally get typed without matching the in-game item's
+    // exact spelling - confirmed live 2026-08: "stoneaxe" typed into the Old Trunk tool field,
+    // which NAlias.matches() (a case-insensitive substring/"contains" check - see NAlias.java)
+    // never matches against the actual item name "Stone Axe", because of the missing space, so
+    // Equip() always reported the tool as not found even with a real Stone Axe in hand/belt/
+    // inventory. Normalized here, scoped to LP Assistant's own tool-name settings, rather than in
+    // NAlias itself - NAlias's matching is shared by every other bot/tool lookup in the codebase,
+    // and a broader fuzzy-match change there risks unrelated behavior changes.
+    private static final java.util.Map<String, String> TOOL_NAME_FIXUPS = java.util.Map.of(
+            "stoneaxe", "Stone Axe"
+    );
+
     /** The configured tool alias for this category, or null if that category needs no tool. */
     public static String requiredTool(Category category, NLpAssistantProp prop) {
+        String tool;
         switch (category) {
             case BOARD:
-                return blankToNull(prop.boardTool);
+                tool = prop.boardTool;
+                break;
             case BLOCK:
-                return blankToNull(prop.blockTool);
+                tool = prop.blockTool;
+                break;
             case STONE:
-                return blankToNull(prop.stoneTool);
+                tool = prop.stoneTool;
+                break;
             case OLDTRUNK:
-                return blankToNull(prop.oldtrunkTool);
+                tool = prop.oldtrunkTool;
+                break;
             case SEED:
             case LEAF:
             case BOUGH:
@@ -159,6 +185,11 @@ public class LpActionMatcher {
             default:
                 return null;
         }
+        tool = blankToNull(tool);
+        if (tool == null)
+            return null;
+        String fixed = TOOL_NAME_FIXUPS.get(tool.toLowerCase());
+        return fixed != null ? fixed : tool;
     }
 
     private static String blankToNull(String s) {

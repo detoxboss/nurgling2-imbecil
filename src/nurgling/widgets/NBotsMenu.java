@@ -51,9 +51,9 @@ public class NBotsMenu extends Widget
             NLayout layout = layouts.get(groupType);
             if (layout == null) continue;
             if (bot.clazz == CatchBugsAround.class) {
-                layout.elements.add(new NToggleNButton(bot.iconPath, bot.instantiate(Map.of()), bot.disStacks));
+                layout.elements.add(new NToggleNButton(bot.iconPath, bot.id, bot.instantiate(Map.of()), bot.disStacks));
             } else {
-                layout.elements.add(new NButton(bot.iconPath, bot.instantiate(Map.of()), bot.disStacks));
+                layout.elements.add(new NButton(bot.iconPath, bot.id, bot.instantiate(Map.of()), bot.disStacks));
             }
         }
 
@@ -201,12 +201,31 @@ public class NBotsMenu extends Widget
 
     ArrayList<NLayout> layouts = new ArrayList<>();
 
-    public NButton find(String path) {
+    // Looks up by BotDescriptor.id first - see NButton.id's own doc for why identity and icon path
+    // used to be conflated and why that broke. Two-pass, ID across the whole collection before any
+    // path fallback: a hotbar slot saved BEFORE that fix persisted the icon path, not the id, so an
+    // id-only lookup would silently stop resolving every already-saved slot whose bot's id differs
+    // from its iconPath - confirmed live in this registry for 24+ bots (e.g. "blueprint_tree_planter"
+    // uses icon "treegardener", "tunneling" uses icon "tunelling", "table_eat_optimizer" uses icon
+    // "eater"). Checking id first across every button, and only falling back to path if nothing
+    // matched by id anywhere, means a value that happens to equal one bot's path can't shadow a
+    // different bot's real id (e.g. "forager" always resolves to Forager via its own id, not to
+    // whichever bot merely shares that icon). New saves always persist the id (see dropthing() in
+    // NGameUI.java), so this fallback only ever matters for pre-existing saved values.
+    public NButton find(String id) {
         for (NLayout lay : layouts)
         {
             for(NButton element: lay.elements)
             {
-                if(element.path!=null && element.path.equals(path))
+                if(element.id!=null && element.id.equals(id))
+                    return element;
+            }
+        }
+        for (NLayout lay : layouts)
+        {
+            for(NButton element: lay.elements)
+            {
+                if(element.path!=null && element.path.equals(id))
                     return element;
             }
         }
@@ -217,9 +236,21 @@ public class NBotsMenu extends Widget
     {
         public final IButton btn;
         public String path;
+        // Unique bot identity (BotDescriptor.id), separate from `path` (which is only the icon
+        // RESOURCE path, e.g. "nurgling/bots/icons/forager"). Hotbar persistence (dropthing below)
+        // and lookup (find(), NGameUI's belt click handling) used to key off `path` directly -
+        // broke the moment two different bots shared one icon (before this fix, LpAssistantBot and
+        // Forager both used iconPath "forager" in BotRegistry - LpAssistantBot now has its own
+        // "lpassistant" iconPath, see BotRegistry.java): dragging either one to a hotbar slot
+        // stored the same string, and NButton.find() always returned whichever bot happened to be
+        // registered first under that path (Forager), so clicking either hotbar slot ran Forager
+        // regardless of which button was actually dragged there. `id` is what identity-sensitive
+        // code must use now; `path` stays icon-only.
+        public String id;
         public boolean disStacks;
-        NButton(String path, Action action) {
+        NButton(String path, String id, Action action) {
             this.path = path;
+            this.id = id;
             Resource res = Resource.remote().loadwait(dir_path + path + "/u");
             btn = new IButton(Resource.loadsimg(dir_path + path + "/u"), Resource.loadsimg(dir_path + path + "/d"), Resource.loadsimg(dir_path + path + "/h")) {
                 TexI rtip;
@@ -277,9 +308,9 @@ public class NBotsMenu extends Widget
 
         }
 
-        NButton(String path, Action action, Boolean disStacks)
+        NButton(String path, String id, Action action, Boolean disStacks)
         {
-            this(path, action);
+            this(path, id, action);
             this.disStacks = disStacks;
         }
 
@@ -340,8 +371,8 @@ public class NBotsMenu extends Widget
         private boolean active = false;
         private Thread thread;
 
-        NToggleNButton(String path, Action action, boolean disStacks) {
-            super(path, action, disStacks);
+        NToggleNButton(String path, String id, Action action, boolean disStacks) {
+            super(path, id, action, disStacks);
 
             btn.action(new Runnable() {
                 @Override
