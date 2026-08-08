@@ -41,6 +41,10 @@ public class StackSupporter {
         customStackSizes.put("Cattail Roots", 4);
         customStackSizes.put("Heartwood Leaves", 4);
         customStackSizes.put("Oyster", 4);
+        customStackSizes.put("Petrified Seashell", 3);
+        // gfx/invobjs/branch. Sits in "Wicker" for what it crafts into, but the server
+        // stacks it 5 deep, not 3 like the rest of that category.
+        customStackSizes.put("Branch", 5);
 
         putAll(3,
                 "Tuber", "Onion", "Beetroot", "Carrot", "Cucumber",
@@ -114,6 +118,7 @@ public class StackSupporter {
         catExceptions.add("Boiled River Pearl Mussel");
         catExceptions.add("Mammoth Tusk");
         catExceptions.add("Troll Mushrooms");
+        catExceptions.add("Boreworm Beak");
     }
 
     private static final NAlias unstackableContainers = new NAlias(
