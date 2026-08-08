@@ -61,6 +61,24 @@ public class Equip implements Action {
         }
         if (container != null) {
             if (witem != null) {
+                    // A bucket carrying liquid can't be put into a container inventory slot at all
+                    // - the server rejects it ("The bucket must be carried when not empty.") and
+                    // silently ignores the drop request instead of erroring. Confirmed live 2026-08:
+                    // the swap logic below used to try exactly that (take the occupying hand's item,
+                    // then drop it into the belt/inventory slot the target tool currently sits in)
+                    // whenever both hands were occupied, which for a non-empty bucket just hangs the
+                    // caller's DropOn wait until it times out. A non-empty bucket must stay in hand,
+                    // so it's excluded from the swap candidates the same way the "exception" alias
+                    // already is, and equipping fails cleanly instead of hanging when there's no
+                    // other hand available to free.
+                    boolean lhandBucket = isNonEmptyBucket(lhand);
+                    boolean rhandBucket = isNonEmptyBucket(rhand);
+
+                    if (isTwoHanded(witem) && (lhandBucket || rhandBucket)) {
+                        return Results.ERROR("Cannot equip " + witemName(witem)
+                                + ": it needs both hands, but a non-empty bucket must stay in hand");
+                    }
+
                     if (isTwoHanded(witem) && ((lhand != null && rhand != null && lhand != rhand && !isTwoHanded(lhand)))) {
                         NUtils.takeItemToHand(rhand);
                         if (container.getFreeSpace() == 0) {
@@ -82,21 +100,27 @@ public class Equip implements Action {
                             NUtils.takeItemToHand(witem);
                             NUtils.getEquipment().wdgmsg("drop", -1);
                         } else {
+                            boolean lhandKeep = lhandBucket
+                                    || (lhand != null && NParser.checkName(((NGItem) lhand.item).name(), exception));
 
-                            if(lhand!=null && !NParser.checkName(((NGItem)lhand.item).name(), exception))
-                            {
+                            if (lhand != null && !lhandKeep) {
                                 NUtils.takeItemToHand(lhand);
                                 container.dropOn(witem.c.div(Inventory.sqsz));
                                 NUtils.getUI().core.addTask(new WaitItemInHand(witem));
                                 NUtils.getEquipment().wdgmsg("drop", -1);
 
                             }
-                            else
+                            else if (rhand != null && !rhandBucket)
                             {
                                 NUtils.takeItemToHand(rhand);
                                 container.dropOn(witem.c.div(Inventory.sqsz));
                                 NUtils.getUI().core.addTask(new WaitItemInHand(witem));
                                 NUtils.getEquipment().wdgmsg("drop", -1);
+                            }
+                            else
+                            {
+                                return Results.ERROR("Cannot equip " + witemName(witem)
+                                        + ": both hands hold protected items (non-empty bucket)");
                             }
                         }
                     }
@@ -109,6 +133,20 @@ public class Equip implements Action {
         }
 
         return Results.SUCCESS();
+    }
+
+    /** True if this hand holds a Bucket that currently has liquid in it - see run()'s own doc. */
+    private boolean isNonEmptyBucket(WItem item) {
+        if (item == null || !(item.item instanceof NGItem))
+            return false;
+        NGItem ngItem = (NGItem) item.item;
+        String name = ngItem.name();
+        return name != null && NParser.checkName(name, "Bucket") && !ngItem.content().isEmpty();
+    }
+
+    private String witemName(WItem item) {
+        String name = ((NGItem) item.item).name();
+        return name != null ? name : "tool";
     }
 
     boolean isTwoHanded(WItem item)

@@ -445,7 +445,12 @@ public class NCore extends Widget
         }
         if(task.criticalExit)
         {
-            throw new InterruptedException();
+            // A dedicated InterruptedException subtype, not a plain one - see its own class doc
+            // for why isInterrupted()-after-catch cannot tell this apart from a real cancellation
+            // (Object.wait() clears the interrupt flag for both cases). Callers that already catch
+            // InterruptedException broadly are unaffected; a caller that needs to distinguish must
+            // catch TaskCriticalExitException first.
+            throw new TaskCriticalExitException(task);
         }
     }
 

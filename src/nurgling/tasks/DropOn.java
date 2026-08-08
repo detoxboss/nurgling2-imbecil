@@ -35,14 +35,12 @@ public class DropOn extends NTask
     @Override
     public boolean check()
     {
-        if(!infinite)
-        {
-            if(counter++ >=maxCounter)
-            {
-                criticalExit = true;
-                return true;
-            }
-        }
+        // The counter/maxCounter timeout is already handled once per poll by NTask.baseCheck()
+        // (which calls this check() only when its own counter hasn't yet tripped) - re-checking it
+        // here as well double-counts against the same shared `counter` field, so a bounded DropOn
+        // was actually timing out (and setting criticalExit, which NCore.addTask() turns into an
+        // InterruptedException up the caller - see LpAssistantBot's own containment doc for why
+        // that mattered) after ~maxCounter/2 polls instead of the intended maxCounter.
         return !inventory.isSlotFree(coord) && inventory.isItemInSlot(coord, name);
     }
 }

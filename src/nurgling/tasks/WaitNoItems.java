@@ -17,10 +17,26 @@ public class WaitNoItems extends NTask
     Widget inventory;
 
     GItem target = null;
+    // -1 = wait forever (original behavior, unchanged for existing callers). A positive value
+    // makes check() give up and report a timeout instead of blocking indefinitely once the
+    // deadline passes - same wall-clock-deadline-inside-check() pattern as
+    // WaitLpProductDiscovered, not NTask's counter/criticalExit mechanism, so a timeout here is
+    // reported via timedOut() for the caller to react to, never a synthetic InterruptedException.
+    private final long deadline;
+    private boolean timedOut = false;
+
     public WaitNoItems(NInventory inventory, NAlias name)
     {
         this.name = name;
         this.inventory = inventory;
+        this.deadline = -1;
+    }
+
+    public WaitNoItems(NInventory inventory, NAlias name, long timeoutMs)
+    {
+        this.name = name;
+        this.inventory = inventory;
+        this.deadline = System.currentTimeMillis() + timeoutMs;
     }
 
 
@@ -32,7 +48,7 @@ public class WaitNoItems extends NTask
             if (((NGItem) target).name() != null)
                 name = new NAlias(((NGItem) target).name());
             else
-                return false;
+                return checkDeadline();
 
         if(inventory instanceof NInventory)
         {
@@ -46,7 +62,7 @@ public class WaitNoItems extends NTask
                     String item_name;
                     if ((item_name = ((NGItem) item.item).name()) == null)
                     {
-                        return false;
+                        return checkDeadline();
                     }
                     else
                     {
@@ -57,9 +73,27 @@ public class WaitNoItems extends NTask
                     }
                 }
             }
-            return result.isEmpty();
+            if (result.isEmpty())
+                return true;
+            return checkDeadline();
+        }
+        return checkDeadline();
+    }
+
+    private boolean checkDeadline()
+    {
+        if (deadline >= 0 && System.currentTimeMillis() >= deadline)
+        {
+            timedOut = true;
+            return true;
         }
         return false;
+    }
+
+    /** True if this wait gave up on its deadline instead of ever seeing the items disappear. */
+    public boolean timedOut()
+    {
+        return timedOut;
     }
 
     private ArrayList<WItem> result = new ArrayList<>();

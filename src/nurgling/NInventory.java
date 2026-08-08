@@ -1819,8 +1819,18 @@ public class NInventory extends Inventory
         short[][] inventory = containerMatrix();
         if ((inventory == null) || (target_size.y < 1) || (target_size.x < 1))
             return null;
-        for (int i = 0; i <= isz.y - target_size.y; i++)
-            for (int j = 0; j <= isz.x - target_size.x; j++)
+        // target_size.x = rows/height, target_size.y = columns/width (the swapped (height, width)
+        // convention every grid-placement call site uses - see docs/inventory-grid-system.md). The
+        // outer bounds must therefore range i (row start) against isz.y using target_size.x, and j
+        // (column start) against isz.x using target_size.y - matching calcNumberFreeCoord's bound
+        // orientation, and matching the inner k/n loops below, which already used the correct
+        // (target_size.x, target_size.y) pairing. Previously these outer bounds were swapped
+        // (isz.y-target_size.y / isz.x-target_size.x), which under-scanned valid column start
+        // positions for any non-square footprint - confirmed live 2026-08: a 1-wide x 4-tall board
+        // (Coord(4,1)) in a 6-column inventory only ever tried columns 0..(6-4)=2, silently never
+        // considering columns 3-5 even though a 1-wide item obviously fits in any of them.
+        for (int i = 0; i <= isz.y - target_size.x; i++)
+            for (int j = 0; j <= isz.x - target_size.y; j++)
                 if (inventory[i][j] == 0) {
                     boolean isFree = true;
                     for (int k = i; k < i + target_size.x; k++)
@@ -1833,6 +1843,18 @@ public class NInventory extends Inventory
                         return new Coord(j, i);
                 }
         return null;
+    }
+
+    /**
+     * True once every top-level item's sprite has loaded and containerMatrix() (and therefore
+     * findFreeCoord()/calcNumberFreeCoord()/calcFreeSpace()) can answer definitively. False means
+     * "not ready to answer yet" - the same "sprite still loading" condition containerMatrix()
+     * itself signals by returning null (see its own doc) - and must never be read as "no space
+     * exists", which is a different, real answer callers may need to act on differently (e.g. wait
+     * and recheck, rather than report a hard failure).
+     */
+    public boolean isGridReady() {
+        return containerMatrix() != null;
     }
 
     public int calcFreeSpace()
