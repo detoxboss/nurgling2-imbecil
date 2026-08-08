@@ -39,10 +39,25 @@ public class LpExplorer {
     // a seasonal pair exists at all is derived from VSpec.object itself (does the sibling name
     // appear in this same resource's product list) rather than a separately hand-maintained
     // species list, so there's nothing to keep in sync when a new species is added.
+    // VSpec.object's normal/Yesteryear's pairs are almost always related by exact prefix-strip
+    // (e.g. "Red Apple" <-> "Yesteryear's Red Apple"), except crabapple: the in-season product is
+    // plural ("Crabapples") but the Yesteryear one is singular ("Yesteryear's Crabapple"), so
+    // stripping the prefix yields "Crabapple", which never matches "Crabapples" in the resource's
+    // own product list. Without this override, isCurrentSeasonProduct() silently fell through its
+    // "no sibling found" branch and returned true unconditionally for the Yesteryear variant -
+    // showing "Crabapples" and "Yesteryear's Crabapple" as undiscovered at the same time,
+    // year-round, on every crabapple tree (confirmed live 2026-08: two icons on first sight, one
+    // clearing on pickup, the other never clearing since it can't actually be picked outside its
+    // season). Confirmed the only such mismatch across VSpec.object as of this writing.
+    private static final Map<String, String> YESTERYEAR_BASE_OVERRIDE = new HashMap<>();
+    static {
+        YESTERYEAR_BASE_OVERRIDE.put("Crabapple", "Crabapples");
+    }
+
     private static boolean isCurrentSeasonProduct(String gobResName, String product) {
         boolean isYesteryearVariant = product.startsWith(HarvestState.YESTERYEAR_PREFIX);
         String base = isYesteryearVariant ? product.substring(HarvestState.YESTERYEAR_PREFIX.length()) : product;
-        String sibling = isYesteryearVariant ? base : (HarvestState.YESTERYEAR_PREFIX + base);
+        String sibling = isYesteryearVariant ? YESTERYEAR_BASE_OVERRIDE.getOrDefault(base, base) : (HarvestState.YESTERYEAR_PREFIX + base);
         List<String> products = VSpec.object.get(gobResName);
         if (products == null || !products.contains(sibling))
             return true;
@@ -237,8 +252,15 @@ public class LpExplorer {
         return product.contains("Leaf") || product.contains("Leaves");
     }
 
+    // Olive is the one species whose bough-equivalent product is literally named "Olive Branch"
+    // (every other tree's is "<Species> Bough") - confirmed by cross-checking VSpec.object, no
+    // other product name contains "Branch". Without this, "Olive Branch" fell through to the
+    // default seed bucket in allUndiscoveredProducts(), gating its icon behind the seed bit (wrong
+    // - bough-equivalents aren't seasonal/bit-gated) and making the bot's LpActionMatcher classify
+    // it as SEED, where findSeedPetal() (which only matches "Pick "-prefixed petals) could never
+    // find its actual petal, "Take branch".
     private static boolean isBoughProduct(String product) {
-        return product.contains("Bough");
+        return product.contains("Bough") || product.equals("Olive Branch");
     }
 
     private static List<String> undiscoveredProductsMatching(String gobResName, Predicate<String> category) {

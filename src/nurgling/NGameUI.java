@@ -1000,7 +1000,10 @@ public class NGameUI extends GameUI
                 if(thing instanceof NBotsMenu.NButton) {
                     NBotsMenu.NButton pag = (NBotsMenu.NButton)thing;
                     NToolBeltProp prop = NToolBeltProp.get(name);
-                    prop.custom.put(slot,pag.path);
+                    // Store the bot's unique id, not its icon path - two bots can share an icon
+                    // (e.g. before this fix, LpAssistantBot and Forager both used "forager"), and
+                    // path alone can't tell them apart once persisted (see NBotsMenu.NButton.id's doc).
+                    prop.custom.put(slot,pag.id);
                     NToolBeltProp.set(name,prop);
                     return(true);
                 } else if(thing instanceof nurgling.widgets.NScenarioButton) {

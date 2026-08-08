@@ -46,22 +46,35 @@ public class Equip implements Action {
             return Results.SUCCESS();
         }
         WItem wbelt = NUtils.getEquipment().findItem (NEquipory.Slots.BELT.idx);
-        if(wbelt!=null) {
-            if (wbelt.item.contents instanceof NInventory) {
-                WItem witem = ((NInventory) wbelt.item.contents).getItem(target_name);
-                if(witem != null) {
+        NInventory belt = (wbelt != null && wbelt.item.contents instanceof NInventory) ? (NInventory) wbelt.item.contents : null;
+        WItem witem = belt != null ? belt.getItem(target_name) : null;
+        // Tool wasn't on the belt - fall back to the main inventory instead of failing outright.
+        // A player's axe/saw can live in either place (belt has limited slots), and the old code
+        // only ever looked at the belt, silently failing every Equip call for a tool that was
+        // sitting in plain inventory (confirmed root cause of LP Assistant never swapping to the
+        // axe/saw for board/block/stone actions when the tool wasn't belted).
+        NInventory container = belt;
+        if (witem == null) {
+            NInventory inv = gui.getInventory();
+            witem = inv.getItem(target_name);
+            container = inv;
+        }
+        if (container != null) {
+            if (witem != null) {
                     if (isTwoHanded(witem) && ((lhand != null && rhand != null && lhand != rhand && !isTwoHanded(lhand)))) {
                         NUtils.takeItemToHand(rhand);
-                        if (((NInventory) wbelt.item.contents).getFreeSpace() == 0) {
+                        if (container.getFreeSpace() == 0) {
                             WItem item = NUtils.getGameUI().vhand;
                             Coord pos = NUtils.getGameUI().getInventory().getFreeCoord(item);
                             gui.getInventory().dropOn(pos, ((NGItem) item.item).name());
-                        } else {
+                        } else if (container == belt) {
                             NUtils.transferToBelt();
+                        } else {
+                            gui.getInventory().dropOn(container.getFreeCoord(NUtils.getGameUI().vhand));
                         }
 
                         NUtils.takeItemToHand(lhand);
-                        ((NInventory) wbelt.item.contents).dropOn(witem.c.div(Inventory.sqsz));
+                        container.dropOn(witem.c.div(Inventory.sqsz));
                         NUtils.getUI().core.addTask(new WaitItemInHand(witem));
                         NUtils.getEquipment().wdgmsg("drop", -1);
                     } else {
@@ -73,7 +86,7 @@ public class Equip implements Action {
                             if(lhand!=null && !NParser.checkName(((NGItem)lhand.item).name(), exception))
                             {
                                 NUtils.takeItemToHand(lhand);
-                                ((NInventory) wbelt.item.contents).dropOn(witem.c.div(Inventory.sqsz));
+                                container.dropOn(witem.c.div(Inventory.sqsz));
                                 NUtils.getUI().core.addTask(new WaitItemInHand(witem));
                                 NUtils.getEquipment().wdgmsg("drop", -1);
 
@@ -81,18 +94,16 @@ public class Equip implements Action {
                             else
                             {
                                 NUtils.takeItemToHand(rhand);
-                                ((NInventory) wbelt.item.contents).dropOn(witem.c.div(Inventory.sqsz));
+                                container.dropOn(witem.c.div(Inventory.sqsz));
                                 NUtils.getUI().core.addTask(new WaitItemInHand(witem));
                                 NUtils.getEquipment().wdgmsg("drop", -1);
                             }
                         }
                     }
                     NUtils.getUI().core.addTask(new WaitItemInEquip(witem,new NEquipory.Slots[]{NEquipory.Slots.HAND_LEFT, NEquipory.Slots.HAND_RIGHT}));
-                }
-                else {
-                        return Results.ERROR("No target item");
-                }
-
+            }
+            else {
+                    return Results.ERROR("No target item");
             }
 
         }

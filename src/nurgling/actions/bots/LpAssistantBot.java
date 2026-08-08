@@ -136,27 +136,48 @@ public class LpAssistantBot implements Action {
                 String gobResName = target.ngob != null ? target.ngob.name : null;
                 log("Target: " + gobResName + " (id=" + target.id + ")");
 
-                List<String> products;
                 try {
-                    products = LpExplorer.allUndiscoveredProducts(target);
-                } catch (Loading l) {
-                    log("  sprite still loading, retrying next scan");
-                    continue; // sprite not loaded yet - retry on the next scan
+                    productsDiscovered += processGob(gui, target, gobResName);
+                } catch (RuntimeException e) {
+                    // BotExecutor only catches InterruptedException around the whole run() call
+                    // (see BotExecutor.runWithSupports) - any other exception previously killed
+                    // this thread outright with no message shown to the player, which read as
+                    // "the bot just stops/finishes" (confirmed live 2026-08, reliably reproduced by
+                    // a bugged VSpec entry that made a gob's data disagree with itself - fixed at
+                    // the data level too, but this gob-level isolation is the general fix: one bad
+                    // gob, of any cause, must never take the whole run down silently).
+                    log("  " + gobResName + " (id=" + target.id + "): error processing gob, skipping it - " + e);
+                    recordSkip(target.id, "*", "error: " + e);
                 }
 
-                for (String product : products) {
+                clearedGobs.add(target.id);
+                gobsCleared++;
+            }
+
+            report(gobsCleared, productsDiscovered);
+            return Results.SUCCESS();
+        } finally {
+            closeDebugLog();
+        }
+    }
+
+    /**
+     * Every still-undiscovered product on one gob - the body of the main loop's per-target work.
+     * Returns how many of them were confirmed discovered this pass.
+     */
+    private int processGob(NGameUI gui, Gob target, String gobResName) throws InterruptedException {
+        List<String> products;
+        try {
+            products = LpExplorer.allUndiscoveredProducts(target);
+        } catch (Loading l) {
+            log("  sprite still loading, retrying next scan");
+            return 0; // sprite not loaded yet - retry on the next scan
+        }
+
+        int discoveredCount = 0;
+        for (String product : products) {
                     if (alreadySkipped(target.id, product))
                         continue;
-
-                    // Re-path before every product, not just once per gob: interruptActivity()
-                    // below deliberately walks the player a step away from the gob after each
-                    // product to cancel any still-running repeat action, so later products on the
-                    // same gob need re-approaching.
-                    if (!new PathFinder(target).run(gui).IsSuccess()) {
-                        log("  " + product + ": unreachable, skipping rest of this gob");
-                        recordSkip(target.id, "*", "unreachable");
-                        break;
-                    }
 
                     LpActionMatcher.Category category = LpActionMatcher.classify(gobResName, product);
                     String tool = LpActionMatcher.requiredTool(category, prop);
@@ -169,47 +190,98 @@ public class LpAssistantBot implements Action {
                         }
                     }
 
-                    NUtils.rclickGob(target);
-                    // LpExplorer.checkLpExplorer() (the thing that actually writes the discovery
-                    // record the green marker depends on) only fires within a short window after
-                    // map.clickedGob points at a harvestable gob - see recentHarvestClick() in that
-                    // class. That field is normally set by MapView.Click.hit(), which only runs for
-                    // a real local mouse click; NUtils.rclickGob()/lclick() and GoTo's movement
-                    // click all send their "click" wdgmsg directly to the server and never trigger
-                    // it. Bot-driven harvesting was therefore relying entirely on whatever stale
-                    // value a real click happened to leave behind before the bot started (matched
-                    // by resource TYPE, not gob identity - see recentHarvestClick()'s own doc) -
-                    // explaining both why discovery sometimes recorded for the wrong-seeming
-                    // product and why it often silently never recorded at all (the fallback marker/
-                    // minimap icon depends solely on this record, not on the exp signal below, so a
-                    // missing record here is exactly "icon never clears"). Stamping it explicitly
-                    // for the gob we're actually about to harvest - the same public field/
-                    // constructor a real click would populate - fixes this at the source instead of
-                    // working around it. Re-stamped fresh for every product on this gob, each
-                    // giving its own 10s window (LpExplorer.HARVEST_CLICK_WINDOW).
-                    gui.map.clickedGob = new MapView.ClickedGob(target, 3);
-                    NFlowerMenu fm = NUtils.getFlowerMenu();
-                    if (fm == null || fm.nopts == null || fm.nopts.length == 0) {
-                        if (fm != null) {
-                            fm.wdgmsg("cl", -1);
-                            NUtils.getUI().core.addTask(new NFlowerMenuIsClosed());
+                    // Logs/old trunks have a wide, finicky rectangular hitbox (confirmed live
+                    // 2026-08): approaching from certain sides leaves the player somewhere
+                    // PathFinder considers "reached" but too far from the actual clickable hitbox
+                    // for the harvest click to land, opening no flower menu (or one without the
+                    // expected petal) even though the resource is genuinely still there. A single
+                    // failed attempt isn't proof of "nothing left" for these categories, so back
+                    // off and re-approach from a rotated angle before accepting the skip - trees/
+                    // bushes/stone use round hitboxes and don't show this failure mode, so they
+                    // stay single-attempt.
+                    boolean retryableHitbox = category == LpActionMatcher.Category.BOARD
+                            || category == LpActionMatcher.Category.BLOCK
+                            || category == LpActionMatcher.Category.OLDTRUNK;
+                    int maxAttempts = retryableHitbox ? 3 : 1;
+
+                    NFlowerMenu fm = null;
+                    NFlowerMenu.NPetal petal = null;
+                    boolean unreachable = false;
+                    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                        boolean lastAttempt = attempt == maxAttempts;
+                        if (attempt > 1)
+                            repositionAround(gui, target, attempt);
+
+                        // Re-path before every attempt, not just once per gob: interruptActivity()
+                        // walks the player a step away from the gob after each product to cancel
+                        // any still-running repeat action, so later products need re-approaching
+                        // too, same as a failed hitbox attempt does.
+                        if (!new PathFinder(target).run(gui).IsSuccess()) {
+                            unreachable = true;
+                            log("  " + product + ": unreachable" + (lastAttempt ? ", skipping rest of this gob" : ", retrying approach"));
+                            if (lastAttempt)
+                                break;
+                            continue;
                         }
-                        log("  " + product + ": no flower menu opened, skipping");
+                        unreachable = false;
+
+                        NUtils.rclickGob(target);
+                        // LpExplorer.checkLpExplorer() (the thing that actually writes the discovery
+                        // record the green marker depends on) only fires within a short window after
+                        // map.clickedGob points at a harvestable gob - see recentHarvestClick() in that
+                        // class. That field is normally set by MapView.Click.hit(), which only runs for
+                        // a real local mouse click; NUtils.rclickGob()/lclick() and GoTo's movement
+                        // click all send their "click" wdgmsg directly to the server and never trigger
+                        // it. Bot-driven harvesting was therefore relying entirely on whatever stale
+                        // value a real click happened to leave behind before the bot started (matched
+                        // by resource TYPE, not gob identity - see recentHarvestClick()'s own doc) -
+                        // explaining both why discovery sometimes recorded for the wrong-seeming
+                        // product and why it often silently never recorded at all (the fallback marker/
+                        // minimap icon depends solely on this record, not on the exp signal below, so a
+                        // missing record here is exactly "icon never clears"). Stamping it explicitly
+                        // for the gob we're actually about to harvest - the same public field/
+                        // constructor a real click would populate - fixes this at the source instead of
+                        // working around it. Re-stamped fresh for every attempt, each giving its own
+                        // 10s window (LpExplorer.HARVEST_CLICK_WINDOW).
+                        gui.map.clickedGob = new MapView.ClickedGob(target, 3);
+                        fm = NUtils.getFlowerMenu();
+                        if (fm == null || fm.nopts == null || fm.nopts.length == 0) {
+                            if (fm != null) {
+                                fm.wdgmsg("cl", -1);
+                                NUtils.getUI().core.addTask(new NFlowerMenuIsClosed());
+                            }
+                            fm = null;
+                            log("  " + product + ": no flower menu opened" + (lastAttempt ? "" : ", retrying from a different angle"));
+                            continue;
+                        }
+
+                        // SEED has no fixed wording (species-specific: "Pick berries"/"Pick pomes"/
+                        // "Pick cone"/... - see LpActionMatcher's class doc) so it gets its own
+                        // shape-based matcher instead of a candidate list.
+                        petal = category == LpActionMatcher.Category.SEED
+                                ? LpActionMatcher.findSeedPetal(fm)
+                                : LpActionMatcher.findPetal(fm, LpActionMatcher.candidateActions(category, product));
+                        fm.wdgmsg("cl", -1);
+                        NUtils.getUI().core.addTask(new NFlowerMenuIsClosed());
+
+                        if (petal != null)
+                            break;
+                        log("  " + product + ": no matching petal on attempt " + attempt + (lastAttempt ? "" : ", retrying from a different angle"));
+                    }
+
+                    if (unreachable) {
+                        recordSkip(target.id, "*", "unreachable");
+                        break;
+                    }
+
+                    if (fm == null) {
+                        log("  " + product + ": no flower menu opened after " + maxAttempts + " attempt(s), skipping");
                         recordSkip(target.id, product, "no flower menu");
                         continue;
                     }
 
-                    // SEED has no fixed wording (species-specific: "Pick berries"/"Pick pomes"/
-                    // "Pick cone"/... - see LpActionMatcher's class doc) so it gets its own
-                    // shape-based matcher instead of a candidate list.
-                    NFlowerMenu.NPetal petal = category == LpActionMatcher.Category.SEED
-                            ? LpActionMatcher.findSeedPetal(fm)
-                            : LpActionMatcher.findPetal(fm, LpActionMatcher.candidateActions(category, product));
-                    fm.wdgmsg("cl", -1);
-                    NUtils.getUI().core.addTask(new NFlowerMenuIsClosed());
-
                     if (petal == null) {
-                        log("  " + product + ": no matching petal, live petals were: " + petalNames(fm));
+                        log("  " + product + ": no matching petal after " + maxAttempts + " attempt(s), live petals were: " + petalNames(fm));
                         recordSkip(target.id, product, "no matching action, petals were: " + petalNames(fm));
                         continue;
                     }
@@ -262,7 +334,7 @@ public class LpAssistantBot implements Action {
                     NUtils.getUI().core.addTask(discovered);
                     if (discovered.confirmed()) {
                         log("  " + product + ": discovery confirmed (via " + discovered.confirmedVia() + ")");
-                        productsDiscovered++;
+                        discoveredCount++;
                     } else {
                         log("  " + product + ": discovery NOT confirmed (timed out)");
                         logClickedGob("  " + product + ": clickedGob at timeout");
@@ -282,17 +354,30 @@ public class LpAssistantBot implements Action {
 
                     if (prop.autoEatNew || prop.autoDropNew)
                         triageNewItems(gui);
-                }
-
-                clearedGobs.add(target.id);
-                gobsCleared++;
-            }
-
-            report(gobsCleared, productsDiscovered);
-            return Results.SUCCESS();
-        } finally {
-            closeDebugLog();
         }
+        return discoveredCount;
+    }
+
+    /**
+     * Backs the player off target and re-approaches from a different side - used by the
+     * BOARD/BLOCK/OLDTRUNK hitbox-retry loop above. Rotates the offset angle a further ~70 degrees
+     * each attempt so a retry doesn't just re-walk the same failed angle: a log's hitbox is a wide
+     * rectangle, not a circle, so a side that failed to click is often fine from elsewhere around it.
+     */
+    private void repositionAround(NGameUI gui, Gob target, int attempt) throws InterruptedException {
+        Gob player = NUtils.player();
+        if (player == null || target == null)
+            return;
+        Coord2d fromTarget = player.rc.sub(target.rc);
+        if (fromTarget.x == 0 && fromTarget.y == 0)
+            fromTarget = new Coord2d(1, 0);
+        else
+            fromTarget = fromTarget.norm();
+        double angle = Math.toRadians(70 * (attempt - 1));
+        double cos = Math.cos(angle), sin = Math.sin(angle);
+        Coord2d rotated = new Coord2d(fromTarget.x * cos - fromTarget.y * sin, fromTarget.x * sin + fromTarget.y * cos);
+        Coord2d away = target.rc.add(rotated.mul(11));
+        new GoTo(away).run(gui);
     }
 
     /** Steps the player one tile away from target, to interrupt any still-running repeat action. */
@@ -334,6 +419,14 @@ public class LpAssistantBot implements Action {
             try {
                 products = LpExplorer.allUndiscoveredProducts(gob);
             } catch (Loading l) {
+                continue;
+            } catch (RuntimeException e) {
+                // One gob in a transient bad state (e.g. attrs not fully attached yet on a
+                // just-loaded-in gob) must not take the whole candidate scan down with it - see
+                // the matching guard in run()'s main loop for why this matters (a bot thread that
+                // dies from an uncaught exception here shows the player nothing at all, looking
+                // exactly like "the bot silently finished").
+                log("  candidate scan error on gob id=" + gob.id + ": " + e + ", skipping it this scan");
                 continue;
             }
             products = withoutSkipped(gob.id, products);
@@ -384,9 +477,27 @@ public class LpAssistantBot implements Action {
         skipped.computeIfAbsent(gobId, k -> new LinkedHashMap<>()).put(product, reason);
     }
 
-    /** True if a contiguous WORKING_SPACE-sized block is free - room for whatever comes next. */
+    // Squares a WORKING_SPACE-sized block would cover (4x2=8) - used as a total-free-square
+    // threshold instead of requiring that exact shape to be free in one contiguous block (see
+    // hasWorkingSpace's own doc for why the contiguous check was wrong).
+    private static final int WORKING_SQUARES = WORKING_SPACE.x * WORKING_SPACE.y;
+
+    /**
+     * True if there's roughly a WORKING_SPACE-sized block's worth of free inventory space -
+     * enough room for whatever comes next.
+     *
+     * Originally required getNumberFreeCoord(WORKING_SPACE) > 0 - a literal contiguous 4x2
+     * rectangle free somewhere in the grid. Confirmed live 2026-08 to false-positive "inventory
+     * full" and abort the bot even when the player had several free squares' worth of total space
+     * left (e.g. their own reported 2x4/5x4 empty block): once the bot's own gathered items (or
+     * anything else in the inventory) fragment that region into non-rectangular free space, no
+     * single 4x2 rectangle exists anymore even though plenty of individual free squares do -
+     * and Haven's own item placement never actually needs one contiguous block, it fills whatever
+     * free squares fit. A total-free-square count is the correct, non-false-positive proxy for
+     * "is there room", matching how items actually get placed.
+     */
     private boolean hasWorkingSpace(NGameUI gui) throws InterruptedException {
-        return gui.getInventory().getNumberFreeCoord(WORKING_SPACE) > 0;
+        return gui.getInventory().getFreeSpace() >= WORKING_SQUARES;
     }
 
     /** Stashes a cursor/hand-held item into a free inventory slot, or drops it if none exists. */

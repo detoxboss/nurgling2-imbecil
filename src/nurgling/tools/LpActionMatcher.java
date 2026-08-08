@@ -23,9 +23,14 @@ import nurgling.conf.NLpAssistantProp;
  * instead: starts with "Pick ", isn't the leaf petal, and - same safety rule as everywhere else -
  * only resolves if it's the single such petal on the menu.
  *
- * "Take branch" is deliberately NOT a bough candidate despite once being included as one: live
- * testing showed it's a generic, always-present petal unrelated to the discoverable bough curio
- * (selecting it never produced a discovery) - "Take bough" alone is the confirmed real action.
+ * "Take branch" is deliberately NOT a general bough candidate: live testing showed it's a generic,
+ * always-present petal unrelated to the discoverable bough curio on most species (selecting it
+ * never produced a discovery there) - "Take bough" alone is the confirmed real action for those.
+ * Olive is the sole confirmed exception: its bough-equivalent product is actually named "Olive
+ * Branch" (not "Olive Bough" - see LpExplorer.isBoughProduct()), and "Take branch" is genuinely
+ * its harvest petal, so it's listed second in ACTIONS_BOUGH as a fallback tried only when "Take
+ * bough" isn't on the menu at all (which is the case for olive and never for any other BOUGH-
+ * classified species, since classify() only assigns BOUGH when the product name says so).
  */
 public class LpActionMatcher {
     public enum Category {
@@ -34,7 +39,7 @@ public class LpActionMatcher {
 
     // Confirmed verbatim from the existing bots / live testing named in the class doc above.
     private static final String[] ACTIONS_LEAF = {"Pick leaf", "Pick leaves"};
-    private static final String[] ACTIONS_BOUGH = {"Take bough"};
+    private static final String[] ACTIONS_BOUGH = {"Take bough", "Take branch"};
     private static final String[] ACTIONS_BARK = {"Take bark"};
     private static final String[] ACTIONS_BOARD = {"Make boards"};
     private static final String[] ACTIONS_BLOCK = {"Chop into blocks"};
@@ -58,7 +63,7 @@ public class LpActionMatcher {
         // Tree/bush: same product-name substring rules LpExplorer uses internally.
         if (product.contains("Leaf") || product.contains("Leaves"))
             return Category.LEAF;
-        if (product.contains("Bough"))
+        if (product.contains("Bough") || product.equals("Olive Branch"))
             return Category.BOUGH;
         if (product.equals(HarvestState.getBarkProductName(gobResName)))
             return Category.BARK;

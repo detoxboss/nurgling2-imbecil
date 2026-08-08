@@ -206,8 +206,112 @@ See `docs/inventory-grid-system.md` for the general footprint/stacking backgroun
 `WItem`, Eat/Study consume one unit per click with no whole-stack equivalent) this
 was built on.
 
-## Open / unverified
+## Round 2 fixes (2026-08-07, live-testing feedback)
 
+- **VSpec Yesteryear season-pair mismatch (Crabapple).** `LpExplorer.isCurrentSeasonProduct()`
+  derives a product's normal/Yesteryear sibling name by prefix-stripping and assumes an exact
+  match in `VSpec.object`. Crabapple's in-season entry is plural (`"Crabapples"`) but its
+  Yesteryear entry singular (`"Yesteryear's Crabapple"`), so the stripped base (`"Crabapple"`)
+  never matched, and the method's "no sibling found" fallback returns `true` unconditionally -
+  showing both as undiscovered simultaneously, year-round, on every crabapple tree. This was the
+  root cause of the "duplicate icon that never fully clears" report. Fixed with an explicit
+  `YESTERYEAR_BASE_OVERRIDE` map in `LpExplorer.java`; confirmed via full grep of `VSpec.object`
+  that Crabapple is the only such mismatch.
+- **Olive Branch misclassified as SEED.** Every tree's bough-equivalent product is named
+  `"<Species> Bough"` except olive, whose product is `"Olive Branch"`. Both `LpExplorer.
+  isBoughProduct()` and `LpActionMatcher.classify()` matched only on `"Bough"`, so Olive Branch
+  fell into the seed bucket - wrongly gated behind the seed-presence bit for display, and
+  unreachable for the bot (`findSeedPetal()` only matches `"Pick "`-prefixed petals, but olive's
+  real petal is `"Take branch"`). Fixed both classifiers to special-case `"Olive Branch"`, and
+  added `"Take branch"` to `LpActionMatcher.ACTIONS_BOUGH` as a second candidate (only ever
+  reached when `"Take bough"` isn't present at all, which in practice is olive-only).
+- **Bot thread could die silently on any uncaught exception.** `BotExecutor.runWithSupports()`
+  (the thing that actually runs `Action.run()` on a background thread) only catches
+  `InterruptedException` around the call. Any other exception - confirmed reachable via a gob
+  whose live attrs disagree with themselves, e.g. the Crabapple bug above manifesting as a
+  `NullPointerException`-shaped edge case in some sessions - killed the thread outright with zero
+  message shown to the player, which read exactly like "the bot silently finished" rather than
+  "the bot crashed". `LpAssistantBot` now isolates each gob's processing (`processGob()`) and each
+  scan-time candidate scored (`pickNearestCandidate()`'s inner loop) behind its own
+  `catch (RuntimeException e)` that logs and skips just that one gob, instead of letting one bad
+  gob take the whole run down. This is a general robustness fix, not tied to one specific
+  exception cause - any future bug in this area now degrades to "one gob skipped, run continues"
+  instead of "run silently dies".
+- **`hasWorkingSpace()` false-positived "inventory full".** The original check required
+  `getNumberFreeCoord(WORKING_SPACE) > 0` - a literal contiguous 4x2 rectangle free somewhere in
+  the grid. Once the bot's own gathered items (or anything else) fragment the free area into a
+  non-rectangular shape, no single 4x2 block exists even with plenty of total free squares -
+  confirmed as the cause of the bot aborting mid-run on a player-reported empty 2x4/5x4 block.
+  Switched to a total-free-square-count threshold (`getFreeSpace() >= WORKING_SQUARES`, i.e. 8),
+  matching how Haven's own item placement actually works (fills whatever free squares fit, no
+  contiguity requirement).
+- **`Equip` only ever searched the belt.** `Equip.run()` looked up the target tool exclusively in
+  `wbelt.item.contents` and returned `Results.ERROR("No target item")` (or, if no belt was even
+  equipped, a silent `Results.SUCCESS()` that equipped nothing) if it wasn't there - never checking
+  the main inventory at all. Root cause of LP Assistant never swapping to the axe/saw for
+  board/block/stone actions when the tool happened to be in plain inventory rather than belted.
+  Fixed to fall back to `gui.getInventory()` when the belt search comes up empty, generalizing the
+  belt-vs-inventory container reference through the rest of the swap logic.
+- **Log/old-trunk hitbox: single failed attempt treated as "nothing left".** Logs and old trunks
+  have a wide, non-circular hitbox; approaching from certain sides leaves the player somewhere
+  `PathFinder` considers "reached" but too far for the harvest click to actually land, opening no
+  flower menu (or one missing the expected petal) even though the resource is genuinely still
+  there - previously recorded as a permanent skip on the first miss. `processGob()` now retries
+  BOARD/BLOCK/OLDTRUNK products up to 3 times, backing off and re-approaching from a ~70-degree
+  rotated angle each retry (`repositionAround()`) before accepting the skip. Trees/bushes/stone use
+  round hitboxes and weren't reported to have this failure mode, so they stay single-attempt.
+- **Hotbar drag-drop routed to the wrong bot.** `BotDescriptor.iconPath` was being reused as both
+  "which icon image to draw" AND "unique identity for hotbar persistence/lookup"
+  (`NBotsMenu.NButton.path`, stored via `prop.custom.put(slot, pag.path)` and resolved via
+  `NBotsMenu.find(path)`). Before this fix, `LpAssistantBot` and `Forager` both used
+  `iconPath = "forager"` in `BotRegistry.java` (LpAssistantBot has since been given its own
+  `"lpassistant"` iconPath, see below), so dragging either one to a hotbar slot persisted the same
+  string, and
+  `find()` always returned whichever bot was registered first under that path (Forager) -
+  clicking either hotbar slot ran Forager regardless of which was actually dragged there. Fixed by
+  adding a separate `NButton.id` (sourced from the unique `BotDescriptor.id`) used for persistence
+  and lookup everywhere identity matters; `path` is now purely which icon image to load. New saves
+  (`NGameUI.java`'s `dropthing()`) always persist the id.
+  - **Backward compatibility with pre-existing saved hotbar slots**: `NBotsMenu.find()` is two-pass
+    - it checks every button's `id` first across the whole collection, and only falls back to a
+    legacy `path` match if nothing matched by id anywhere. This matters beyond just this one bot:
+    a grep of `BotRegistry.java` turned up 24+ other bots whose `id` differs from their `iconPath`
+    (e.g. `blueprint_tree_planter`/`treegardener`, `tunneling`/`tunelling`,
+    `table_eat_optimizer`/`eater`) - an id-only lookup would have silently broken every one of
+    their pre-existing saved hotbar slots (which were saved under the old path-based scheme), not
+    just LpAssistantBot's. Checking id first, across everything, before any path fallback also
+    means a value that happens to equal one bot's path can't shadow a different bot's real id -
+    e.g. a saved `"forager"` value resolves to Forager via its own id (Forager's `id` and
+    `iconPath` are both `"forager"`), not to whichever other bot merely shares that icon.
+  - **LpAssistantBot's own icon+tooltip**: it now has its own resource identity,
+    `nurgling/bots/icons/lpassistant/` (`BotRegistry.java`'s `iconPath` changed from `"forager"` to
+    `"lpassistant"`), with its tooltip layer referencing `@bot.lpassistantbot.title` /
+    `@bot.lpassistantbot.desc` (the same `messages.properties` keys `BotDescriptor` already used) -
+    so the sidebar now shows the correct name and description on hover, not Forager's. The
+    displayed *artwork* still reuses Forager's `image_0.png` verbatim (no art tool was available to
+    author something distinct), so the two icons still look alike at a glance despite being
+    genuinely separate resources now. Dropping a different `image_0.png` into
+    `resources/src/nurgling/bots/icons/lpassistant/{u,d,h}.res/image/` and rebuilding is enough to
+    change the artwork - no further identity or tooltip change needed, since those are already
+    wired to their own resource and their own keys.
+
+### Still open
+
+- **VSpec.object completeness.** Confirmed incomplete generally (per live-testing report) beyond
+  the two specific bugs above; `VSpec.object` is a hand-maintained static Java table, not
+  server/JSON-sourced (see class doc). No mechanism currently exists for adding entries without
+  editing `VSpec.java` and rebuilding.
+- **Log/stone/old-trunk per-instance depletion.** `ProductListHarvestSpec` (the always-on overlay
+  class covering these three) has no live per-instance state at all - upstream's own marker
+  feature can't tell a depleted log from a fresh one either, it's not a nurgling-specific gap. The
+  bot's actual live signal remains the flower menu at interaction time (now retried per the
+  hitbox-retry fix above before being treated as truly empty); there's no cheaper live-availability
+  check available upstream to mirror. See `docs/live-harvest-availability.md` for the full
+  writeup - written specifically to prevent a future session from assuming the hitbox-retry fix
+  added real depletion tracking, which it didn't.
+- **Gob scan range.** Candidate gobs are read from `NUtils.getGameUI().ui.sess.glob.oc`, the raw
+  client object cache mirroring exactly what the server has sent - i.e. already bounded by the
+  server's fixed load radius, not camera zoom/facing. No bug found here.
 - The empty-`chrid` trigger (see "Storage" above) — worked around, not root-caused.
 - Whether other bots/features reading `LpExplorer` (none currently do besides this
   one and the passive marker/overlay code) would need the same `clickedGob` stamp -
