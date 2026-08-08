@@ -27,11 +27,16 @@ not necessarily fully implemented), `historical` (a record of a past event, not 
 | [`inventory-grid-system.md`](inventory-grid-system.md) | current | `NInventory`/`WItem` grid mechanics: footprint, stacking, whole-stack vs. per-unit operations, `InventorySnapshot`'s ownership model. Routed via [`.claude/rules/inventory-management.md`](../.claude/rules/inventory-management.md) |
 | [`gob-context-menu.md`](gob-context-menu.md) | current | The Ctrl+Right-Click flower-menu system for launching gob-scoped bots |
 | [`feps-system-reference.md`](feps-system-reference.md) | current | FEP/food/attribute-gain mechanics, for anything touching `OptimizeTableEating.java` or similar |
-| [`mixed-wip-recovery.md`](mixed-wip-recovery.md) | recovery | Reusable navigation/automation primitives found in unreconstructed rescue-snapshot code (stuck detection, cliff-aware movement, frontier picking, terrain distance fields, coast following, file-based debug logging) — see its "Reusable systems awaiting reconstruction" table before treating any of these as available |
+| [`mixed-wip-recovery.md`](mixed-wip-recovery.md) | recovery | Reusable navigation/automation primitives found in unreconstructed rescue-snapshot code (cliff-aware movement, `DynamicPf`'s opt-in cliff handling), plus reconstruction status for the World Explorer group — see its "Reusable systems awaiting reconstruction" table before treating any of the still-unreconstructed ones as available |
+| [`world-explorer-system.md`](world-explorer-system.md) | current (branch-only — see doc's own status banner) | World Explorer bot: runtime path (`WorldExplorer` → `TileField` → `CoastFollower`), movement/backoff/stuck-detection, water-mode classification, character-scoped config/persistence, active vs. dormant components, and recorded-but-unfixed latent findings. Reconstructed on `feat/world-explorer-reconstruction`, not yet merged to or current on `master`. Water/shore-tracing only — see its own scope-boundary note |
+| [`land-navigation-research.md`](land-navigation-research.md) | recovery/proposal | Research for a **separate, future, proposed** land-based long-distance exploration bot: rolling-horizon navigation over live `MCache` terrain (not `ChunkNav`-dependent), player-observed and snapshot-calibrated cliff-traversal evidence, reusable-candidate inventory (`PathFinder`/`NPFMap`, `FrontierPicker`, `StuckDetector`, `animalrad`), and open decisions. Not a mode or dependency of the water World Explorer. Routed via [`.claude/rules/land-navigation.md`](../.claude/rules/land-navigation.md) |
 
-No general-purpose automation/navigation system document exists yet for the primitives above — none
-are implemented on current `master`. Do not create one until they're reconstructed and verifiable;
-see `mixed-wip-recovery.md` for the promotion criteria.
+No general-purpose automation/navigation system document exists yet for primitives that remain
+unreconstructed (cliff-aware movement/`CliffScan`/`CliffCalibrate`, the `DynamicPf.cliffAware` opt-in) —
+none of those are implemented on current `master`. Do not create one for them until they're
+reconstructed and verifiable; see `mixed-wip-recovery.md` for the promotion criteria. World Explorer
+itself now has its own doc (above) once its branch merges, and the land-navigation research above is a
+separate, not-yet-reconstructed track with its own routing rule — do not conflate the two.
 
 ## Inventory / LP Assistant
 
@@ -60,7 +65,7 @@ the sub-documents from here; follow `combat/README.md`'s own "Read this for…" 
 
 | Doc | Kind | What it covers |
 |---|---|---|
-| [`mixed-wip-recovery.md`](mixed-wip-recovery.md) | recovery | Ledger of feature groups preserved in rescue snapshot `802a8855` (branch `backup/mixed-wip-before-upstream-2026-08-07`): what's already reconstructed onto `master` (LP Assistant), what's next (World Explorer), what's separable (the `Graph.java` priority-queue change), and reusable navigation/automation systems awaiting a reconstruction decision |
+| [`mixed-wip-recovery.md`](mixed-wip-recovery.md) | recovery | Ledger of feature groups preserved in rescue snapshot `802a8855` (branch `backup/mixed-wip-before-upstream-2026-08-07`): what's already reconstructed onto `master` (LP Assistant), what's reconstructed on a feature branch pending runtime testing and merge (World Explorer — see `world-explorer-system.md`), what's separable (the `Graph.java` priority-queue change), and reusable navigation/automation systems still awaiting a reconstruction decision (cliff-aware movement) |
 
 ## Reusable-system questions
 

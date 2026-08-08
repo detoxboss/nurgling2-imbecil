@@ -1,21 +1,61 @@
 package nurgling.actions.bots;
 
-import haven.*;
-import nurgling.*;
+import haven.Coord2d;
+import haven.MCache;
+import haven.UI;
+import nurgling.NGameUI;
+import nurgling.NUtils;
 import nurgling.actions.Action;
-import nurgling.actions.GoTo;
 import nurgling.actions.Results;
+import nurgling.actions.StuckDetector;
 import nurgling.conf.NWorldExplorerProp;
+import nurgling.pf.CoastFollower;
+import nurgling.pf.TileField;
+import nurgling.tasks.NTask;
 import nurgling.tasks.WaitCheckable;
+import nurgling.tools.NDebugLog;
 
-import static haven.Coord.of;
-
+/**
+ * Coastline explorer: follows the shore at a fixed offset by tracing an
+ * iso-contour of a distance-to-land field (see {@link TileField} and
+ * {@link CoastFollower}), rather than by chasing the boundary between two
+ * water tile types.
+ *
+ * That distinction is the whole point. Earlier versions steered by the
+ * shallow/deep waterline, which fails wherever the world does not provide
+ * one - land meeting deep water directly, beaches, wide shallow flats - and
+ * in testing those gaps caused the boat to stall, loop, or double back.
+ * Land is always present along a coast, so a field measured from land is
+ * defined everywhere the shallow/deep line is not.
+ *
+ * Consequences worth noting, because they replace explicit special cases
+ * that used to exist here:
+ *  - Reversal is structurally impossible along open coast: the direction of
+ *    travel is the contour tangent, whose sign is a fixed chirality constant.
+ *  - A dead-end inlet needs no handling; the contour runs in, around the
+ *    tip, and back out.
+ *  - Stuck-recovery backs off along the field gradient, i.e. provably away
+ *    from the nearest land, instead of guessing a side from config (which
+ *    used to drive the boat further into the shore it was already stuck on).
+ */
 public class WorldExplorer implements Action {
-    public static Coord[] counterclockwise = {of(1, 0), of(0, 1), of(-1, 0), of(0, -1)};
-    public static Coord[][] counternearest = {{of(0, 1),of(1, 1),of(2, 1)}, {of(-1, 0),of(-1, 1),of(-1, 2)}, {of(0, -1),of(-1, -1),of(-2, -1)}, {of(1, 0),of(1, -1),of(1, -2)}};
 
-    public static Coord[] clockwise = {of(1, 0), of(0, -1), of(-1, 0), of(0, 1)};
-    public static Coord[][] nearest = {{of(0, -1),of(1, -1),of(2, -1)}, {of(-1, 0),of(-1, -1),of(-1, -2)}, {of(0, 1),of(-1, 1),of(-2, 1)}, {of(1, 0),of(1, 1),of(1, 2)}};
+    /** How far ahead the contour is traced each iteration, in tiles. */
+    private static final int CONTOUR_STEPS = 60;
+
+    /** How far (perpendicular to travel) to look for a far shore for crossings. */
+    private static final double CROSSING_SENSOR_RANGE = MCache.tilesz.x * 150;
+
+    /**
+     * Hard floor on main-loop iteration time. A real incident during testing
+     * showed the loop can spin unboundedly fast under some conditions,
+     * flooding chat/audio and overwhelming the client's UI thread badly
+     * enough to crash it. Enforced unconditionally so it cannot regress.
+     */
+    private static final long MIN_ITERATION_MS = 300;
+
+    /** Consecutive plan failures tolerated before aborting rather than spinning. */
+    private static final int MAX_NO_PLAN = 6;
 
     @Override
     public Results run(NGameUI gui) throws InterruptedException {
@@ -23,112 +63,137 @@ public class WorldExplorer implements Action {
         nurgling.widgets.bots.WorldExplorerWnd w = null;
         NWorldExplorerProp prop = null;
         try {
-            NUtils.getUI().core.addTask(new WaitCheckable( NUtils.getGameUI().add((w = new nurgling.widgets.bots.WorldExplorerWnd()), UI.scale(200,200))));
+            NUtils.getUI().core.addTask(new WaitCheckable(NUtils.getGameUI().add((w = new nurgling.widgets.bots.WorldExplorerWnd()), UI.scale(200, 200))));
             prop = w.prop;
-        }
-        catch (InterruptedException e)
-        {
+        } catch (InterruptedException e) {
             throw e;
-        }
-        finally {
-            if(w!=null)
+        } finally {
+            if (w != null)
                 w.destroy();
         }
-        if(prop == null)
-        {
+        if (prop == null) {
             return Results.ERROR("No config");
         }
 
-        Coord[] dirs = (prop.clockwise)?clockwise:counterclockwise;
-        Coord[][] neardirs = (prop.clockwise)?nearest:counternearest;
-        String targetTile = "odeep";
-        String nearestTile = (prop.deeper)?"odeeper":"owater";
+        boolean deeperMode = prop.deeper;
+        double bandTiles = Math.max(1, prop.bandTiles);
+        // Chirality: which rotational sense the coast is circled in. Chosen
+        // once here and never re-decided, which is what makes doubling back
+        // impossible. Unlike the previous build, this genuinely controls the
+        // direction of travel rather than only a search order.
+        int chirality = prop.clockwise ? 1 : -1;
 
-        if(!prop.deeper)
-        {
-            dirs = (prop.clockwise)?counterclockwise:clockwise;
-            neardirs = (prop.clockwise)?counternearest:nearest;
+        WorldExplorerFrontier frontier = new WorldExplorerFrontier(prop);
+        CrossingCandidateTracker crossing = new CrossingCandidateTracker();
+        StuckDetector stuck = new StuckDetector();
+        stuck.timeoutS = prop.stuckTimeoutS;
+        stuck.reset();
+
+        Coord2d startPos = NUtils.player().rc;
+        TileField startField = TileField.scan(startPos, deeperMode);
+        Coord2d heading = CoastFollower.initialHeading(startField, startPos, chirality);
+        if (heading == null) {
+            // No land within scan range: nothing to hug yet. Hold a course
+            // until coastline streams into view.
+            heading = Coord2d.of(1, 0);
+            NDebugLog.logAndChat("WorldExplorer: no coast in range at start, holding course until one appears");
         }
 
-        boolean deepFound = false;
+        int consecutiveStuck = 0;
+        int consecutiveNoPlan = 0;
 
-        Coord[] buffer = new Coord[100];
-        int counter = 0;
-        Coord  pltc = NUtils.player().rc.div(MCache.tilesz).floor();
-        boolean isStart = false;
-        for(int j = 0; j<50;j++) {
-            for (int i = 0; i < 4; i++) {
-                Coord cand = pltc.add(dirs[i].mul(j));
-                Resource res_beg = NUtils.getGameUI().ui.sess.glob.map.tilesetr(NUtils.getGameUI().ui.sess.glob.map.gettile(cand));
-                if (res_beg != null) {
-                    if (res_beg.name.endsWith(targetTile)) {
-                        boolean isCorrect = false;
-                        for (Coord test : neardirs[i]) {
-                            Resource testr = NUtils.getGameUI().ui.sess.glob.map.tilesetr(NUtils.getGameUI().ui.sess.glob.map.gettile(cand.add(test)));
-                            if (testr != null && testr.name.endsWith(nearestTile)) {
-                                deepFound = true;
-                                isCorrect = true;
-                            }
-                        }
-                        if (isCorrect) {
-                            new GoTo(cand.mul(MCache.tilesz).add(MCache.tilehsz)).run(gui);
-                            isStart = true;
-                        }
-                        if (isStart)
-                            break;
-                    }
-                }
-            }
-            if(isStart)
-                break;
-        }
+        NDebugLog.newRun();
+        NDebugLog.logAndChat("WorldExplorer: starting coast-following (mode=" + (deeperMode ? "Deep&Deeper" : "Deep&Shallow")
+                + ", band=" + (int) bandTiles + " tiles, " + (prop.clockwise ? "clockwise" : "counterclockwise")
+                + "). Full diagnostic detail: " + NDebugLog.path());
 
-        Coord last = null;
         while (true) {
-            pltc = NUtils.player().rc.div(MCache.tilesz).floor();
-            boolean isFound = false;
+            long iterStart = System.currentTimeMillis();
+            Coord2d pos = NUtils.player().rc;
+            frontier.markVisited(pos);
 
-            for (int i = 0; i < 4; i++) {
-                Coord cand = pltc.add(dirs[i]);
-                boolean skip = false;
-                for (Coord check : buffer) {
-                    if (check != null && cand.equals(check.x, check.y)) {
-                        skip = true;
-                        break;
-                    }
+            TileField field = TileField.scan(pos, deeperMode);
+            CoastFollower.Plan plan = CoastFollower.plan(field, pos, heading, chirality, bandTiles, CONTOUR_STEPS);
+
+            if (plan != null) {
+                consecutiveNoPlan = 0;
+                heading = plan.heading;
+                NDebugLog.log(String.format("WorldExplorer: shore=%.1ft contour=%dt run=%.0f heading=%.0fdeg",
+                        plan.shoreDistance, plan.contourTiles, pos.dist(plan.target),
+                        Math.toDegrees(Math.atan2(heading.y, heading.x))));
+
+                Coord2d perp = heading.rot(chirality * Math.PI / 2);
+                crossing.scanForCrossing(pos, perp, CROSSING_SENSOR_RANGE);
+                WorldExplorerMove.clickAndChase(plan.target, gui);
+            } else {
+                consecutiveNoPlan++;
+                if (consecutiveNoPlan >= MAX_NO_PLAN) {
+                    NDebugLog.logAndChat("WorldExplorer: no navigable coast ahead after " + consecutiveNoPlan
+                            + " attempts - stopping rather than looping in place");
+                    return Results.ERROR("No navigable coast ahead");
                 }
-                if (skip) {
-                    continue;
-                }
-                Resource res_beg = NUtils.getGameUI().ui.sess.glob.map.tilesetr(NUtils.getGameUI().ui.sess.glob.map.gettile(cand));
-                if (res_beg != null) {
-                    if (res_beg.name.endsWith(targetTile)) {
-                        if (last == null || !cand.equals(last.x, last.y)) {
-                            boolean isCorrect = false;
-                            for(Coord test : neardirs[i])
-                            {
-                                Resource testr = NUtils.getGameUI().ui.sess.glob.map.tilesetr(NUtils.getGameUI().ui.sess.glob.map.gettile(pltc.add(test)));
-                                if(testr != null && testr.name.endsWith(nearestTile))
-                                {
-                                    deepFound = true;
-                                    isCorrect = true;
-                                }
-                            }
-                            if(!deepFound||isCorrect) {
-                                new GoTo(cand.mul(MCache.tilesz).add(MCache.tilehsz)).run(gui);
-                                buffer[counter++ % 100] = last;
-                                last = pltc;
-                                isFound = true;
-                                break;
-                            }
-                        }
-                    }
-                }
+                NDebugLog.logAndChat("WorldExplorer: no contour ahead, backing off from shore");
+                backOffFromShore(gui, field, pos, heading, prop);
             }
-            if (!isFound && last != null) {
-                new GoTo(last.mul(MCache.tilesz).add(MCache.tilehsz)).run(gui);
-                buffer[counter++ % 100] = pltc;
+
+            if (stuck.check(NUtils.player().rc)) {
+                consecutiveStuck++;
+                // Only genuine progress clears this counter. A recovery that
+                // merely found somewhere to click is not evidence the boat
+                // actually moved, and treating it as such is why the
+                // three-strikes abort never used to fire.
+                if (consecutiveStuck >= 3) {
+                    return Results.ERROR("Stuck: unable to clear obstacle");
+                }
+                NDebugLog.logAndChat("WorldExplorer: stuck (attempt " + consecutiveStuck + "), backing off from shore");
+                backOffFromShore(gui, field, NUtils.player().rc, heading, prop);
+                stuck.reset();
+            } else {
+                consecutiveStuck = 0;
+            }
+
+            long remaining = MIN_ITERATION_MS - (System.currentTimeMillis() - iterStart);
+            if (remaining > 0) {
+                final long waitUntil = System.currentTimeMillis() + remaining;
+                NUtils.addTask(new NTask() {
+                    @Override
+                    public boolean check() {
+                        return System.currentTimeMillis() >= waitUntil;
+                    }
+                });
             }
         }
+    }
+
+    /**
+     * Moves directly away from the nearest land, using the distance field's
+     * gradient. This is the correct escape direction by construction, which
+     * the previous implementation could not guarantee: it chose the swing
+     * side from the clockwise setting alone, so whenever land happened to be
+     * on that side it drove the boat harder into the shore it was stuck
+     * against and never recovered.
+     */
+    private static boolean backOffFromShore(NGameUI gui, TileField field, Coord2d pos,
+                                            Coord2d heading, NWorldExplorerProp prop) throws InterruptedException {
+        double tile = MCache.tilesz.x;
+        Coord2d away = field.awayFromBlocked(pos);
+        if (away == null)
+            away = heading.mul(-1); // no land in range; simply give back ground
+
+        // Try straight out first, then fan sideways, and prefer the longest
+        // clear run so one escape actually leaves the obstacle behind.
+        for (double angleDeg : new double[]{0, 25, -25, 50, -50}) {
+            Coord2d dir = away.rot(Math.toRadians(angleDeg));
+            for (int d = Math.max(2, prop.backupTiles); d >= 1; d--) {
+                Coord2d cand = pos.add(dir.mul(d * tile));
+                if (field.navigableAt(cand) && field.lineClear(pos, cand)) {
+                    WorldExplorerMove.clickAndChase(cand, gui);
+                    NDebugLog.log("WorldExplorer: backed off " + d + "t at " + (int) angleDeg + "deg from shore");
+                    return true;
+                }
+            }
+        }
+        NDebugLog.logAndChat("WorldExplorer: no open water to back off into");
+        return false;
     }
 }

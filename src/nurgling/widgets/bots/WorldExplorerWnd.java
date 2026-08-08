@@ -15,6 +15,11 @@ public class WorldExplorerWnd extends Window implements Checkable {
     CheckBox unclockwise;
     CheckBox deep;
     CheckBox shallow;
+    TextEntry lookaheadEntry;
+    TextEntry stuckTimeoutEntry;
+    TextEntry backupTilesEntry;
+    TextEntry swingTilesEntry;
+    TextEntry bandTilesEntry;
 
     public WorldExplorerWnd() {
         super(new Coord(200,200), L10n.get("explorer.wnd_title"));
@@ -74,6 +79,20 @@ public class WorldExplorerWnd extends Window implements Checkable {
 
         }, prev.pos("bl").add(UI.scale(0,5)));
 
+        prev = add(new Label(L10n.get("explorer.lookahead")), prev.pos("bl").add(UI.scale(0,5)));
+        prev = add(lookaheadEntry = new TextEntry(UI.scale(80), String.valueOf(finalStartprop.lookaheadTiles)), prev.pos("bl").add(UI.scale(0,2)));
+
+        prev = add(new Label(L10n.get("explorer.stuck_timeout")), prev.pos("bl").add(UI.scale(0,5)));
+        prev = add(stuckTimeoutEntry = new TextEntry(UI.scale(80), String.valueOf(finalStartprop.stuckTimeoutS)), prev.pos("bl").add(UI.scale(0,2)));
+
+        prev = add(new Label(L10n.get("explorer.backup_tiles")), prev.pos("bl").add(UI.scale(0,5)));
+        prev = add(backupTilesEntry = new TextEntry(UI.scale(80), String.valueOf(finalStartprop.backupTiles)), prev.pos("bl").add(UI.scale(0,2)));
+
+        prev = add(new Label(L10n.get("explorer.swing_tiles")), prev.pos("bl").add(UI.scale(0,5)));
+        prev = add(swingTilesEntry = new TextEntry(UI.scale(80), String.valueOf(finalStartprop.swingTiles)), prev.pos("bl").add(UI.scale(0,2)));
+
+        prev = add(new Label(L10n.get("explorer.band_tiles")), prev.pos("bl").add(UI.scale(0,5)));
+        prev = add(bandTilesEntry = new TextEntry(UI.scale(80), String.valueOf(finalStartprop.bandTiles)), prev.pos("bl").add(UI.scale(0,2)));
 
         prev = add(new Button(UI.scale(150), L10n.get("botwnd.start")){
             @Override
@@ -83,6 +102,21 @@ public class WorldExplorerWnd extends Window implements Checkable {
                 if (prop != null) {
                     prop.deeper = deep.a;
                     prop.clockwise = clockwise.a;
+                    try {
+                        prop.lookaheadTiles = Integer.parseInt(lookaheadEntry.text().trim());
+                    } catch (NumberFormatException ignored) {}
+                    try {
+                        prop.stuckTimeoutS = Double.parseDouble(stuckTimeoutEntry.text().trim());
+                    } catch (NumberFormatException ignored) {}
+                    try {
+                        prop.backupTiles = Integer.parseInt(backupTilesEntry.text().trim());
+                    } catch (NumberFormatException ignored) {}
+                    try {
+                        prop.swingTiles = Integer.parseInt(swingTilesEntry.text().trim());
+                    } catch (NumberFormatException ignored) {}
+                    try {
+                        prop.bandTiles = Integer.parseInt(bandTilesEntry.text().trim());
+                    } catch (NumberFormatException ignored) {}
                     NWorldExplorerProp.set(prop);
                 }
                 isReady = true;
