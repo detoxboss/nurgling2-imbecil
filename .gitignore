@@ -8,8 +8,18 @@
 /.idea
 nurgling2.iml
 *~
-CLAUDE.md
-.claude
+
+# CLAUDE.md at repo root is tracked (project guidance). Nested CLAUDE.md files stay ignored.
+/*/**/CLAUDE.md
+# CLAUDE.local.md is always local/private, at any depth including root.
+CLAUDE.local.md
+
+# .claude/ is local Claude Code state by default; whitelist only the tracked rules directory.
+/.claude/*
+!/.claude/rules/
+/.claude/rules/*
+!/.claude/rules/*.md
+
 .agent-os
 __pycache__/
 *.pyc
