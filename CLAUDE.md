@@ -126,6 +126,7 @@ when (and when not) to use the mixed-WIP safety-snapshot pattern:
 | Water-based World Explorer bot (shore-tracing, `TileField`/`CoastFollower`) | `.claude/rules/world-explorer.md` → `docs/world-explorer-system.md` |
 | Land-based long-distance navigation research, cliff handling, rolling-horizon overland exploration, or related `DynamicPf`/`PathFinder`/`NPFMap`/`ChunkNav` work toward that goal | `.claude/rules/land-navigation.md` → `docs/land-navigation-research.md` |
 | Hafen/upstream integration | `docs/hafen-integration-guide.md`, `docs/fork-sync-guide.md`, `docs/nurgling-modified-files.md` |
+| Cutting a portable release, GitHub Release workflow | `.claude/rules/release-engineering.md` → `docs/release-process.md` |
 | Anything else — check the index first | `docs/README.md` |
 | Recovering work referenced in the mixed-WIP snapshot | `docs/mixed-wip-recovery.md` |
 

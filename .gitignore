@@ -1,5 +1,11 @@
 /build
 /bin
+/release
+/steam
+/dist
+/build.num
+/ver
+/tmp_ver
 /local-config.properties
 /local-boot.properties
 /build.properties

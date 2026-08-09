@@ -19,6 +19,7 @@ not necessarily fully implemented), `historical` (a record of a past event, not 
 | [`hafen-integration-2026-02-27.md`](hafen-integration-2026-02-27.md) | historical | Record of one past hafen integration |
 | [`hafen-integration-2026-06-port-design.md`](hafen-integration-2026-06-port-design.md) | historical | Record of another past hafen integration (port-design + execution status) |
 | [`resource-upgrade-strategy.md`](resource-upgrade-strategy.md) | current | How server-distributed resource code relates to the git source tree, and the strategy for client-side modifications to it |
+| [`release-process.md`](release-process.md) | current | Cutting a portable release: the manual `workflow_dispatch` GitHub Release workflow, archive contents, Java/Steam requirements, and manual verification status. Routed via [`.claude/rules/release-engineering.md`](../.claude/rules/release-engineering.md) |
 
 ## Automation systems (bots, actions, navigation)
 
