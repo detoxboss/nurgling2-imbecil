@@ -31,10 +31,11 @@ tracks and has been retired here (see "Legacy updater system" below).
 Two dependent jobs:
 
 1. **`build-windows`** (`windows-2022`): validate the `version` input → checkout `refs/heads/master`
-   (`persist-credentials: false`) → resolve the exact commit SHA → `ant test` → `ant bin` → verify the
-   required `bin/` files are present → verify `bin/nurgling-res.jar` contains a non-empty
-   `res/nurgling/hud/loginscr2.res` (see "Windows-only resource build" below) → upload the verified
-   `bin/` directory as a workflow artifact.
+   (`persist-credentials: false`) → resolve the exact commit SHA → `ant test` → `ant bin` → report (but
+   not fail on) generic `LayerUtil` resource-conversion warnings in the build log → verify the required
+   `bin/` files are present → verify `bin/nurgling-res.jar` contains the required non-empty startup
+   resources (see "Windows-only resource build" below) → upload the verified `bin/` directory as a
+   workflow artifact.
 2. **`package-and-release`** (`ubuntu-latest`, needs `build-windows`): checkout the exact commit SHA
    resolved by the Windows job → download the verified `bin/` artifact → assemble a portable folder
    from `bin/`'s output plus two launchers and a README → verify required files are present and
@@ -64,11 +65,31 @@ logging `Invalid number of decoded files for image` / `Error loading file` — a
 declares `failifexecutionfails="false"`, Ant's own exit code never reflected the failure, so a broken
 build could still complete "successfully" and produce a client that crashes at `LoginScreen.java:40`
 on the very first launch. That is why resource compilation (`ant test` / `ant bin`) runs on
-`windows-2022`, not Ubuntu, and why `build-windows` explicitly greps the `ant bin` log for those two
-messages and independently checks that `res/nurgling/hud/loginscr2.res` exists inside
-`bin/nurgling-res.jar` with an uncompressed size greater than 18 bytes before uploading the `bin/`
-artifact. Any future all-Linux fix to `LayerUtil` should re-verify this resource before reverting the
-build job back to a single Ubuntu job.
+`windows-2022`, not Ubuntu.
+
+`resources/src` also contains known **pre-existing, unused legacy resource-source gaps** — e.g.
+`resources/src/nurgling/hud/buttons/{add_folder_icon,category,export,import}` — that contain image
+files without the metadata `LayerUtil` expects, and so log the same `Invalid number of decoded files
+for image` / `Error loading file` messages on every build, on any OS, independent of whether the
+release is otherwise sound. The workflow does **not** treat the mere presence of those messages in the
+`ant bin` log as failure: `build-windows` counts them and emits a `::warning::` for future cleanup, but
+release safety is enforced by a separate, targeted check — after the build, it opens
+`bin/nurgling-res.jar` and requires each of the following entries to exist with an uncompressed size
+greater than 18 bytes:
+
+- `res/nurgling/hud/loginscr2.res`
+- `res/nurgling/hud/buttons/login/u.res`
+- `res/nurgling/hud/buttons/login/d.res`
+- `res/nurgling/hud/buttons/login/o.res`
+
+These are the resources the login screen actually needs at startup; the workflow fails only if one of
+*these* is missing or empty, not on generic warnings elsewhere in the resource tree. Do not read a
+clean `ant bin` log (no warnings at all) as a release requirement — some warnings from the legacy gaps
+above are expected and are not, by themselves, evidence of a broken build. Any future fix to
+`LayerUtil` or cleanup of those legacy resource-source directories should re-verify this list before
+loosening the check further; adding a new required-at-startup resource means adding it here too. Any
+future all-Linux fix to `LayerUtil` should re-verify this check before reverting the build job back to
+a single Ubuntu job.
 
 `ant bin` is the packaging basis, unmodified. It already assembles a genuinely cross-platform payload
 in one build: JOGL, LWJGL, and Steamworks each ship native libraries for Windows/Linux/macOS as part of
