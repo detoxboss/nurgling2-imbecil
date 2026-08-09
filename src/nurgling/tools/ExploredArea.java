@@ -74,12 +74,18 @@ public class ExploredArea {
     private volatile boolean sessionActive = false;
     
     /**
-     * Get the appropriate NConfig instance (profile-specific if available)
+     * Get the appropriate NConfig instance for this ExploredArea's own session.
+     * Resolved via the owning minimap's own ui/core, NOT an ambient "current UI"
+     * lookup - an ambient lookup returns whichever session happens to be the
+     * foreground/active one, which is a different session than this ExploredArea
+     * whenever it belongs to a background multi-session tab. That mismatch was
+     * the root cause of explored-area data being loaded from/saved to the wrong
+     * session's config in multi-account/multi-character setups.
      */
     private NConfig getConfig() {
         try {
-            if (nurgling.NUtils.getUI() != null && nurgling.NUtils.getUI().core != null) {
-                return nurgling.NUtils.getUI().core.config;
+            if (miniMap.ui != null && miniMap.ui.core != null) {
+                return miniMap.ui.core.config;
             }
         } catch (Exception e) {
             // Fallback to global config
@@ -90,6 +96,57 @@ public class ExploredArea {
     // Track last update position to avoid redundant updates
     private Coord lastTileUL, lastTileBR;
     private long lastSegmentId = -1;
+
+    // Per-session save-dirty tracking. Lives here, on this session's own
+    // ExploredArea, NOT on the genus-shared NConfig - so that two same-world
+    // sessions in one client can't clear each other's save trigger before
+    // their own edits reach disk (same reasoning as MCache.markAreasDirty()).
+    private volatile boolean needSave = false;
+    private volatile long lastChangeTime = 0;
+    private static final long SAVE_DEBOUNCE_MS = 5000; // batch rapid changes into one write
+
+    private void markDirty() {
+        needSave = true;
+        lastChangeTime = System.currentTimeMillis();
+    }
+
+    /**
+     * True once this session's own explored area has unsaved changes older
+     * than the debounce window.
+     */
+    public boolean isSaveDue() {
+        return needSave && lastChangeTime > 0 &&
+            (System.currentTimeMillis() - lastChangeTime) >= SAVE_DEBOUNCE_MS;
+    }
+
+    /**
+     * Merge-save this session's own explored area if a debounced change is
+     * pending. Called from this session's own NCore.tick() - never resolves
+     * "which session" ambiently.
+     */
+    public void saveIfDue() {
+        if (!isSaveDue()) {
+            return;
+        }
+        saveNow();
+    }
+
+    /**
+     * Merge-save immediately, bypassing the debounce window. Call on session
+     * teardown/logout so a pending change isn't stranded in memory only.
+     */
+    public void saveNow() {
+        if (!needSave) {
+            return;
+        }
+        try {
+            mergeAndSaveToFile(getConfig().getExploredPath());
+            needSave = false;
+            lastChangeTime = 0;
+        } catch (Exception e) {
+            System.err.println("Error saving explored area: " + e.getMessage());
+        }
+    }
     
     public ExploredArea(NMiniMap miniMap) {
         this.miniMap = miniMap;
@@ -164,7 +221,7 @@ public class ExploredArea {
         
         if (changed) {
             seq++;
-            NConfig.needExploredUpdate();
+            markDirty();
         }
         if (sessionChanged) {
             sessionSeq++;
@@ -202,7 +259,7 @@ public class ExploredArea {
             lastTileBR = null;
             lastSegmentId = -1;
             seq++;
-            NConfig.needExploredUpdate();
+            markDirty();
         }
     }
     

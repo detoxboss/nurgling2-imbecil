@@ -2,7 +2,6 @@ package nurgling.overlays.map;
 
 import haven.*;
 import nurgling.NConfig;
-import nurgling.NUtils;
 import nurgling.tools.ExploredArea;
 import nurgling.widgets.NCornerMiniMap;
 import nurgling.widgets.NMiniMap;
@@ -64,11 +63,14 @@ public class MinimapExploredAreaRenderer {
             float scaleFactor = nmap.getCurrentScale();
 
             // Get explored area data from the main minimap (corner minimap)
-            // This ensures both the corner minimap and the large map window 
-            // use the same explored area data
+            // This ensures both the corner minimap and the large map window
+            // use the same explored area data. Resolved via this widget's own
+            // ui.gui (this session's own GameUI), not an ambient "active session"
+            // lookup - the latter would pull a different session's data whenever
+            // this map window belongs to a backgrounded multi-session tab.
             ExploredArea exploredArea = null;
-            if (NUtils.getGameUI() != null && NUtils.getGameUI().mmap instanceof NCornerMiniMap) {
-                exploredArea = ((NCornerMiniMap) NUtils.getGameUI().mmap).exploredArea;
+            if (map.ui.gui != null && map.ui.gui.mmap instanceof NCornerMiniMap) {
+                exploredArea = ((NCornerMiniMap) map.ui.gui.mmap).exploredArea;
             }
             if (exploredArea == null) {
                 // Fallback to the map's own explored area if corner minimap not available

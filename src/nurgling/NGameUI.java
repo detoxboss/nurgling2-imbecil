@@ -302,8 +302,18 @@ public class NGameUI extends GameUI
             fishLocationService.dispose();
         if(labeledMarkService != null)
             labeledMarkService.dispose();
-        if(nurgling.NUtils.getUI().core!=null)
-            NUtils.getUI().core.dispose();
+        // Flush any pending explored-area change immediately - the periodic
+        // debounced save (NCore.tick() -> ExploredArea.saveIfDue()) won't get
+        // another chance to run once this session's widgets are torn down.
+        if(mmap != null && mmap instanceof NCornerMiniMap) {
+            ((NCornerMiniMap) mmap).exploredArea.saveNow();
+        }
+        // This session's own core, not the ambient active-tab session - disposing
+        // the wrong session's NCore here (e.g. when closing a backgrounded
+        // multi-session character) stops that OTHER session's persistence and
+        // watcher threads while it's still meant to be running.
+        if(ui != null && ui.core != null)
+            ui.core.dispose();
         // Shutdown ChunkNav to prevent thread accumulation on game restart
         if(map instanceof NMapView) {
             NMapView nmapView = (NMapView) map;
