@@ -37,7 +37,7 @@ convenience only, not something to ship.
 
 ## Archive formats
 
-`nurgling2-VERSION-portable.zip` and `nurgling2-VERSION-portable.tar.gz` contain identical files. The
+`nurgling-bufu-VERSION.zip` and `nurgling-bufu-VERSION.tar.gz` contain identical files. The
 `.tar.gz` is recommended and verified for Linux/macOS, because its handling of `run.sh`'s executable bit
 is predictable. The `.zip` is recommended for Windows; ZIP permission restoration on other platforms
 depends on the extractor used, so don't rely on it there.

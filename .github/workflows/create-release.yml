@@ -11,11 +11,17 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build-windows:
+    runs-on: windows-2022
+
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      sha: ${{ steps.rev.outputs.sha }}
 
     steps:
       - name: Validate version input
+        id: validate
+        shell: bash
         env:
           VERSION_INPUT: ${{ inputs.version }}
         run: |
@@ -24,7 +30,7 @@ jobs:
             echo "::error::invalid version '$VERSION_INPUT' — expected e.g. 1.0.0 or 1.0.0-beta.1 (no leading v, no whitespace/slashes/shell characters)"
             exit 1
           fi
-          echo "VERSION=$VERSION_INPUT" >> "$GITHUB_ENV"
+          echo "version=$VERSION_INPUT" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -34,6 +40,7 @@ jobs:
 
       - name: Resolve commit SHA
         id: rev
+        shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up JDK 21
@@ -43,12 +50,21 @@ jobs:
           distribution: 'temurin'
 
       - name: Run tests
+        shell: bash
         run: ant test
 
       - name: Build portable client (ant bin)
-        run: ant bin
+        shell: bash
+        run: |
+          set -euo pipefail
+          ant bin 2>&1 | tee ant-bin.log
+          if grep -qE "Error loading file|Invalid number of decoded files for image" ant-bin.log; then
+            echo "::error::ant bin output contains resource-conversion errors (see ant-bin.log)"
+            exit 1
+          fi
 
       - name: Verify bin/ output
+        shell: bash
         run: |
           set -euo pipefail
           required=(
@@ -83,13 +99,56 @@ jobs:
             fi
           done
 
+      - name: Verify nurgling-res.jar resource integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          entry="res/nurgling/hud/loginscr2.res"
+          line="$(jar tvf bin/nurgling-res.jar | awk -v e="$entry" '$NF==e')"
+          if [ -z "$line" ]; then
+            echo "::error::$entry missing from bin/nurgling-res.jar"
+            exit 1
+          fi
+          size="$(echo "$line" | awk '{print $1}')"
+          if [ -z "$size" ] || [ "$size" -le 18 ]; then
+            echo "::error::$entry uncompressed size is ${size:-0} bytes (must be > 18) — resource likely failed to convert"
+            exit 1
+          fi
+          echo "$entry OK: $size bytes"
+
+      - name: Upload verified bin/ artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-windows
+          path: bin/
+          if-no-files-found: error
+          retention-days: 1
+
+  package-and-release:
+    needs: build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.build-windows.outputs.sha }}
+          persist-credentials: false
+
+      - name: Download verified bin/ artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: bin-windows
+          path: bin
+
       - name: Assemble portable package
         id: assemble
         env:
-          COMMIT: ${{ steps.rev.outputs.sha }}
+          VERSION: ${{ needs.build-windows.outputs.version }}
+          COMMIT: ${{ needs.build-windows.outputs.sha }}
         run: |
           set -euo pipefail
-          PKG="nurgling2-${VERSION}-portable"
+          PKG="nurgling-bufu-${VERSION}"
           rm -rf "$PKG"
           mkdir -p "$PKG"
           find bin -maxdepth 1 -type f -exec cp {} "$PKG"/ \;
@@ -140,7 +199,8 @@ jobs:
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ steps.rev.outputs.sha }}
+          VERSION: ${{ needs.build-windows.outputs.version }}
+          COMMIT: ${{ needs.build-windows.outputs.sha }}
         run: |
           set -euo pipefail
           gh release create "v${VERSION}" \

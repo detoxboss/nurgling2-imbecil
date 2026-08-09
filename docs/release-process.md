@@ -19,29 +19,56 @@ tracks and has been retired here (see "Legacy updater system" below).
    version string, without a leading `v`.
 3. The workflow validates the version string before doing anything else (rejects a leading `v`,
    whitespace, slashes, shell characters, or an empty value; accepts a conservative semver-like form
-   such as `1.0.0` or `1.0.0-beta.1`), checks out `refs/heads/master`, builds, and publishes a **draft**
-   GitHub Release tagged `v<version>`, targeted at the exact resolved commit SHA. It never runs on
-   push — only on manual dispatch — so it cannot create a permanent release automatically.
+   such as `1.0.0` or `1.0.0-beta.1`), checks out `refs/heads/master`, builds on Windows, packages and
+   publishes on Ubuntu, and produces a **draft** GitHub Release tagged `v<version>`, targeted at the
+   exact resolved commit SHA. It never runs on push — only on manual dispatch — so it cannot create a
+   permanent release automatically.
 4. Inspect the draft release's assets and notes, then publish it manually from the GitHub UI when
    satisfied. The workflow deliberately stops at "draft" — publishing is a separate, human action.
 
 ## What the workflow does
 
-Validate the `version` input → checkout `refs/heads/master` (`persist-credentials: false`) → resolve
-the exact commit SHA → `ant test` → `ant bin` → assemble a portable folder from `bin/`'s output plus two
-launchers and a README → verify required files are present and forbidden files are absent → build
-`.zip` and `.tar.gz` from identical contents → `SHA256SUMS.txt` → `gh release create --draft`.
+Two dependent jobs:
 
-The validated version is carried forward only as an environment variable (`$VERSION`, set via
-`GITHUB_ENV` after validation) — the raw `${{ inputs.version }}` expression is never interpolated
-directly into shell script text after that point, to avoid script-injection risk from workflow-input
-text.
+1. **`build-windows`** (`windows-2022`): validate the `version` input → checkout `refs/heads/master`
+   (`persist-credentials: false`) → resolve the exact commit SHA → `ant test` → `ant bin` → verify the
+   required `bin/` files are present → verify `bin/nurgling-res.jar` contains a non-empty
+   `res/nurgling/hud/loginscr2.res` (see "Windows-only resource build" below) → upload the verified
+   `bin/` directory as a workflow artifact.
+2. **`package-and-release`** (`ubuntu-latest`, needs `build-windows`): checkout the exact commit SHA
+   resolved by the Windows job → download the verified `bin/` artifact → assemble a portable folder
+   from `bin/`'s output plus two launchers and a README → verify required files are present and
+   forbidden files are absent → build `.zip` and `.tar.gz` from identical contents → `SHA256SUMS.txt`
+   → `gh release create --draft`.
 
-It runs on `ubuntu-latest` (not Windows) specifically so `chmod`/`tar` reliably preserve the executable
-bit on `run.sh` inside the tarball. It uses the workflow's automatic `GITHUB_TOKEN`, scoped to
-`permissions: contents: write` — no personal access token, no repository secret. It does not cache
-`lib/ext` — this is a manually-run, infrequent workflow, so each run starts from a fresh hosted runner
-and lets Ant's existing dependency targets fetch their expected current inputs directly.
+The validated version and resolved commit SHA are passed from `build-windows` to `package-and-release`
+as job outputs — the raw `${{ inputs.version }}` expression is never interpolated directly into shell
+script text after validation, to avoid script-injection risk from workflow-input text. Both jobs
+therefore operate on the exact same commit: the Ubuntu job checks out `build-windows`'s resolved SHA
+rather than re-resolving `refs/heads/master` itself, so a push to `master` between the two jobs can't
+skew them apart.
+
+The packaging job runs on `ubuntu-latest` (not Windows) specifically so `chmod`/`tar` reliably preserve
+the executable bit on `run.sh` inside the tarball. It uses the workflow's automatic `GITHUB_TOKEN`,
+scoped to `permissions: contents: write` — no personal access token, no repository secret. Neither job
+caches `lib/ext` — this is a manually-run, infrequent workflow, so each run starts from a fresh hosted
+runner and lets Ant's existing dependency targets fetch their expected current inputs directly.
+
+### Windows-only resource build
+
+`ant bin`'s `resources` target shells out to `etc/LayerUtil.jar` to convert `resources/src` into the
+`.res` files packed into `nurgling-res.jar` (`build.xml`'s `resources` target). That conversion is
+**not Linux-safe** with the current legacy `LayerUtil` build: on Ubuntu it silently produced a broken,
+near-empty `res/nurgling/hud/loginscr2.res` (an 18-byte resource header with no image data) while
+logging `Invalid number of decoded files for image` / `Error loading file` — and because the target
+declares `failifexecutionfails="false"`, Ant's own exit code never reflected the failure, so a broken
+build could still complete "successfully" and produce a client that crashes at `LoginScreen.java:40`
+on the very first launch. That is why resource compilation (`ant test` / `ant bin`) runs on
+`windows-2022`, not Ubuntu, and why `build-windows` explicitly greps the `ant bin` log for those two
+messages and independently checks that `res/nurgling/hud/loginscr2.res` exists inside
+`bin/nurgling-res.jar` with an uncompressed size greater than 18 bytes before uploading the `bin/`
+artifact. Any future all-Linux fix to `LayerUtil` should re-verify this resource before reverting the
+build job back to a single Ubuntu job.
 
 `ant bin` is the packaging basis, unmodified. It already assembles a genuinely cross-platform payload
 in one build: JOGL, LWJGL, and Steamworks each ship native libraries for Windows/Linux/macOS as part of
@@ -52,7 +79,7 @@ in the complete set for each. No per-OS build or archive split is needed.
 ## Release archive contents
 
 ```
-nurgling2-<version>-portable/
+nurgling-bufu-<version>/
   hafen.jar, hafen-res.jar, builtin-res.jar, nurgling-res.jar
   jogl-all.jar, gluegen-rt.jar, jogl-all-natives-*.jar        (win/linux/macos)
   lwjgl-fat.jar, lwjgl-awt.jar, lwjgl-opengl-fat.jar
@@ -76,7 +103,7 @@ exact source tree this build came from, and notes that GitHub also provides a do
 archive on the corresponding release tag's page — that combination satisfies GPL/LGPL corresponding-
 source requirements without bundling a source snapshot in the binary archive itself.
 
-Two archives, `nurgling2-<version>-portable.zip` and `.tar.gz`, contain identical files. The `.tar.gz`
+Two archives, `nurgling-bufu-<version>.zip` and `.tar.gz`, contain identical files. The `.tar.gz`
 is recommended and verified for Linux/macOS, because its handling of `run.sh`'s executable bit is
 predictable; the `.zip` is recommended for Windows. ZIP permission restoration on other platforms
 depends on the extractor used — it is not that ZIP inherently cannot preserve the bit, just that
