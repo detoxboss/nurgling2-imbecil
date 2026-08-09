@@ -123,6 +123,7 @@ when (and when not) to use the mixed-WIP safety-snapshot pattern:
 | Inventory/stack/cursor/equipment/drop/study/eat grid code | `.claude/rules/inventory-management.md` → `docs/inventory-grid-system.md` |
 | LP Assistant bot, LP discovery markers | `.claude/rules/lp-assistant.md` → `docs/lp-assistant-bot.md` |
 | Combat reactor (`src/nurgling/combat/**`, `Fightsess`/`NFightsess`) | `.claude/rules/combat-automation.md` → `docs/combat/README.md` |
+| Water-based World Explorer bot (shore-tracing, `TileField`/`CoastFollower`) | `.claude/rules/world-explorer.md` → `docs/world-explorer-system.md` |
 | Land-based long-distance navigation research, cliff handling, rolling-horizon overland exploration, or related `DynamicPf`/`PathFinder`/`NPFMap`/`ChunkNav` work toward that goal | `.claude/rules/land-navigation.md` → `docs/land-navigation-research.md` |
 | Hafen/upstream integration | `docs/hafen-integration-guide.md`, `docs/fork-sync-guide.md`, `docs/nurgling-modified-files.md` |
 | Anything else — check the index first | `docs/README.md` |

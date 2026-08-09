@@ -28,19 +28,20 @@ current master code for this group.
 `docs/live-harvest-availability.md` is byte-identical between `master` and the snapshot — already
 fully carried forward, nothing left to reconstruct for it.
 
-### World Explorer — reconstructed in source on `feat/world-explorer-reconstruction`, runtime-reverification pending
+### Done — World Explorer (restored, runtime-smoke-tested)
 
-**Not yet current on `master`.** The 12 core files (`WorldExplorer.java`, `NWorldExplorerProp.java`,
-`WorldExplorerWnd.java`, `WorldExplorerMove.java`, `WorldExplorerFrontier.java`,
-`CrossingCandidateTracker.java`, `StuckDetector.java`, `CoastFollower.java`, `FrontierPicker.java`,
-`TileField.java`, `WaterTiles.java`, `NDebugLog.java`) have been restored byte-identical to snapshot
-`802a8855` on branch `feat/world-explorer-reconstruction` and confirmed to compile/build (`ant jar`)
-against current `master`. **In-client runtime testing on this branch has not yet been performed** —
-see `docs/world-explorer-system.md` §7-8 for current status and recorded-but-unfixed latent findings.
-`NBotsMenu.java` and `BotRegistry.java`'s existing `"worldexplorer"` descriptor were deliberately left
-unmodified; the `cliff_calibrate` debug-bot registry entry was **not** added in this pass (tracked
-separately, see the cliff-aware-movement row below). Canonical doc:
-[`world-explorer-system.md`](world-explorer-system.md).
+The 12 core files (`WorldExplorer.java`, `NWorldExplorerProp.java`, `WorldExplorerWnd.java`,
+`WorldExplorerMove.java`, `WorldExplorerFrontier.java`, `CrossingCandidateTracker.java`,
+`StuckDetector.java`, `CoastFollower.java`, `FrontierPicker.java`, `TileField.java`, `WaterTiles.java`,
+`NDebugLog.java`) were restored byte-identical to snapshot `802a8855`, via branch
+`feat/world-explorer-reconstruction` (commit `a8070ebb1`), and confirmed to compile/build
+(`ant jar`/`ant test`) against current `master`. Runtime-smoke-tested in-client 2026-08-08 — see
+`docs/world-explorer-system.md` §7-8 for the active/dormant component breakdown and recorded-but-unfixed
+latent findings, and §10 for the smoke test's exact scope (what was and was not verified). The existing
+`NBotsMenu.java` and `BotRegistry.java` `"worldexplorer"` descriptor were left unmodified — the existing
+menu button launches the restored bot without any registry change; the `cliff_calibrate` debug-bot
+registry entry was **not** added (tracked separately, see the cliff-aware-movement row below). Canonical
+doc: [`world-explorer-system.md`](world-explorer-system.md).
 
 Target: a rewritten `WorldExplorer` bot (boat-based coastline exploration). Current `master` (prior to
 this branch) has the pre-rewrite `WorldExplorer.java` (134 lines, confirmed via direct line count —
@@ -87,9 +88,8 @@ New files, no `master` counterpart at all:
 
 Localization: `src/lang/messages.properties`/`messages_ru.properties` gained WE-only keys
 (`explorer.lookahead`, `explorer.stuck_timeout`, `explorer.backup_tiles`, `explorer.swing_tiles`,
-`explorer.band_tiles`) in the snapshot. **Hand-applied on `feat/world-explorer-reconstruction`**, not
-yet on `master`. `bot.worldexplorer.desc` was deliberately left at its current `master` text — see the
-table above.
+`explorer.band_tiles`), hand-applied during the `feat/world-explorer-reconstruction` reconstruction.
+`bot.worldexplorer.desc` was deliberately left at its pre-reconstruction text — see the table above.
 
 ### Separate — land-based World Explorer research (proposal, not reconstructed)
 
@@ -154,17 +154,17 @@ Per scope: generated/binary artifacts in the snapshot (`build.num`, `tmp_ver`, `
 ## Reusable systems awaiting reconstruction
 
 These snapshot-only classes were written with explicit "shared by multiple bots" intent in their own
-class docs, or have a real precedent already on `master`. **Most are now reconstructed** on
-`feat/world-explorer-reconstruction` (not yet on `master`) as part of the World Explorer group — see
-`docs/world-explorer-system.md` for their current active/dormant status there. `CliffAwareMove` +
-`CliffScan` (+ `CliffCalibrate`) remain fully unreconstructed and are not implemented anywhere on
-`master` or any feature branch. Do not cite any row below as current `master` behavior. This section is
-now a decision-input for whoever reconstructs the remaining cliff-aware-movement group — promote what's
-still useful into a canonical doc at that point.
+class docs, or have a real precedent already on `master`. **Most are now reconstructed**, via branch
+`feat/world-explorer-reconstruction`, as part of the World Explorer group — see
+`docs/world-explorer-system.md` for their active/dormant status there. `CliffAwareMove` + `CliffScan`
+(+ `CliffCalibrate`) remain fully unreconstructed and are not implemented anywhere on `master` or any
+feature branch — do not cite that row below as current `master` behavior. This section is now a
+decision-input for whoever reconstructs the remaining cliff-aware-movement group — promote what's still
+useful into a canonical doc at that point.
 
 | System | Snapshot location | Reusable purpose | Known consumers | Verification status | Disposition |
 |---|---|---|---|---|---|
-| `StuckDetector` | `src/nurgling/actions/StuckDetector.java` | Generic "no net tile progress for N seconds" detector, decoupled from any one bot | Snapshot: `WorldExplorer`. Its own class doc names a real precedent already on `master`: `src/nurgling/WaypointMovementService.java` has an inline >2.0s no-progress stuck check that this class claims to generalize — **that inline check is current, real code; the extracted shared class was snapshot-only, now reconstructed** | **Reconstructed on `feat/world-explorer-reconstruction`, byte-identical to snapshot.** Compiles/builds; in-client runtime testing pending | Promoted onto the World Explorer branch as-is; a later refactor of `WaypointMovementService`'s inline copy onto this class is out of scope for that branch |
+| `StuckDetector` | `src/nurgling/actions/StuckDetector.java` | Generic "no net tile progress for N seconds" detector, decoupled from any one bot | Snapshot: `WorldExplorer`. Its own class doc names a real precedent already on `master`: `src/nurgling/WaypointMovementService.java` has an inline >2.0s no-progress stuck check that this class claims to generalize — **that inline check is current, real code; the extracted shared class was snapshot-only, now reconstructed** | **Reconstructed byte-identical to snapshot.** Compiles/builds; runtime-smoke-tested 2026-08-08 — 6 timed stuck events recorded, all correctly detected (see `world-explorer-system.md` §10) | Promoted onto the World Explorer branch as-is; a later refactor of `WaypointMovementService`'s inline copy onto this class is out of scope for that branch |
 | `CliffAwareMove` + `CliffScan` | `src/nurgling/actions/CliffAwareMove.java`, `src/nurgling/pf/CliffScan.java` | Detects terrain-height discontinuities along a movement segment and aims an approach point short of the edge, so the server's own auto-climb proximity check fires instead of walking into a cliff base and stopping | Snapshot: `DynamicPf.java` (opt-in `cliffAware` flag, default off), `CliffCalibrate.java` (debug bot for threshold tuning). **Confirmed: not a World Explorer consumer** — `WorldExplorer` never uses `DynamicPf` | `CliffScan`'s threshold constant carries an in-code note claiming it was calibrated from live `CliffCalibrate` readings during snapshot-era testing — **not independently re-verified this pass**; classify as runtime-tested-per-snapshot-history, not re-confirmed | **Not reconstructed** — deliberately kept out of the World Explorer branch since it has no WE call site; the elevation-discontinuity detection has no WE-specific coupling and is plausibly reusable for any bot that walks near cliffs, but needs its own separate reconstruction decision |
 | `FrontierPicker` | `src/nurgling/pf/FrontierPicker.java` | Terrain-agnostic frontier-exploration primitives (ray-scan to the nearest unresolved/unloaded map edge, with loaded-grid-edge and expanding-ring fallbacks), gated by a caller-supplied acceptor predicate so land vs. water logic is the caller's problem | Snapshot: `WorldExplorerFrontier` (water). Its own class doc names an intended second consumer, `LandFrontier` — **that class does not exist anywhere, in the snapshot or on `master`; it is a proposal referenced in a doc comment, not implemented code** | **Reconstructed on `feat/world-explorer-reconstruction`, byte-identical to snapshot.** **Correction: not entirely dormant.** Its frontier-*selection* tiers (`pickFrontierPoint`, `scanLoadedGridsForFrontier`, `pickFrontierChunk`) are only reachable via `WorldExplorerFrontier.pickTarget`, which `WorldExplorer` never calls — those tiers are dormant. But `FrontierPicker.safeTileName()` specifically **is active at runtime**, called directly by `CrossingCandidateTracker.scanForCrossing` (which `WorldExplorer` does call every successful-plan iteration) and referenced by `WorldExplorerMove`'s dormant `scanAhead`/`scanHeading` helpers | Reusable pattern in principle (explicitly designed caller-agnostic); the "shared by land and water bots" claim is aspirational until a land consumer actually exists. Candidate for the future land bot researched in `docs/land-navigation-research.md` §8, pending correction of its `MCache.grids`-only-grows assumption and a land-specific acceptor |
 | `TileField` | `src/nurgling/pf/TileField.java` | Chamfer distance-transform field over locally-scanned navigable terrain (distance-to-nearest-obstacle), used to derive shoreline-following gradients without depending on a specific tile-type boundary | Snapshot: `CoastFollower` | **Reconstructed on `feat/world-explorer-reconstruction`, byte-identical to snapshot, and active** — core of the reconstructed bot's real steering path | Reusable terrain-scanning pattern; currently only consumed by `CoastFollower`, no second consumer yet |

@@ -1,10 +1,10 @@
 # World Explorer system reference
 
-**Status: current — describes the reconstructed implementation on branch `feat/world-explorer-reconstruction`.**
-**Not yet current on `master`.** Source-level reconstruction is complete and byte-identical to rescue
-snapshot `802a885500a76b68697fb6450bd35bcc82355cab` for the 12 core files listed below; **runtime
-re-verification on current `master` has not yet been performed** (see §7). Do not cite this document as
-proof the bot works in-client until that testing pass is recorded here.
+**Status: current — describes the implemented World Explorer bot.** Source is byte-identical to rescue
+snapshot `802a885500a76b68697fb6450bd35bcc82355cab` for the 12 core files listed below, reconstructed via
+branch `feat/world-explorer-reconstruction` (commit `a8070ebb1`). Runtime-smoke-tested in-client
+2026-08-08 — see §10 for precisely what was and was not verified. Do not cite this document as proof of
+complete validation beyond §10's stated scope.
 
 This is the canonical document for the World Explorer bot. It supersedes
 [`world-explorer-plan-a-fix-wall-following.md`](world-explorer-plan-a-fix-wall-following.md) and
@@ -120,12 +120,12 @@ persisted fields round-trip through `toJson()`/the `HashMap` constructor exactly
 **Snapshot-era status vs. this reconstruction**: the mixed-WIP recovery ledger records this code as
 having been runtime-tested during the original 2026-08-07 snapshot-era development (the class doc
 comments throughout this group reference specific real testing incidents — e.g. `WorldExplorer`'s
-`MIN_ITERATION_MS` doc, `CoastFollower`'s `MIN_CHORD_RATIO` doc). **That testing predates this
-reconstruction** and was performed against a different (now-superseded) `master` state. This
-reconstruction has been verified to compile and build (`ant jar`) against current `master` but **has
-not yet been runtime-tested in-client on this branch**. Treat prior "confirmed in testing" claims
-embedded in code comments as historical evidence the design works, not as current verification of this
-exact branch.
+`MIN_ITERATION_MS` doc, `CoastFollower`'s `MIN_CHORD_RATIO` doc). That testing predates this
+reconstruction and was performed against a different (now-superseded) `master` state. This
+reconstruction has been verified to compile and build (`ant jar`/`ant test`) against current `master`
+and was runtime-smoke-tested in-client on 2026-08-08 — see §10 for the precise scope of what that
+verified. Treat prior "confirmed in testing" claims embedded in code comments as historical evidence the
+design worked once, not as a substitute for §10's own findings.
 
 ## 8. Recorded latent findings (not fixed in this pass)
 
@@ -141,7 +141,8 @@ unfixed, per the "preserve the runtime-tested baseline" mandate for this branch:
    which unconditionally returns `false` (not stuck) and reseeds `lastTile`/`lastProgressTime` — so
    the very next iteration after any backoff-triggered `stuck.reset()` cannot itself report stuck,
    which clears `consecutiveStuck` back to 0 in `WorldExplorer`'s `else` branch before three
-   consecutive failures can ever be counted.
+   consecutive failures can ever be counted. **Empirically confirmed in the 2026-08-08 runtime smoke
+   test (§10):** all 6 recorded stuck events remained `attempt 1` — none ever escalated.
 3. **`CrossingCandidateTracker.getCandidates()` has no consumer.** Candidates are detected, deduped,
    sorted, and logged, but nothing reads the list back for any navigation decision.
 4. **The crossing scan's perpendicular direction likely points shoreward, not seaward.** In
@@ -177,15 +178,16 @@ unfixed, per the "preserve the runtime-tested baseline" mandate for this branch:
    transform every main-loop iteration**, allocating fresh `boolean[]`/`int[]` arrays and doing
    temporary `Coord`/`Coord2d` allocation throughout the scan and `CoastFollower.plan`'s per-step
    walk. This is a profiling candidate, not an approved change — do not optimize, cache, or
-   incrementally update this in this pass; profile only after the runtime-testing baseline (§7) is
-   established.
+   incrementally update this without separate approval; the 2026-08-08 smoke test (§10) did not
+   measure performance, only functional behavior.
 10. **The snapshot's `bot.worldexplorer.desc` text ("sails toward genuinely unexplored water,
     discovering the coastline as it goes") does not match the active algorithm**, which coast-follows
     via a distance-to-land field and does not call `WorldExplorerFrontier.pickTarget()` (finding 5).
     This key has a real runtime consumer — the World Explorer bot icon resource's tooltip contains
     `@bot.worldexplorer.desc`, resolved through `L10n` by `Resource.Tooltip.text()` — so changing it
-    to inaccurate text would be user-visible. **Left unchanged in this pass**, pending an accurate
-    replacement description approved after runtime testing.
+    to inaccurate text would be user-visible. **Left unchanged**, pending an accurate replacement
+    description as a separate, explicitly approved change — the 2026-08-08 smoke test (§10) confirmed
+    the bot's actual behavior (coast-following) but did not include an approved rewrite of this text.
 
 ## 9. Performance observations (profiling candidates only)
 
@@ -200,3 +202,49 @@ Not approved changes; listed here so a future profiling pass has a starting poin
 
 None of these have been measured against current `master` in this pass — treat as hypotheses, not
 confirmed bottlenecks.
+
+## 10. Runtime verification — 2026-08-08 smoke test
+
+Distinguishes what the user directly observed in-client from what was independently re-derived from 9
+`worldexplorer-debug-*.log` files recorded during the same session. Per data-handling policy, raw logs
+are not reproduced in this repository and no absolute user path or world coordinate appears below — the
+figures here were recomputed from the session's log files, not copied on faith.
+
+**User-observed, runtime-smoke-tested 2026-08-08:**
+
+- The existing UTILS-menu "World Explorer" button launches the restored bot (§1's menu route, unchanged).
+- Clockwise direction works.
+- Counterclockwise direction works.
+- Larger `bandTiles` values produce a visibly wider path from shore.
+- `bandTiles=1` closely hugs the shore; catches on difficult corners as expected, and successfully
+  performs the same first-level recovery behavior as the previous known-good bot.
+- Debug-log file creation works.
+
+**Log-supported, independently re-verified across all 9 session runs (8 Deep&Deeper, 1 Deep&Shallow;
+`bandTiles` of 1, 5, and 15 all exercised, both chiralities exercised):**
+
+- Normal planning continued across all 9 runs — 1,037 successful `WorldExplorer: shore=...` planning
+  records total, with zero exceptions, crashes, fatal errors, or terminal-abort messages (`No navigable
+  coast ahead`, `no open water to back off into`, `Stuck: unable to clear obstacle`) in any run.
+- The `MIN_ITERATION_MS=300` loop floor (§2) holds in practice: the minimum interval between consecutive
+  normal planning records across all 9 runs was ≈0.301s.
+- `bandTiles` measurably affects the actual shore-following contour, not just theoretically: recorded
+  average shore-distance was ≈1.48 tiles at `bandTiles=1`, ≈5.54 tiles at `bandTiles=5`, and ≈13.32 tiles
+  at `bandTiles=15` — each within the expected band for its configured value.
+- Recovery reliably resumes normal planning: 6 timed `StuckDetector` events (§4) and 10 `no contour
+  ahead` events (§2's `CoastFollower.plan`-returned-null path), all followed by a successful backoff (16
+  total, every one a `5t at 0deg` recovery — `backOffFromShore`'s first angle at its configured backup
+  distance succeeded every time this session) and a resumed `shore=` planning line with no gap.
+
+**Known limitation confirmed, not fixed:** all 6 recorded stuck events remained `attempt 1` (see §8
+finding 2's empirical-confirmation note) — the intended three-strikes escalation-to-abort never fired,
+consistent with the documented orchestration defect, not a new issue. This session verifies first-level
+stuck recovery only; it neither exercises nor fixes the three-strike abort path.
+
+**Explicitly not verified by this session — do not cite these as tested:** dedicated river-mouth
+behavior, dedicated dead-end-inlet behavior, long-duration soak testing, relog/`visitedGridIds`
+persistence across sessions, crossing-candidate usefulness or consumption (§8 finding 3), repeated
+recovery failure and three-strike-abort behavior, or every coastline/obstacle/boat/terrain
+configuration. This is a successful restoration/runtime-smoke test, not complete validation of every
+dormant or unfinished subsystem — every dormant/partially-active component in §7 and every unfixed
+finding in §8 remains exactly as documented there; none were fixed or fully exercised by this session.

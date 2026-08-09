@@ -11,12 +11,13 @@ contradicts §7/§8 below):
   `DynamicPf.cliffAware` opt-in diff — exists **only** in rescue snapshot `802a8855`. None of it has
   been reconstructed on `master` or on `feat/world-explorer-reconstruction`, and it is not implemented
   anywhere in this repository today.
-- `FrontierPicker` and `StuckDetector` **were restored, unchanged, on `feat/world-explorer-reconstruction`**
-  — but as part of the water bot's own core-file set (shared/dormant infrastructure the water bot
-  carries), not as a land-bot implementation. See §7/§8 for exactly what each restored class does and
-  does not do.
-- **No land explorer, and no land-specific consumer of either restored class, exists anywhere.** Nothing
-  in this document is implemented as land-navigation behavior on `master` or on any branch.
+- `FrontierPicker` and `StuckDetector` **were restored, unchanged, by the World Explorer reconstruction**
+  (branch `feat/world-explorer-reconstruction`, commit `a8070ebb1`) — as part of the water bot's own
+  core-file set (shared/dormant infrastructure the water bot carries), not as a land-bot implementation.
+  See §7/§8 for exactly what each restored class does and does not do.
+- **No land explorer, and no land-specific consumer of either restored class, exists anywhere.**
+  Restoration as part of the water bot does not constitute land-navigation behavior — nothing in this
+  document is implemented as land-navigation behavior anywhere.
 
 **This is a separate, future, proposed bot with its own future menu entry.** It is not a mode,
 extension, variant, or dependency of the restored water-based shore-tracing World Explorer bot. See
