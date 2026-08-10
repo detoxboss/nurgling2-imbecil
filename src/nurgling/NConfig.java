@@ -1278,18 +1278,36 @@ public class NConfig
 
     public void writeAreas(String customPath)
     {
-        if(NUtils.getGameUI()!=null && NUtils.getGameUI().map!=null)
+        // User-triggered call sites (manual export/import) only ever run on
+        // the input thread of whatever session the user is actually looking
+        // at, so the ambient "active session" lookup is correct by
+        // construction here. Tick-driven callers must use the (String,
+        // NGameUI) overload below instead, passing their OWN session.
+        writeAreas(customPath, NUtils.getGameUI());
+    }
+
+    /**
+     * @param sessionGui the calling session's own GameUI. Tick-driven callers
+     *                    (NCore.tick()) must pass their own ui.gui explicitly
+     *                    rather than relying on NUtils.getGameUI(), which
+     *                    resolves to whichever session is currently the
+     *                    foreground/active multi-session tab - a different
+     *                    session whenever the caller is backgrounded.
+     */
+    public void writeAreas(String customPath, NGameUI sessionGui)
+    {
+        if(sessionGui!=null && sessionGui.map!=null)
         {
             // If customPath is provided, write to file (for manual export only)
             if (customPath != null) {
-                writeAreasToFile(customPath);
+                writeAreasToFile(customPath, sessionGui);
                 return;
             }
 
             // Area-save dirty state lives on the per-session MCache, not on this
             // (genus-shared) NConfig - so same-world sessions don't clobber each
             // other's save trigger.
-            final haven.MCache mcache = ((NMapView)NUtils.getGameUI().map).glob.map;
+            final haven.MCache mcache = ((NMapView)sessionGui.map).glob.map;
 
             // If DB is enabled - ONLY use DB, never fallback to file
             if ((Boolean) NConfig.get(NConfig.Key.ndbenable)) {
@@ -1298,7 +1316,7 @@ public class NConfig
 
                 if (NCore.databaseManager != null && NCore.databaseManager.isReady()) {
                     try {
-                        String profile = NUtils.getGameUI().getGenus();
+                        String profile = sessionGui.getGenus();
                         if (profile == null || profile.isEmpty()) {
                             profile = "global";
                         }
@@ -1327,7 +1345,7 @@ public class NConfig
 
             // DB not enabled - write to file
             String areasPath = getAreasPath();
-            writeAreasToFile(areasPath);
+            writeAreasToFile(areasPath, sessionGui);
             mcache.clearAreasDirty();
             // Record the mtime we just wrote so our own write isn't mistaken for
             // another session's edit on the next reload check.
@@ -1336,10 +1354,10 @@ public class NConfig
         }
     }
 
-    private void writeAreasToFile(String path) {
+    private void writeAreasToFile(String path, NGameUI sessionGui) {
         JSONObject main = new JSONObject();
         JSONArray jareas = new JSONArray();
-        for(NArea area : ((NMapView)NUtils.getGameUI().map).glob.map.areas.values())
+        for(NArea area : ((NMapView)sessionGui.map).glob.map.areas.values())
         {
             jareas.put(area.toJson());
         }
@@ -1501,18 +1519,38 @@ public class NConfig
     }
 
     public void writeScenarios(String customPath) {
-        if (NUtils.getGameUI() != null && NUtils.getGameUI().map != null) {
+        // User-triggered call sites (ScenarioPanel save button) only ever run
+        // on the input thread of whatever session the user is actually
+        // looking at, so the ambient "active session" lookup is correct by
+        // construction here. Tick-driven callers must use the (String, NUI)
+        // overload below instead, passing their own session.
+        writeScenarios(customPath, NUtils.getUI());
+    }
+
+    /**
+     * @param sessionUi the calling session's own UI (Widget.ui). Tick-driven
+     *                   callers (NCore.tick()) must pass their own ui
+     *                   explicitly rather than relying on
+     *                   NUtils.getUI()/getGameUI(), which resolve to
+     *                   whichever session is currently the foreground/active
+     *                   multi-session tab - a different session's scenario
+     *                   list whenever the caller is backgrounded, silently
+     *                   overwriting this (intentionally global) file with
+     *                   stale/incomplete data.
+     */
+    public void writeScenarios(String customPath, UI sessionUi) {
+        if (sessionUi != null && sessionUi.gui != null && sessionUi.gui.map != null && sessionUi.core != null) {
             JSONObject main = new JSONObject();
             JSONArray jscenarios = new JSONArray();
 
-            for (Scenario scenario : NUtils.getUI().core.scenarioManager.getScenarios().values()) {
+            for (Scenario scenario : sessionUi.core.scenarioManager.getScenarios().values()) {
                 jscenarios.put(scenario.toJson());
             }
             main.put("scenarios", jscenarios);
 
             try {
                 NFileUtils.writeAtomically(customPath == null ? getScenariosPath() : customPath, main.toString());
-                current.isScenariosUpd = false;
+                this.isScenariosUpd = false;
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

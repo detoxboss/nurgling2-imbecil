@@ -345,7 +345,7 @@ public class NCore extends Widget
             nurgling.NMapView amap = (nurgling.NMapView) ui.gui.map;
             if (amap.glob.map.isAreasUpdated())
             {
-                config.writeAreas(null);
+                config.writeAreas(null, ui.gui);
             }
             // File mode: pick up area edits another in-process session wrote to
             // the shared per-genus file (no-op in DB mode, which uses the sync worker).
@@ -360,7 +360,7 @@ public class NCore extends Widget
         }
         if (config.isScenariosUpdated())
         {
-            config.writeScenarios(null);
+            config.writeScenarios(null, ui);
         }
         planningLayer.tick();
         if (planningLayer.isDirty())
