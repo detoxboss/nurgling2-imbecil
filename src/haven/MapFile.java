@@ -47,12 +47,31 @@ public class MapFile {
     public final Collection<Long> knownsegs = new HashSet<>();
     public final Collection<Marker> markers = new ArrayList<>();
     public volatile int markerseq = 0;
-    public final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    public final ReentrantReadWriteLock lock;
     private final Random rnd = new Random();
+
+    /* Nurgling multisession note: two MapFile objects loading the same
+     * (store, filename) - one per concurrent session sharing a world - must
+     * share ONE lock, or each object's own checklock()/writeLock() only
+     * guards against races within itself and never against a sibling
+     * session's object writing the same underlying HashDirCache entries at
+     * the same time. IdentityHashMap keys on the ResCache object itself
+     * (both ResCache.global and HashDirCache.get(id) are long-lived process
+     * singletons), so this doesn't depend on ResCache implementing
+     * equals()/hashCode(). */
+    private static final Map<ResCache, Map<String, ReentrantReadWriteLock>> sessionLocks = new IdentityHashMap<>();
+
+    private static ReentrantReadWriteLock sharedLock(ResCache store, String filename) {
+	synchronized(sessionLocks) {
+	    return(sessionLocks.computeIfAbsent(store, s -> new HashMap<>())
+		   .computeIfAbsent(filename, f -> new ReentrantReadWriteLock()));
+	}
+    }
 
     public MapFile(ResCache store, String filename) {
 	this.store = store;
 	this.filename = filename;
+	this.lock = sharedLock(store, filename);
     }
 
     private void checklock() {

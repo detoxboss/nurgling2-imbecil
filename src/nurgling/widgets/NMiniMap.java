@@ -617,8 +617,14 @@ NMiniMap extends MiniMap {
         if(ui.gui.map==null)
             return;
 
-        NGameUI gui = NUtils.getGameUI();
-        
+        // This widget's own session's GameUI - NOT NUtils.getGameUI(), which
+        // resolves to whichever session is currently the foreground/active tab.
+        // For a background multi-session tab that ambient lookup returns a
+        // DIFFERENT session's GameUI, so "gui.mmap == this" below would never
+        // hold for this minimap and its exploration tracking would silently
+        // stop while backgrounded.
+        NGameUI gui = (this.ui != null) ? this.ui.gui : null;
+
         // Smooth zoom interpolation
         if(Math.abs(currentScale - targetScale) > 0.001f) {
             // Interpolate towards target scale
