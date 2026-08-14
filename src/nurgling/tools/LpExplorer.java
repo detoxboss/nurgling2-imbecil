@@ -38,26 +38,14 @@ public class LpExplorer {
     // has no seasonal counterpart at all, or it's the variant matching the current season. Whether
     // a seasonal pair exists at all is derived from VSpec.object itself (does the sibling name
     // appear in this same resource's product list) rather than a separately hand-maintained
-    // species list, so there's nothing to keep in sync when a new species is added.
-    // VSpec.object's normal/Yesteryear's pairs are almost always related by exact prefix-strip
-    // (e.g. "Red Apple" <-> "Yesteryear's Red Apple"), except crabapple: the in-season product is
-    // plural ("Crabapples") but the Yesteryear one is singular ("Yesteryear's Crabapple"), so
-    // stripping the prefix yields "Crabapple", which never matches "Crabapples" in the resource's
-    // own product list. Without this override, isCurrentSeasonProduct() silently fell through its
-    // "no sibling found" branch and returned true unconditionally for the Yesteryear variant -
-    // showing "Crabapples" and "Yesteryear's Crabapple" as undiscovered at the same time,
-    // year-round, on every crabapple tree (confirmed live 2026-08: two icons on first sight, one
-    // clearing on pickup, the other never clearing since it can't actually be picked outside its
-    // season). Confirmed the only such mismatch across VSpec.object as of this writing.
-    private static final Map<String, String> YESTERYEAR_BASE_OVERRIDE = new HashMap<>();
-    static {
-        YESTERYEAR_BASE_OVERRIDE.put("Crabapple", "Crabapples");
-    }
-
+    // species list, so there's nothing to keep in sync when a new species is added. VSpec.object's
+    // normal/Yesteryear's pairs are related by exact prefix-strip (e.g. "Red Apple" <-> "Yesteryear's
+    // Red Apple"); crabapple's normal entry is "Crabapple" (singular), matching its Yesteryear
+    // sibling "Yesteryear's Crabapple" the same way.
     private static boolean isCurrentSeasonProduct(String gobResName, String product) {
         boolean isYesteryearVariant = product.startsWith(HarvestState.YESTERYEAR_PREFIX);
         String base = isYesteryearVariant ? product.substring(HarvestState.YESTERYEAR_PREFIX.length()) : product;
-        String sibling = isYesteryearVariant ? YESTERYEAR_BASE_OVERRIDE.getOrDefault(base, base) : (HarvestState.YESTERYEAR_PREFIX + base);
+        String sibling = isYesteryearVariant ? base : (HarvestState.YESTERYEAR_PREFIX + base);
         List<String> products = VSpec.object.get(gobResName);
         if (products == null || !products.contains(sibling))
             return true;

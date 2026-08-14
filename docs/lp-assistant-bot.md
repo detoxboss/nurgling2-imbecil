@@ -215,13 +215,16 @@ was built on.
 
 - **VSpec Yesteryear season-pair mismatch (Crabapple).** `LpExplorer.isCurrentSeasonProduct()`
   derives a product's normal/Yesteryear sibling name by prefix-stripping and assumes an exact
-  match in `VSpec.object`. Crabapple's in-season entry is plural (`"Crabapples"`) but its
-  Yesteryear entry singular (`"Yesteryear's Crabapple"`), so the stripped base (`"Crabapple"`)
-  never matched, and the method's "no sibling found" fallback returns `true` unconditionally -
+  match in `VSpec.object`. Crabapple's in-season entry was plural (`"Crabapples"`) while its
+  Yesteryear entry was singular (`"Yesteryear's Crabapple"`), so the stripped base (`"Crabapple"`)
+  never matched, and the method's "no sibling found" fallback returned `true` unconditionally -
   showing both as undiscovered simultaneously, year-round, on every crabapple tree. This was the
-  root cause of the "duplicate icon that never fully clears" report. Fixed with an explicit
-  `YESTERYEAR_BASE_OVERRIDE` map in `LpExplorer.java`; confirmed via full grep of `VSpec.object`
-  that Crabapple is the only such mismatch.
+  root cause of the "duplicate icon that never fully clears" report. Originally patched with an
+  explicit `YESTERYEAR_BASE_OVERRIDE` map in `LpExplorer.java`; superseded 2026-08-13 by upstream's
+  root fix (`3f85d829f`, merged via the 2026-08-13 upstream sync) renaming `VSpec.object`'s
+  crabapple normal entry itself to singular `"Crabapple"` - matching what `VSpec`'s own
+  `seedsAndBerries` category already used for this item - so the generic exact prefix-strip
+  pairing works unmodified and the override was removed as obsolete.
 - **Olive Branch misclassified as SEED.** Every tree's bough-equivalent product is named
   `"<Species> Bough"` except olive, whose product is `"Olive Branch"`. Both `LpExplorer.
   isBoughProduct()` and `LpActionMatcher.classify()` matched only on `"Bough"`, so Olive Branch
