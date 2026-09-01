@@ -184,7 +184,9 @@ public class MapWnd extends Window implements Console.Directory {
 		}
 	    }
 	    /* XXX: Shift-clicks that do not drag should be propagated to the map. */
-	    if((ev.b == 1) && (checkhit(c) || ui.modshift)) {
+	    /* Alt+shift is excluded: it is the map ping (NMiniMap.sendPointPing), and this
+	     * blanket shift grab would otherwise eat it before the view ever sees it. */
+	    if((ev.b == 1) && (checkhit(c) || (ui.modshift && !ui.modmeta))) {
 		MapWnd.this.drag(parentpos(MapWnd.this, c));
 		return(true);
 	    }
@@ -347,6 +349,79 @@ public class MapWnd extends Window implements Console.Directory {
 	}
     }
 
+    public void mark(Location loc, boolean onmap) {
+	mark(loc, onmap, null);
+    }
+
+    public void mark(Location loc, boolean onmap, String name) {
+	mark(loc, onmap, name, BuddyWnd.gc[new Random().nextInt(BuddyWnd.gc.length)]);
+    }
+
+    public void mark(Location loc, boolean onmap, String name, Color color) {
+	if(name == null)
+	    name = "New marker";
+	Marker nm = new PMarker(file, loc.seg.id, loc.tc, name, color, onmap);
+	file.add(nm);
+	uploadpmarker(nm);
+	focus(nm);
+    }
+
+    private static Gob clickedgob(ClickData inf) {
+	if(inf == null)
+	    return(null);
+	if(inf.ci instanceof Composited.CompositeClick)
+	    return(((Composited.CompositeClick)inf.ci).gi.gob);
+	else if(inf.ci instanceof Gob.GobClick)
+	    return(((Gob.GobClick)inf.ci).gob);
+	return(null);
+    }
+
+    private static String prettify(String basename) {
+	StringBuilder buf = new StringBuilder();
+	for(String word : basename.split("[_-]+")) {
+	    if(word.isEmpty())
+		continue;
+	    if(buf.length() > 0)
+		buf.append(' ');
+	    buf.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+	}
+	return((buf.length() > 0) ? buf.toString() : basename);
+    }
+
+    private static String gobname(ClickData inf) {
+	Gob gob = clickedgob(inf);
+	if(gob == null)
+	    return(null);
+	GobIcon icon = gob.getattr(GobIcon.class);
+	if(icon != null && icon.icon != null) {
+	    String nm = icon.icon.name();
+	    if((nm != null) && !nm.equals("???"))
+		return(nm);
+	}
+	Drawable dr = gob.getattr(Drawable.class);
+	if((dr == null) || (dr.getres() == null))
+	    return(null);
+	Resource res = dr.getres();
+	Resource.Tooltip tt = res.layer(Resource.tooltip);
+	if(tt != null)
+	    return(tt.text());
+	return(prettify(res.basename()));
+    }
+
+    private static final Color quickmarkcolor = new Color(255, 255, 0);
+
+    public void quickmark(Coord c) {
+	mv.new Hittest(c) {
+	    protected void hit(Coord pc, Coord2d mc, ClickData inf) {
+		Location sloc = view.sessloc;
+		if(sloc != null) {
+		    Location loc = new Location(sloc.seg, sloc.tc.add(mc.floor(tilesz)));
+		    mark(loc, true, gobname(inf), quickmarkcolor);
+		}
+	    }
+	}.run();
+    }
+
     public class MarkButton extends ICheckBox implements CursorQuery.Handler {
 	private UI.Grab grab = null;
 
@@ -363,13 +438,6 @@ public class MapWnd extends Window implements Console.Directory {
 		grab = ui.grabmouse(this);
 	}
 
-	public void mark(Location loc, boolean onmap) {
-	    Marker nm = new PMarker(file, loc.seg.id, loc.tc, "New marker", BuddyWnd.gc[new Random().nextInt(BuddyWnd.gc.length)], onmap);
-	    file.add(nm);
-	    uploadpmarker(nm);
-	    focus(nm);
-	}
-
 	private boolean ungrab() {
 	    if(grab != null) {
 		grab.remove();
@@ -378,14 +446,14 @@ public class MapWnd extends Window implements Console.Directory {
 	    return(true);
 	}
 
-	public class FindMark extends MapView.Maptest {
+	public class FindMark extends MapView.Hittest {
 	    private FindMark(MapView mv, Coord c) {mv.super(c);}
 
-	    protected void hit(Coord pc, Coord2d mc) {
+	    protected void hit(Coord pc, Coord2d mc, ClickData inf) {
 		Location sloc = view.sessloc;
 		if(sloc != null) {
 		    Location loc = new Location(sloc.seg, sloc.tc.add(mc.floor(tilesz)));
-		    mark(loc, true);
+		    mark(loc, true, gobname(inf));
 		}
 		ungrab();
 	    }
@@ -1140,27 +1208,23 @@ public class MapWnd extends Window implements Console.Directory {
     public void importmap() {
 	FilePicker dialog = ui.wnd.toolkit().picker().make(FilePicker.Mode.OPEN, ui.wnd);
 	dialog.filter("Exported Haven map data", "hmap");
-	dialog.show().map(Promise.cnonnull(this::exportmap)).report(ui);
+	dialog.show().map(Promise.cnonnull(this::importmap)).report(ui);
     }
 
     private Map<String, Console.Command> cmdmap = new TreeMap<String, Console.Command>();
     {
-	cmdmap.put("exportmap", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    if(args.length > 1)
-			exportmap(Utils.path(args[1]));
-		    else
-			exportmap();
-		}
-	    });
-	cmdmap.put("importmap", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    if(args.length > 1)
-			importmap(Utils.path(args[1]));
-		    else
-			importmap();
-		}
-	    });
+	cmdmap.put("exportmap", (cons, args) -> {
+	    if(args.length > 1)
+		exportmap(Utils.path(args[1]));
+	    else
+		exportmap();
+	});
+	cmdmap.put("importmap", (cons, args) -> {
+	    if(args.length > 1)
+		importmap(Utils.path(args[1]));
+	    else
+		importmap();
+	});
     }
     public Map<String, Console.Command> findcmds() {
 	return(cmdmap);

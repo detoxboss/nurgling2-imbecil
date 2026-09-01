@@ -87,8 +87,17 @@ The following files typically have conflicts:
   - Example at commit 51a5a5f4e
 
 **src/haven/QuestWnd.java**
-- **Nurgling changes**: Usually minimal
-- **Resolution strategy**: Take hafen's version (--theirs)
+- **⚠ This entry used to say "usually minimal, take --theirs". That is no longer
+  true and following it will silently break the quest tracker.**
+- **Nurgling changes**: `$_` factory returns `nurgling.NQuestWnd`;
+  `Quest.DefaultBox` → `nurgling.NQuestBox`; `NUtils.setQuestConds` hook in
+  `Quest.Info.uimsg("conds")`; `NUtils.addQuest`/`removeQuest` hooks in the
+  `uimsg("quests")` loop; ctor split into an overridable `buildLayout()`
+  (so `questbox`/`cqst`/`dqst` are non-final); an extra
+  `QuestList(Coord, int itemh, boolean showcond)` ctor for NQuestWnd's row height.
+- **Resolution strategy**: Take hafen's version of any rewritten method, then
+  re-graft the hooks above onto the new control flow. See the Aug 2026 round 2
+  notes for a worked example.
 
 **src/haven/TexRender.java**
 - **Nurgling changes**: Usually minimal
@@ -121,8 +130,13 @@ After resolving conflicts, ensure these nurgling-specific files are included:
 ### Step 6: Build and Test
 
 ```bash
-# Build to check for compilation errors
-ant clean compile
+# Force a FULL recompile. Incremental javac misses subclass/override breakage
+# introduced by a merge, so never trust an incremental build here.
+#
+# Do NOT use `ant clean`: it wipes lib/ext, and the re-downloaded lwjgl-fat
+# crashes the client at startup. Delete the class output instead:
+rm -rf build/classes
+powershell.exe -Command "cd C:\\Users\\imbecil\\nurgling2; ant"
 
 # Common compilation errors after hafen integration:
 # - Session.CachedRes access issues → ensure CachedRes is public
@@ -357,9 +371,9 @@ For the next hafen integration:
 
 ---
 
-**Last Updated:** 2026-07-24
-**Last Integration:** hafen-integration-2026-07-polity (merge commit 57b811005, branch off master)
-**Hafen Commits Integrated:** 26 commits (merge-base 592d4d5ac → hafen/master 9bba2bb9d)
+**Last Updated:** 2026-08-26
+**Last Integration:** hafen-integration-2026-08b (merge commit 372bac1d0, branch off master)
+**Hafen Commits Integrated:** 57 commits (merge-base f4b86b855 → hafen/master bbfc4d728)
 
 > Note: The Feb 2026 reference above (57d9570b2 / d58dcb242) is historical and is
 > NOT in the current master's ancestry — a later, undocumented integration brought
@@ -612,3 +626,171 @@ probe threw `NoSuchMethodError` and the fallback label rendered.
   message), that the name shows as a label with one village and a dropdown with two
   or more, that switching villages swaps the panel, and that the Realm tab still
   works. Not pushed.
+
+### August 2026 integration (32 commits — DPI/monitors, indirect toolkit, console) — SMALL
+
+Merge-base `9bba2bb9d` → hafen/master `f4b86b855`. Merge commit `800f98930`, branch
+`hafen-integration-2026-08` (off master; origin/master and master were level).
+Only **2 conflicts**. No `Session.PVER` change (still 31), so no nurgling
+wire-format reimplementation was at risk this round.
+
+**This one was driven by a symptom: the Kith & Kin Village tab showed only "Banish".**
+Same family of bug as July's "Please update your client!" — the visible widget is
+server-distributed resource code, not ours. `ui/vlg` (`Village`) keeps its three
+action buttons ("Leave the Village", "Oath of Allegiance", "Revoke the Privilege")
+in a container `actcnt` that it **hides whenever a member widget is attached**:
+
+```java
+public void addchild(Widget child, Object... args) {   // res/ui/vlg
+    if(p.equals("m")) { mw = child; add(child, 0, my); actcnt.hide(); pack(); return; }
+public void cdestroy(Widget w) {
+    if(w == mw) actcnt.show();
+```
+
+"Banish" lives in the *other* resource, `ui/vmemb` (`VillageMember`), which is that
+member widget. So "only Banish" means *a member is selected and cannot be
+deselected* — the client had no way to send a bare `sel` with no id, because
+`SListWidget.ItemWidget.mousedown` unconditionally did `list.change(item)`. One
+click on a villager hid the actions panel for the rest of the login session.
+
+Fixed upstream by exactly two of the merged commits:
+- `0585af16b` — `ItemWidget` gains overridable `clicked(MouseDownEvent)` + `toggle()`,
+  and `mousedown` now only acts on `ev.b == 1` (other buttons propagate).
+- `900478c23` — `Polity.MemberList.makeitem` overrides `clicked()` to send
+  `list.change(null)` (→ `wdgmsg("sel")`) when you click the already-selected member.
+
+⚠ Nothing in *our* source ever mentioned those three button labels — grepping `src/`
+finds nothing. Reuse July's technique: dump the resource out of the client's disk
+cache (`grep -rla "res/ui/vlg" "$APPDATA/Haven and Hearth/data"`, then `strings`) to
+read the server-side widget's real logic before assuming a nurgling regression.
+
+- **Conflicts (2):**
+  - `UI.java` — hafen deleted `private static final double scalef` (scaling is now
+    lazily initialized through a `scalef()` accessor + `static { }` block removal, so
+    `Toolkit.instance()` isn't forced early). The conflict was only that nurgling's
+    `gui`/`core` fields sit in the same field block. Kept `gui`/`core`, dropped `scalef`.
+  - `GameUI.java` — hafen converted every `Console.Command` anonymous class to a
+    lambda. Took hafen's lambda form; kept nurgling's deletion of the `belt` command
+    (nurgling swaps in its own belt widget and has no `beltwdg` field). Note hafen
+    now writes `GameUI.this.chrid` — required, since a lambda's `this` differs.
+- **Auto-merged, verified by hand:**
+  - `ModSprite` — hafen split `Poser` into `Poser`(order −1000) + `Poser.Applier`
+    (order 1010) and moved `RenderLinks` from order 2000 to 0. Nurgling's two deltas
+    (customMask forcing in `Meshes.operate()`, `NurglingVarMatOverride` registered in
+    `$res.operate()`) are in untouched regions and survived. **Ordering still holds:**
+    `VarMats`(100) → `NurglingVarMatOverride`(150), and `Meshes` was always order 0,
+    so container status colors are unaffected. RenderLinks dropping to 0 only means
+    its parts are now also visible to the 150-order override — harmless.
+  - `Console` — `public Map findcmds()` on `Console`/`UI.ConsoleHost` was **removed**
+    in favour of a short-circuiting `findcmd(String)`. Nurgling only implements
+    `Console.Directory.findcmds()` (`NCornerMiniMap`), which is unchanged. The
+    `Utils` static block of debug commands moved into `Console` itself.
+  - `SListWidget.ItemWidget.mousedown` now returns `false` for non-left buttons
+    instead of swallowing them. Audited nurgling's ~20 `ItemWidget` subclasses that
+    override `mousedown`: all either gate on `ev.b == 1` or just delegate.
+  - `UILoop.basestate()` now preps `wnd.fbstate()` instead of a hardcoded
+    `FragColor`+`DepthBuffer`. `DummyToolkit.DummyWindow.of()` returns `Pipe.Op.nil`,
+    so nurgling's `NHeadlessLoop` now starts from an empty pipe. Headless never drove
+    real GL (`HeadlessEnvironment` is a stub), so this should be inert — but it is the
+    one behavioural change worth watching if headless bots misbehave.
+  - `Client` (`window` console command, `tk.sharedenvs()`), `Providers.findfirst`,
+    `MapView`/`MapWnd`/`RootWidget`/`Audio`/`Config`/`HeadlessClient` (lambda
+    conversion only), `build.xml` (hafen dropped the steamworks fileset from the
+    `jars` target; nurgling's own `bin` target keeps its copy).
+- **Not touched upstream this round:** `GameUI.Zergwnd` (so `NZergwnd` needed no
+  mirroring), `Makewindow`, `MenuSearch`, `Session`, `Material`, `Bootstrap`.
+- **⚠ Expect a visible UI-scale change.** `UI.loadscale()` now prefers
+  `Monitor.scaling()`, then `userdpi()/96`, then `density()/100`, replacing the old
+  `rint(density/5)*0.05` heuristic; `f4b86b855` also fixes how the Win32 scaling
+  factor is read. If the client comes up at a different size, that is upstream
+  intent, not a merge error — `Config`'s `uiscale` pref still overrides it.
+- **Build note (separate commit `2ebadb16b`, not part of the merge):** the nurgling
+  `extlib/jogl-arm` target unconditionally `<get>`s four version-pinned jogamp.org
+  URLs, so every `ant bin` needs jogamp.org reachable. It was not reachable from the
+  Windows JDK here (TLS "Connection reset"), which failed the build *after* a
+  successful compile. Added `skipexisting="true"` — the URLs pin an exact version, so
+  a present file is already the right one, and `ant clean` still forces a refetch.
+- **Status:** `ant clean`-equivalent full rebuild succeeds (5402 classes, `bin/hafen.jar`
+  built); ancestry verified (`git merge-base --is-ancestor hafen/master HEAD` → 0).
+  **Runtime testing pending** — primarily: open Kith & Kin → Village, click a member
+  (panel shows name/group/Banish), click the same member again to deselect, and
+  confirm "Actions:" plus the three buttons come back. Also worth a look: UI scaling
+  on startup, and any list-widget right-click behaviour. Not pushed.
+
+### August 2026 round 2 (57 commits — new quest format / PVER 32, OSX toolkit) — SMALL
+
+Merge-base `f4b86b855` → hafen/master `bbfc4d728`. Merge commit `372bac1d0`, branch
+`hafen-integration-2026-08b` (off master; origin/master and master were level).
+Only **1 conflict** — but `Session.PVER` went **31 → 32**, so this round belongs to
+the June-`NMakewindow` family: a wire format changed under us.
+
+**Read the PVER line first.** 57 commits sounds large, but `git diff --stat` over
+`src/*.java` showed only **6 files**; the other ~4,000 lines are `opt/panama/**`
+(OSX Cocoa toolkit, Xkb key aliases, a Panama replacement for steamworks4j), which
+compiles only on JDK ≥ 22 and is inert for the main build. The whole risk surface
+of a round can be this small even when the commit count is not — and conversely,
+`PVER` moving means *something* reparses, so find what before trusting the size.
+
+- **Theme 1 — new quest wire format (the PVER bump).** The `quests` uimsg changed
+  from a flat, self-delimiting arg list to **one `OBJS` array per quest**, and each
+  quest gained two trailing ints `ncond` / `ndcond` (done/total conditions).
+  Deletion is now signalled by a payload holding *only* the id (`qd.length == a`)
+  rather than by a null resource. `Quest`'s ctor collapsed to `Quest(int id)` with
+  fields assigned afterwards. Pending-quest rows can now show an `n/m` counter.
+- **Conflict (1): `QuestWnd.java`.** Nurgling does **not** fork QuestWnd — it
+  subclasses (`NQuestWnd extends QuestWnd`) but *does* patch `haven/QuestWnd.java`
+  in place with quest-tracker hooks. Hafen rewrote the whole `uimsg` loop those
+  hooks lived in. Took hafen's loop wholesale and re-grafted all three hooks onto
+  the new control flow:
+  - `NUtils.removeQuest` → the new id-only removal branch (was: the `res == null` else-branch).
+  - `NUtils.addQuest` → inside `if(nl != cl)` when `nl != dqst` (unchanged shape).
+  - `NUtils.removeQuest` → next to `q.done(...)`, now guarded by hafen's
+    `(cl == cqst) && (nl == dqst)` instead of the old explicit PEND/DISABLED
+    state comparison. Same event, hafen just expresses it as a list transition.
+  The `setQuestConds` hook in `Quest.Info.uimsg("conds")` and the `NQuestBox` /
+  `NQuestWnd` factory swaps are in untouched regions and auto-merged.
+- **⚠ Silent break git could not flag — `QuestList.showcond`.** Hafen added
+  `public final boolean showcond` to `QuestList`, assigned only in its own
+  `QuestList(Coord, boolean)` ctor. Nurgling had added a *second* ctor,
+  `QuestList(Coord sz, int itemh)` (NQuestWnd needs a custom row height), which
+  now left a blank final unassigned. javac *did* catch this one — but only
+  because the field is final; had it been a plain field, nurgling's quest log
+  would have silently rendered `showcond == false` and quietly lost the new
+  feature. Threaded the flag through as `QuestList(Coord, int itemh, boolean
+  showcond)` and passed `true` from `NQuestWnd`'s current list / `false` from its
+  completed list, matching upstream's intent.
+  **Generalisable rule:** when upstream adds a field to a class nurgling has added
+  an overload/ctor to, check every nurgling ctor, not just the conflicted hunk.
+- **Theme 2 — physical keys (`Key.Loc`).** `Key` gained an **abstract**
+  `location()` plus a nested `Key.Loc` interface with an Xkb-style `Std` scancode
+  enum (`AD01`, `KPEN`, …, ids `"std:NAME"`). An abstract method added to a
+  widely-implemented interface is normally a compile break; here it is inert
+  because **every implementor is hafen-owned** and was updated in the same round:
+  `AWTToolkit.AWTKey`, `NEWTContext.NEWTKey`, and the panama `WGLContext.W32Key` /
+  `GLXContext.X11Key`. Verified `src/nurgling` neither implements nor references
+  `haven.iosys.tk.Key` (still true since July's rekey round). Nurgling's keybind
+  sites remain on the AWT-era compat API.
+- **Auto-merged, verified by hand:**
+  - `Client` — now sets `ui.lastevent = Utils.rtime()` on key events. Nurgling
+    writes `ui.lastevent` too, in `SessionContext`'s background tick loop, to keep
+    *demoted* sessions from being treated as idle. Different code paths
+    (foreground input vs. background tick), complementary, no interference.
+  - `Session` — PVER only; `injectMessage` / public `CachedRes` untouched.
+  - `AWTToolkit` / `NEWTContext` — additive `Key.Loc` plumbing only.
+- **Not touched upstream this round:** `Makewindow`/`NMakewindow`, `MenuSearch`,
+  `GameUI`, `GameUI.Zergwnd` (so `NZergwnd` needed no mirroring), `Material`,
+  `Bootstrap`, `ModSprite`/`StaticSprite`, `Polity`.
+- **Noted, not done (out of scope):** `QuestModel.pumpConds` sweeps `qsel` per quest
+  to harvest objective *text*, so the new `ncond`/`ndcond` counts do **not** replace
+  it. They could cheaply short-circuit the "is this quest's progress stale?" check,
+  since `ndcond` now arrives unsolicited with every quest update. Possible future
+  optimisation of the tracker's selection-stealing sweep.
+- **Status:** full rebuild succeeds (5528 classes, `bin/hafen.jar` built); ancestry
+  verified (`git merge-base --is-ancestor bbfc4d728 HEAD` → 0; `372bac1d0` is a
+  two-parent merge). **Runtime testing pending** — the quest path is what to
+  exercise, since the wire format moved: open the Quest Log and confirm current
+  quests list with an `n/m` counter on the right and completed quests without one;
+  accept a new quest (appears in Current, tracker panel picks it up); complete one
+  (moves to Completed, leaves the tracker); abandon/lose one (disappears from both).
+  Then confirm the nurgling quest tracker panel still shows objectives, givers and
+  targets. Not pushed.

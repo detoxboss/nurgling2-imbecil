@@ -136,6 +136,17 @@ public abstract class AWTToolkit implements Toolkit {
 	}
     }
 
+    public static class AWTKeyCode implements Key.Loc {
+	public final int code;
+
+	public AWTKeyCode(int code) {
+	    this.code = code;
+	}
+
+	public String id() {return(("awt:" + code).intern());}
+	public String toString() {return("<" + code + ">");}
+    }
+
     public static class AWTKey implements Key {
 	public final int pc, ec;
 	public final char ch;
@@ -153,6 +164,8 @@ public abstract class AWTToolkit implements Toolkit {
 	public String id() {
 	    return(String.format("awt:%x", ec).intern());
 	}
+
+	public Loc location() {return(new AWTKeyCode(ec));}
 
 	private AWTSym extended() {
 	    if(ec == java.awt.event.KeyEvent.VK_UNDEFINED)
@@ -877,12 +890,12 @@ public abstract class AWTToolkit implements Toolkit {
 	    return(dev.getDisplayMode().getRefreshRate());
 	}
 
-	public double density() {
+	public double userdpi() {
 	    return(java.awt.Toolkit.getDefaultToolkit().getScreenResolution());
 	}
 
 	public String toString() {
-	    return(dev.toString());
+	    return(String.format("#<awt-monitor %s %s %.2fdpi>", dev.toString(), resolution(), userdpi()));
 	}
     }
 

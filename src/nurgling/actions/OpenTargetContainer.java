@@ -50,6 +50,20 @@ public class OpenTargetContainer implements Action
                     new SelectFlowerAction("Open", gob, true).run(gui);
                 gui.ui.core.addTask(new FindNInventory(name));
                 break;
+            case "Study Desk":
+            case "Fine Study Desk":
+            case "Grand Study Desk":
+                // A non-owned desk pops an "Open"/"Take possession" flower menu instead of
+                // opening directly; only a fresh click (not a reused window) can trigger one.
+                if (already == null) {
+                    NFlowerMenu deskMenu = NUtils.findFlowerMenu();
+                    if (deskMenu != null) {
+                        deskMenu.chooseOpt("Open");
+                        gui.ui.core.addTask(new NFlowerMenuIsClosed());
+                    }
+                }
+                gui.ui.core.addTask(new FindNInventory(name));
+                break;
             default:
                 gui.ui.core.addTask(new FindNInventory(name));
         }
@@ -66,6 +80,11 @@ public class OpenTargetContainer implements Action
      *
      * Only NInventory-backed containers carry the binding. Windows without one (stockpiles
      * and other ISBoxes, barter stands) are left alone and keep the previous behaviour.
+     *
+     * Barrels are the exception: their window holds only a RelCont, so there is nothing to match
+     * against, and TakeFromBarrel leaves its window open. An area with several barrels then had
+     * every barrel after the first suppress its own click and silently reuse the previous barrel's
+     * window. Always reopen those.
      */
     private static boolean isOwnedBy(NGameUI gui, Window wnd, Gob gob)
     {
@@ -79,7 +98,7 @@ public class OpenTargetContainer implements Action
             }
         }
         if(inv == null)
-            return true;
+            return !"Barrel".equals(wnd.cap);
         return inv.parentGob != null && gob != null && inv.parentGob.id == gob.id;
     }
 

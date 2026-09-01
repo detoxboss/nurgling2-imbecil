@@ -3,7 +3,6 @@ package nurgling;
 import haven.*;
 import haven.res.ui.rbuff.RealmBuff;
 import haven.res.ui.relcnt.RelCont;
-import nurgling.conf.IconRingConfig;
 import nurgling.conf.NDiscordNotification;
 import nurgling.conf.NToolBeltProp;
 import nurgling.notifications.DiscordHookObject;
@@ -51,23 +50,24 @@ public class NGameUI extends GameUI
     private LocalizedResourceTimerDialog localizedResourceTimerDialog = null;
     public LocalizedResourceTimerService localizedResourceTimerService;
     public WaypointMovementService waypointMovementService;
+    public PingService pingService;
     public FishLocationService fishLocationService;
+    public PeerPositionService peerPositionService;
     public FishSearchWindow fishSearchWindow = null;
     public final Map<String, FishLocationDetailsWindow> openFishDetailWindows = new HashMap<>();
     public TreeLocationService treeLocationService;
     public TreeSearchWindow treeSearchWindow = null;
     public final Map<String, TreeLocationDetailsWindow> openTreeDetailWindows = new HashMap<>();
     public LabeledMarkService labeledMarkService;
-    public TerrainSearchWindow terrainSearchWindow = null;
+    public MapToolsWindow mapToolsWindow = null;
     public StudyDeskPlannerWidget studyDeskPlanner = null;
     public NDraggableWidget studyReportWidget = null;
     public DbStatsOverlay dbStatsOverlay = null;
     public nurgling.routes.ForagerPath activeBotPath = null;
 
-    // Local storage for ring settings
-    public IconRingConfig iconRingConfig;
-    private boolean ringSettingsApplied = false;
-    
+    /** Prospecting results waiting to be paired up with their window; see NProspecting. */
+    public final NProspecting.Pending prospecting = new NProspecting.Pending();
+
     // Temporary rings (session-only, for objects without GobIcon)
     // Maps resource name to ring enabled state
     public final Map<String, Boolean> tempRingResources = Collections.synchronizedMap(new HashMap<>());
@@ -80,7 +80,6 @@ public class NGameUI extends GameUI
     private static final Map<String, Float> WORLD_SPEED_MAP = new HashMap<>();
 
     private void initWorldSpeedMap() {
-        WORLD_SPEED_MAP.put("b7c199a4557503a8", 4.93f); // W16.1
         WORLD_SPEED_MAP.put("c646473983afec09", DEFAULT_WORLD_SPEED); // W16
     }
 
@@ -132,9 +131,6 @@ public class NGameUI extends GameUI
         // Initialize world-specific profile
         nurgling.profiles.ConfigFactory.initializeProfile(genus);
 
-        // Initialize local ring config
-        iconRingConfig = new IconRingConfig(genus);
-
         add(new NDraggableWidget(botsMenu = new NBotsMenu(), "botsmenu", botsMenu.sz.add(NDraggableWidget.delta)));
 
         // Initialize world speed
@@ -183,7 +179,12 @@ public class NGameUI extends GameUI
         }
 
 
-        add(new NDraggableWidget(questinfo = new NQuestInfo(), "quests", questinfo.sz.add(NDraggableWidget.delta)));
+        // Resizable, like the minimap and chat: the tracker scrolls its own content, so the
+        // player sets the panel size instead of the quest log deciding it.
+        NResizableWidget questwdg = new NResizableWidget(
+            questinfo = new NQuestInfo(), "quests", questinfo.sz.add(NDraggableWidget.delta));
+        questwdg.minSize = new Coord(200, 110);
+        add(questwdg);
         add(new NDraggableWidget(recentActionsPanel = new NRecentActionsPanel(), "recentactions", recentActionsPanel.sz.add(NDraggableWidget.delta)));
         // Add drink meter widget to show water/tea capacity (uses IMeter.fsz to match other meters)
         drinkMeter = new DrinkMeter();
@@ -200,7 +201,9 @@ public class NGameUI extends GameUI
         // Position BotsInterruptWidget (observer with gears) in center of screen
         add(biw = new BotsInterruptWidget(), new Coord(sz.x/2 - biw.sz.x/2, sz.y/2 - biw.sz.y/2));
         waypointMovementService = new WaypointMovementService(this);
+        pingService = new PingService(this);
         fishLocationService = new FishLocationService(this, genus);
+        peerPositionService = new PeerPositionService(this);
         treeLocationService = new TreeLocationService(this, genus);
         labeledMarkService = new LabeledMarkService(this, genus);
         // These widgets depend on areas which is created in GameUI constructor
@@ -254,29 +257,6 @@ public class NGameUI extends GameUI
 
         super.attached();
         initHeavyWidgets();
-        // Apply local ring settings to iconconf after it's loaded (only once)
-        if (!ringSettingsApplied) {
-            applyLocalRingSettings();
-            ringSettingsApplied = true;
-        }
-    }
-    
-    private void applyLocalRingSettings() {
-        if (iconRingConfig == null || iconconf == null) {
-            return;
-        }
-        
-        for (Map.Entry<String, Boolean> entry : iconRingConfig.getAllSettings().entrySet()) {
-            String iconResName = entry.getKey();
-            boolean ringEnabled = entry.getValue();
-            
-            // Find matching settings in iconconf
-            for (GobIcon.Setting setting : iconconf.settings.values()) {
-                if (setting.res != null && setting.res.name.equals(iconResName)) {
-                    setting.ring = ringEnabled;
-                }
-            }
-        }
     }
 
     private void initializeInventoryVisibility() {
@@ -308,10 +288,23 @@ public class NGameUI extends GameUI
         if(mmap != null && mmap instanceof NCornerMiniMap) {
             ((NCornerMiniMap) mmap).exploredArea.saveNow();
         }
+        /* Take this character's published position out on the way down. It would age out on its own
+         * within the minute, but that minute is a minute of showing someone who has left, and
+         * "logged out" and "standing still" are exactly the two states these markers exist to tell
+         * apart, so it is worth one delete to make the marker go the instant the player does. */
+        if(peerPositionService != null && nurgling.NCore.databaseManager != null
+           && nurgling.NCore.databaseManager.getPeerPositionService() != null) {
+            String profile = getGenus();
+            nurgling.NCore.databaseManager.getPeerPositionService()
+                .withdraw((profile == null || profile.isEmpty()) ? "global" : profile, chrid);
+            peerPositionService.clear();
+        }
         // This session's own core, not the ambient active-tab session - disposing
         // the wrong session's NCore here (e.g. when closing a backgrounded
         // multi-session character) stops that OTHER session's persistence and
-        // watcher threads while it's still meant to be running.
+        // watcher threads while it's still meant to be running. Upstream still
+        // reaches this point via NUtils.getUI() (ambient lookup) on its own side;
+        // kept on ui.core here deliberately.
         if(ui != null && ui.core != null)
             ui.core.dispose();
         // Shutdown ChunkNav to prevent thread accumulation on game restart
@@ -528,10 +521,14 @@ public class NGameUI extends GameUI
         String place = ((String) args[0]).intern();
         if (place == "craft") {
             if (craftwnd == null) {
-                craftwnd = add(new NCraftWindow(), new Coord(400, 200));
+                NCraftWindow cwnd = new NCraftWindow();
+                cwnd.posmem("craft");
+                craftwnd = add(cwnd, cwnd.restorepos(new Coord(400, 200)));
+                fitwdg(craftwnd);
             }
             craftwnd.add(child);
             craftwnd.pack();
+            fitwdg(craftwnd);
             craftwnd.raise();
             craftwnd.show();
         }
@@ -637,6 +634,29 @@ public class NGameUI extends GameUI
                 }
             } catch (IndexOutOfBoundsException | ConcurrentModificationException e) {
                 // Handle concurrent modification or index errors gracefully
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The meter widget itself rather than its bars, so callers can read the per-session
+     * values parsed off its tooltip (soft health, sparring) instead of IMeter's statics,
+     * which belong to whichever session updated last.
+     */
+    public IMeter getimeter (String name ) {
+        synchronized (meters) {
+            try {
+                for (Widget meter : new ArrayList<>(meters)) {
+                    if (meter instanceof IMeter) {
+                        Resource res = ((IMeter) meter).bg.get();
+                        if (res != null && res.basename().equals(name)) {
+                            return (IMeter) meter;
+                        }
+                    }
+                }
+            } catch (IndexOutOfBoundsException | ConcurrentModificationException | Loading e) {
                 return null;
             }
         }
