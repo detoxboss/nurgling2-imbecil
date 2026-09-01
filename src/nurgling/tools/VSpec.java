@@ -1808,6 +1808,8 @@ public class VSpec {
         baits.addAll(royalAntItems);
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/bayshrimp\",\"name\":\"Bay Shrimp\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/beelarvae\",\"name\":\"Bee Larvae\"}"));
+        // Only the bloated form is usable as bait; a plain Tick is not.
+        baits.add(new JSONObject("{\"static\":\"gfx/invobjs/tick-bloated\",\"name\":\"Bloated Tick\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/brimstonebutterfly\",\"name\":\"Brimstone Butterfly\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/cavemoth\",\"name\":\"Cave Moth\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/chumbait\",\"name\":\"Chum Bait\"}"));
@@ -1829,7 +1831,6 @@ public class VSpec {
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/silkegg\",\"name\":\"Silkworm Egg\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/springbumblebee\",\"name\":\"Springtime Bumblebee\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/stagbeetle\",\"name\":\"Stag Beetle\"}"));
-        baits.add(new JSONObject("{\"static\":\"gfx/invobjs/tick\",\"name\":\"Tick\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/waterstrider\",\"name\":\"Waterstrider\"}"));
         baits.add(new JSONObject("{\"static\":\"gfx/invobjs/woodworm\",\"name\":\"Woodworm\"}"));
         categories.put("Bait", baits);
@@ -2817,6 +2818,7 @@ public class VSpec {
         seedsAndBerries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-maple\",\"name\":\"Maple Samara\"}"));
         seedsAndBerries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-willow\",\"name\":\"Willow Catkin\"}"));
         seedsAndBerries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-yew\",\"name\":\"Yew Cones\"}"));
+        seedsAndBerries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-juniper\",\"name\":\"Juniper Berries\"}"));
         categories.put("Seed of Tree or Bush", seedsAndBerries);
 
         ArrayList<JSONObject> mantle = new ArrayList<>();
@@ -3128,7 +3130,7 @@ public class VSpec {
         NaturalResources.add(new JSONObject("{\"static\":\"gfx/invobjs/fairyshroom\",\"name\":\"Fairy Shroom\"}"));
         NaturalResources.add(new JSONObject("{\"static\":\"gfx/invobjs/driftkelp\",\"name\":\"Driftkelp\"}"));
         NaturalResources.add(new JSONObject("{\"static\":\"gfx/invobjs/guano\",\"name\":\"Bat Guano\"}"));
-        NaturalResources.add(new JSONObject("{\"static\":\"gfx/invobjs/heartwoodleaf\",\"name\":\"Heartwood Leaves\"}"));
+        NaturalResources.add(new JSONObject("{\"static\":\"gfx/invobjs/leaf-heartwood\",\"name\":\"Heartwood Leaves\"}"));
         categories.put("Natural Resources", NaturalResources);
 
         ArrayList<JSONObject> Misc = new ArrayList<>();

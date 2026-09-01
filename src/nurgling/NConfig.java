@@ -54,6 +54,8 @@ public class NConfig
         hideNature,
         hideEarthworm,
         hideConf,
+        /** Per-resource display settings from the gob "Configure" window; see nurgling.tools.GobCustomize. */
+        gobConf,
         hideBoxFillColor,
         hideBoxEdgeColor,
         hideBoxLineWidth,
@@ -110,7 +112,7 @@ public class NConfig
         smokeprop,
         worldexplorerprop,
         questNotified, lpassistent, fishingsettings,
-        serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, dbStatsOverlay, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
+        serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, shareHearthSecret, autoHearthSecret, sharePosition, showPeerPositions, dbGrantRole, dbStatsOverlay, mapShareMarkers, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
         temsmarktime, exploredAreaEnable, chunkNavOverlay, player_box, player_fov, temsmarkdist, tempmark, tempmarkIgnoreDist, gridbox, gridWallColor, useGlobalPf, useHFinGlobalPF, boxFillColor, boxEdgeColor, boxLineWidth, ropeAfterFeeding, ropeAfterTaiming, eatingConf, deersprop,dropConf, printpfmap, showPlayerCoords, fonts,
         areaRankPresets,  // Map of areaId -> Map of animalType -> presetName
         shortCupboards,
@@ -130,6 +132,7 @@ public class NConfig
         skipPluckingCocksInKFC,
         studyDeskLayout,
         waypointRetryOnStuck,
+        holdToMove,
         verboseCal,
         pluginsAllowUnsigned,  // Dev only: load external plugin jars without signature verification
         pluginsDir,            // Optional override for the plugin drop-folder (default: "plugins")
@@ -175,6 +178,7 @@ public class NConfig
         alarmDelayFrames,
         alwaysObfuscate,
         boughbeeprop,
+        questtrackerprop,
         foragerprop,
         trufflepigprop,
         buttonStyle,
@@ -182,6 +186,21 @@ public class NConfig
         showThingwallNames,
         showPartyMemberNames,
         trackingVectors,
+        // Combat HUD (FightBuffsInfo / FightActions panels)
+        combatShowOpeningsAsLetters,
+        combatShowHotkeys,
+        combatShowDamagePrediction,
+        combatSingleRowMoves,
+        combatShowEstimatedAgility,
+        combatShowHealthBar,
+        combatShowStaminaBar,
+        combatIncludeHHPText,
+        combatColorOffbalance,
+        combatColorReeling,
+        combatColorCornered,
+        combatColorDizzy,
+        combatColorMyIP,
+        combatColorEnemyIP,
         randomAreaColor,
         treeScaleDisableZoomHide,
         treeScaleMinThreshold,
@@ -223,6 +242,20 @@ public class NConfig
         // Bot path display
         showBotPathOnMinimap,
         showBotPathOnGround,
+        // Movement waypoints (alt+click) drawn in the 3D world
+        showWaypointsInWorld,
+        pingSound,
+        waypointColorActive,
+        waypointColorQueued,
+        // Ground trail to containers matching the item search
+        showStorageTrail,
+        storageTrailColor,
+        storageTrailMax,
+        recipeSearchAsItemSearch,
+        // Map tools panel
+        showTreeIcons,
+        showFishIcons,
+        prospectMarks,
         // Localization
         language
     }
@@ -275,6 +308,7 @@ public class NConfig
         conf.put(Key.showCSprite, true);
         conf.put(Key.hideEarthworm, true);  // true = show earthworms (checkbox unchecked by default)
         conf.put(Key.hideConf, nurgling.tools.GobHide.defaults());
+        conf.put(Key.gobConf, new HashMap<String, Object>());
         // Hidden-object boxes are styled independently of the general showBB boxes; these defaults
         // match the old shared values so upgrading users see no visual change.
         conf.put(Key.hideBoxFillColor, new Color(227, 28, 1, 195));
@@ -288,6 +322,9 @@ public class NConfig
         conf.put(Key.discordWebhookUrl, "");
         conf.put(Key.showGrid, false);
         conf.put(Key.showView, false);
+        conf.put(Key.showTreeIcons, true);
+        conf.put(Key.showFishIcons, true);
+        conf.put(Key.prospectMarks, new ProspectMarkSettings());
         conf.put(Key.disableWinAnim, true);
         conf.put(Key.disableMenugridKeys, false);
         conf.put(Key.baseurl, "https://raw.githubusercontent.com/aleksandrsvoboda/nurgling-release/stable/ver");
@@ -317,6 +354,14 @@ public class NConfig
         conf.put(Key.simplecrops, true);
         conf.put(Key.simpleInspect, false);
         conf.put(Key.ndbenable, false);
+        conf.put(Key.shareHearthSecret, true);
+        /* Live position markers are on out of the box: everyone sharing a database has already
+         * been let in, and the feature is worthless unless most of them are publishing. Both halves
+         * are separately switchable in Database settings. */
+        conf.put(Key.sharePosition, true);
+        conf.put(Key.showPeerPositions, true);
+        conf.put(Key.autoHearthSecret, true);
+        conf.put(Key.dbGrantRole, "PUBLIC");
         conf.put(Key.dbStatsOverlay, false);
         conf.put(Key.harvestautorefill, false);
         conf.put(Key.cleanupQContainers, false);
@@ -326,6 +371,7 @@ public class NConfig
         conf.put(Key.useHFinGlobalPF, false);
         conf.put(Key.sqlite, false);
         conf.put(Key.postgres, false);
+        conf.put(Key.mapShareMarkers, true);
         conf.put(Key.postgresMaxConnections, 5);
         conf.put(Key.dbFilePath, "");
         conf.put(Key.serverNode, "");
@@ -363,6 +409,7 @@ public class NConfig
         conf.put(Key.validateAllCropsBeforeHarvest, false);
         conf.put(Key.studyDeskLayout, "");
         conf.put(Key.waypointRetryOnStuck, true);
+        conf.put(Key.holdToMove, false);
         conf.put(Key.verboseCal, false);
         conf.put(Key.highlightRockTiles, true);
         conf.put(Key.showSpeedometer, false);
@@ -430,7 +477,7 @@ public class NConfig
         arearadprop.add(new NAreaRad("gfx/kritter/bear/bear", 100));
         arearadprop.add(new NAreaRad("gfx/kritter/bear/polarbear", 100));
         arearadprop.add(new NAreaRad("gfx/kritter/adder/adder", 100));
-        arearadprop.add(new NAreaRad("gfx/kritter/wildgoat/wildgoat", 100));
+        arearadprop.add(new NAreaRad("gfx/kritter/goat/wildgoat", 100));
         arearadprop.add(new NAreaRad("gfx/kritter/badger/badger", 100));
         arearadprop.add(new NAreaRad("gfx/kritter/lynx/lynx", 100));
         arearadprop.add(new NAreaRad("gfx/kritter/mammoth/mammoth", 100));
@@ -516,6 +563,22 @@ public class NConfig
         // Map tracking vectors
         conf.put(Key.trackingVectors, false);
         
+        // Combat HUD
+        conf.put(Key.combatShowOpeningsAsLetters, false);
+        conf.put(Key.combatShowHotkeys, true);
+        conf.put(Key.combatShowDamagePrediction, true);
+        conf.put(Key.combatSingleRowMoves, false);
+        conf.put(Key.combatShowEstimatedAgility, true);
+        conf.put(Key.combatShowHealthBar, true);
+        conf.put(Key.combatShowStaminaBar, true);
+        conf.put(Key.combatIncludeHHPText, false);
+        conf.put(Key.combatColorOffbalance, nurgling.conf.NCombatData.DEF_GREEN);
+        conf.put(Key.combatColorReeling, nurgling.conf.NCombatData.DEF_YELLOW);
+        conf.put(Key.combatColorCornered, nurgling.conf.NCombatData.DEF_RED);
+        conf.put(Key.combatColorDizzy, nurgling.conf.NCombatData.DEF_BLUE);
+        conf.put(Key.combatColorMyIP, nurgling.conf.NCombatData.DEF_MYIP);
+        conf.put(Key.combatColorEnemyIP, nurgling.conf.NCombatData.DEF_ENEMYIP);
+
         // Random area color on creation
         conf.put(Key.randomAreaColor, false);
         
@@ -597,6 +660,13 @@ public class NConfig
         // Bot path display
         conf.put(Key.showBotPathOnMinimap, false);
         conf.put(Key.showBotPathOnGround, false);
+        conf.put(Key.showWaypointsInWorld, true);
+        conf.put(Key.pingSound, true);
+
+        // Ground trail to containers matching the item search
+        conf.put(Key.showStorageTrail, true);
+        conf.put(Key.storageTrailMax, 3);
+        conf.put(Key.recipeSearchAsItemSearch, false);
     }
 
 
@@ -1008,6 +1078,9 @@ public class NConfig
                             case "NBoughBeeProp":
                                 res.add(new NBoughBeeProp(obj));
                                 break;
+                            case "NQuestTrackerProp":
+                                res.add(new NQuestTrackerProp(obj));
+                                break;
                             case "NForagerProp":
                                 res.add(new NForagerProp(obj));
                                 break;
@@ -1122,6 +1195,9 @@ public class NConfig
                                 case "ItemQualityOverlaySettings":
                                     conf.put(Key.valueOf(entry.getKey()), new ItemQualityOverlaySettings(hobj));
                                     break;
+                                case "ProspectMarkSettings":
+                                    conf.put(Key.valueOf(entry.getKey()), new ProspectMarkSettings(hobj));
+                                    break;
                                 case "Color":
                                     try {
                                         int red = ((Number) hobj.get("red")).intValue();
@@ -1233,9 +1309,32 @@ public class NConfig
                     isUpd = true;
                 }
             }
+
+            // Migration: the wildgoat entry shipped with a resource path that no gob ever has
+            // ("gfx/kritter/wildgoat/wildgoat"); the real one is "gfx/kritter/goat/wildgoat".
+            // Rename in place so the user's own vis/radius choices survive.
+            for (Iterator<NAreaRad> i = savedRads.iterator(); i.hasNext(); ) {
+                NAreaRad r = i.next();
+                if (r.name.equals("gfx/kritter/wildgoat/wildgoat")) {
+                    if (existingNames.contains("gfx/kritter/goat/wildgoat")) {
+                        i.remove();
+                    } else {
+                        r.name = "gfx/kritter/goat/wildgoat";
+                        existingNames.add(r.name);
+                    }
+                    isUpd = true;
+                }
+            }
+            if (!existingNames.contains("gfx/kritter/goat/wildgoat")) {
+                savedRads.add(new NAreaRad("gfx/kritter/goat/wildgoat", 100));
+                isUpd = true;
+            }
         }
 
         conf.put(Key.showCSprite,conf.get(Key.nextshowCSprite));
+        // Flat surface applies live now (see nurgling.tools.FlatWorld), which keeps both keys
+        // equal, so this only still does anything for a config where an older build staged a
+        // change that its restart never picked up.
         conf.put(Key.flatsurface,conf.get(Key.nextflatsurface));
 
         // Publish only now that conf is fully populated, so no other thread can
@@ -1552,8 +1651,10 @@ public class NConfig
                     newArea.id = existingArea.id;
                     mapView.glob.map.areas.put(newArea.id, newArea);
                 } else {
-                    // Add as new area with new id
-                    int maxId = 0;
+                    // Add as new area with new id. Stay above the DB's own
+                    // watermark too - tombstoned rows keep their ids and the
+                    // sync would delete an imported area that reused one.
+                    int maxId = NMapView.maxKnownDbAreaId();
                     for (NArea area : mapView.glob.map.areas.values()) {
                         if (area.id > maxId) {
                             maxId = area.id;

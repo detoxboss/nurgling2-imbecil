@@ -59,7 +59,7 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
     private Window invwnd;
     public Window equwnd;
     private Window makewnd;
-    private Window srchwnd;
+    private MenuSearch srchwnd;
     public Window iconwnd;
     private Coord makewndc = Utils.getprefc("makewndc", new Coord(400, 200));
     public Inventory maininv;
@@ -337,8 +337,8 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 			GameUI.this.setfocus(srchwnd);
 		    else
 			togglewnd(srchwnd);
-		    if(srchwnd.visible() && (srchwnd instanceof MenuSearch))
-			GameUI.this.setfocus(((MenuSearch)srchwnd).sbox);
+		    if(srchwnd.visible())
+			srchwnd.focussbox();
 		}
 	    }, bg.c);
     }
@@ -764,7 +764,9 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 	    NMenuGridWdg mwdg = new NMenuGridWdg();
 		menu = mwdg.setMenuGrid((MenuGrid)child);
 		add(new NDraggableWidget(mwdg,"menugrid",new Coord(mwdg.sz).add(NDraggableWidget.delta)));
-	    fitwdg(srchwnd = GameUI.this.add(new MenuSearch.Main(menu), Utils.getprefc("wndc-srch", UI.scale(200, 200))));
+	    MenuSearch.Main srch = new MenuSearch.Main(menu);
+	    srch.posmem("srch");
+	    fitwdg(srchwnd = GameUI.this.add(srch, srch.restorepos(UI.scale(200, 200))));
 	    srchwnd.reqclose(srchwnd::hide).hide();
 	} else if(place == "fight") {
 	   add(new NDraggableWidget( fv = (Fightview)child,"Fightview",UI.scale(230,380)));
@@ -798,6 +800,13 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 				else {
 					return super.keydown(ev);
 				}
+			}
+
+			@Override
+			public void hide() {
+				super.hide();
+				if(maininv instanceof nurgling.NInventory)
+					((nurgling.NInventory)maininv).wipeSearch();
 			}
 		};
 	    invwnd.add(maininv = (Inventory)child, Coord.z);
@@ -1112,12 +1121,16 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 
     private GobIcon.Settings loadiconconf() {
 	String nm = iconconfname();
+	GobIcon.Settings ret = null;
 	try {
-	    return(GobIcon.Settings.load(ui, nm));
+	    ret = GobIcon.Settings.load(ui, nm);
 	} catch(Exception e) {
 	    new Warning(e, "could not load icon-conf").issue();
 	}
-	return(new GobIcon.Settings(ui, nm));
+	if(ret == null)
+	    ret = new GobIcon.Settings(ui, nm);
+	nurgling.conf.NGlobalIconSettings.apply(ret);
+	return(ret);
     }
 
     public class CornerMap extends MiniMap implements Console.Directory {
@@ -1176,16 +1189,14 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 	}
 	private Map<String, Console.Command> cmdmap = new TreeMap<String, Console.Command>();
 	{
-	    cmdmap.put("rmseg", new Console.Command() {
-		    public void run(Console cons, String[] args) {
-			MiniMap.Location loc = curloc;
-			if(loc != null) {
-			    try(Locked lk = new Locked(file.lock.writeLock())) {
-				file.segments.remove(loc.seg.id);
-			    }
-			}
+	    cmdmap.put("rmseg", (cons, args) -> {
+		MiniMap.Location loc = curloc;
+		if(loc != null) {
+		    try(Locked lk = new Locked(file.lock.writeLock())) {
+			file.segments.remove(loc.seg.id);
 		    }
-		});
+		}
+	    });
 	}
 	public Map<String, Console.Command> findcmds() {
 	    return(cmdmap);
@@ -1740,36 +1751,30 @@ public class GameUI extends ConsoleHost implements Console.Directory, UI.Notice.
 
     private Map<String, Console.Command> cmdmap = new TreeMap<String, Console.Command>();
     {
-	cmdmap.put("afk", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    afk = true;
-		    wdgmsg("afk");
-		}
-	    });
-	cmdmap.put("act", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    Object[] ad = new Object[args.length - 1];
-		    System.arraycopy(args, 1, ad, 0, ad.length);
-		    wdgmsg("act", ad);
-		}
-	    });
-	cmdmap.put("chrmap", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    Utils.setpref("mapfile/" + chrid, args[1]);
-		}
-	    });
-	cmdmap.put("tool", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    try {
-			Object[] wargs = new Object[args.length - 2];
-			for(int i = 0; i < wargs.length; i++)
-			    wargs[i] = args[i + 2];
-			add(gettype(args[1]).create(ui, wargs), 200, 200);
-		    } catch(RuntimeException e) {
-			e.printStackTrace(Debug.log);
-		    }
-		}
-	    });
+	cmdmap.put("afk", (cons, args) -> {
+	    afk = true;
+	    wdgmsg("afk");
+	});
+	cmdmap.put("act", (cons, args) -> {
+		Object[] ad = new Object[args.length - 1];
+		System.arraycopy(args, 1, ad, 0, ad.length);
+		wdgmsg("act", ad);
+	});
+	/* nurgling: hafen's "belt" console command is omitted -- nurgling replaces
+	 * the belt widget with its own and has no `beltwdg' field. */
+	cmdmap.put("chrmap", (cons, args) -> {
+	    Utils.setpref("mapfile/" + GameUI.this.chrid, args[1]);
+	});
+	cmdmap.put("tool", (cons, args) -> {
+	    try {
+		Object[] wargs = new Object[args.length - 2];
+		for(int i = 0; i < wargs.length; i++)
+		    wargs[i] = args[i + 2];
+		add(gettype(args[1]).create(ui, wargs), 200, 200);
+	    } catch(RuntimeException e) {
+		e.printStackTrace(Debug.log);
+	    }
+	});
     }
     public Map<String, Console.Command> findcmds() {
 	return(cmdmap);

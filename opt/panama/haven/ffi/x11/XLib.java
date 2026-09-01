@@ -220,6 +220,43 @@ public abstract class XLib {
 
     public static final int XkbMajorVersion = 1;
     public static final int XkbMinorVersion = 0;
+    public static final int XkbNumKbdGroups = 4;
+    public static final int XkbNumVirtualMods = 16;
+    public static final int XkbNumIndicators = 32;
+    public static final int XkbKeyNameLength = 4;
+    public static final int XkbUseCoreKbd = 0x0100;
+    public static final int XkbClientMapMask     = 1 << 0;
+    public static final int XkbServerMapMask     = 1 << 1;
+    public static final int XkbCompatMapMask     = 1 << 2;
+    public static final int XkbIndicatorMapMask  = 1 << 3;
+    public static final int XkbNamesMask         = 1 << 4;
+    public static final int XkbGeometryMask      = 1 << 5;
+    public static final int XkbControlsMask      = 1 << 6;
+    public static final int XkbKeyTypesMask           = (1<<0);
+    public static final int XkbKeySymsMask            = (1<<1);
+    public static final int XkbModifierMapMask        = (1<<2);
+    public static final int XkbExplicitComponentsMask = (1<<3);
+    public static final int XkbKeyActionsMask         = (1<<4);
+    public static final int XkbKeyBehaviorsMask       = (1<<5);
+    public static final int XkbVirtualModsMask        = (1<<6);
+    public static final int XkbVirtualModMapMask      = (1<<7);
+    public static final int XkbKeycodesNameMask    = (1<<0);
+    public static final int XkbGeometryNameMask    = (1<<1);
+    public static final int XkbSymbolsNameMask     = (1<<2);
+    public static final int XkbPhysSymbolsNameMask = (1<<3);
+    public static final int XkbTypesNameMask       = (1<<4);
+    public static final int XkbCompatNameMask      = (1<<5);
+    public static final int XkbKeyTypeNamesMask    = (1<<6);
+    public static final int XkbKTLevelNamesMask    = (1<<7);
+    public static final int XkbIndicatorNamesMask  = (1<<8);
+    public static final int XkbKeyNamesMask        = (1<<9);
+    public static final int XkbKeyAliasesMask      = (1<<10);
+    public static final int XkbVirtualModNamesMask = (1<<11);
+    public static final int XkbGroupNamesMask      = (1<<12);
+    public static final int XkbRGNamesMask         = (1<<13);
+    public static final int XkbWrapIntoRange     = 0x00;
+    public static final int XkbClampIntoRange    = 0x40;
+    public static final int XkbRedirectIntoRange = 0x80;
 
     public static final long USPosition = (1L << 0);
     public static final long USSize = (1L << 1);
@@ -729,6 +766,30 @@ public abstract class XLib {
 	}
     }
 
+    public static interface XrmDatabase {}
+
+    public static class XrmValue {
+	public final String type;
+	public final byte[] data;
+
+	public XrmValue(String type, byte[] data) {
+	    this.type = type;
+	    this.data = data;
+	}
+
+	public String string() {
+	    if(!Utils.eq(type, "String"))
+		throw(new IllegalArgumentException(type));
+	    if((data.length == 0) || (data[data.length - 1] != 0))
+		throw(new IllegalArgumentException(Utils.bprint.enc(data)));
+	    return(new String(data, 0, data.length - 1, C_CHARSET));
+	}
+
+	public String toString() {
+	    return(type + ": " + ((data == null) ? "''" : Utils.bprint.enc(data)));
+	}
+    }
+
     public static class XSizeHints {
 	public long flags;
 	public int x, y;
@@ -752,6 +813,64 @@ public abstract class XLib {
 	    this.major = major;
 	    this.minor = minor;
 	}
+    }
+
+    public static interface XkbSymMap {
+	public XID[][] keysyms();
+	public int groupinfo();
+	public default int egroup(int g) {
+	    if(g < 0)
+		throw(new IllegalArgumentException());
+	    int inf = groupinfo();
+	    int n = inf & 0x0f;
+	    if(g < n)
+		return(g);
+	    int rb = inf & 0xc0;
+	    int rn = (inf & 0x30) >> 4;
+	    switch(rb) {
+	    case XkbClampIntoRange: return(Math.max(Math.min(g, n - 1), 0));
+	    case XkbRedirectIntoRange: return(Math.max(Math.min(rn, n - 1), 0));
+	    case XkbWrapIntoRange: default: return(g % n);
+	    }
+	}
+    }
+
+    public static abstract class XkbClientMap extends StructInstance {
+	protected XkbClientMap(MemorySegment mem) {
+	    super(mem);
+	}
+
+	MemorySegment mem() {return(mem);}
+
+	public abstract List<? extends XkbSymMap> key_sym_map();
+	public abstract byte[] modmap();
+    }
+
+    public static abstract class XkbNames extends StructInstance {
+	protected XkbNames(MemorySegment mem) {
+	    super(mem);
+	}
+
+	MemorySegment mem() {return(mem);}
+
+	public abstract Atom[] vmods();
+	public abstract List<String> keys();
+	public abstract List<Pair<String, String>> key_aliases();
+    }
+
+    public static abstract class XkbDesc extends StructInstance {
+	protected XkbDesc(MemorySegment mem) {
+	    super(mem);
+	}
+
+	MemorySegment mem() {return(mem);}
+
+	public abstract int flags();
+	public abstract int device_spec();
+	public abstract int min_key_code();
+	public abstract int max_key_code();
+	public abstract XkbClientMap map();
+	public abstract XkbNames names();
     }
 
     private static final ThreadLocal<Supplier<RuntimeException>> lasterror = new ThreadLocal<>();
@@ -832,9 +951,20 @@ public abstract class XLib {
     public abstract int XSetSelectionOwner(XLib.Display dpy, Atom selection, XID owner, long time);
     public abstract int XConvertSelection(XLib.Display dpy, Atom selection, Atom target, Atom property, XID requestor, long time);
 
+    public abstract void XrmInitialize();
+    public abstract String XResourceManagerString(Display dpy);
+    public abstract String XScreenResourceString(Screen screen);
+    public abstract XrmDatabase XrmGetStringDatabase(String data);
+    public abstract XrmDatabase XrmGetFileDatabase(String filename);
+    public abstract XrmDatabase XrmMergeDatabases(XrmDatabase source, XrmDatabase target);
+    public abstract XrmValue XrmGetResource(XrmDatabase database, String name, String cls);
+
     public abstract boolean XkbLibraryVersion(int[] version);
     public abstract XkbExtensionInfo XkbQueryExtension(Display dpy, int major, int minor);
-    public abstract boolean XkbSetDetectableAutoRepeat(XLib.Display dpy, boolean detectable, boolean[] supported);
+    public abstract boolean XkbSetDetectableAutoRepeat(Display dpy, boolean detectable, boolean[] supported);
+    public abstract XkbDesc XkbGetKeyboard(Display dpy, int which, int device_spec);
+    public abstract XkbDesc XkbGetMap(Display dpy, int which, int device_spec);
+    public abstract void XkbGetNames(Display dpy, int which, XkbDesc xkb);
 
     /* Helper functions */
     public int XChangeProperty(XLib.Display dpy, XID w, Atom property, Atom type, int mode, Atom[] data) {
@@ -882,6 +1012,7 @@ public abstract class XLib {
     public int ScreenCount(Display dpy) {return(dpy.nscreens());}
     public Screen ScreenOfDisplay(Display dpy, int scr) {return(dpy.lscreens().get(scr));}
     public XID DefaultRootWindow(Display dpy) {return(ScreenOfDisplay(dpy, DefaultScreen(dpy)).root());}
+    public int XkbGroupForCoreState(int s) {return((s >> 13) & 0x3);}
 
     static class libX11_so_6 extends XLib {
 	static final MemoryLayout C_Status = C_INT;
@@ -1666,7 +1797,7 @@ public abstract class XLib {
 	    public List<Screen> lscreens() {return(new MemArray<Screen>(screens(), _Screen, nscreens(), Screen::new));}
 	}
 
-    public static final StructLayout _Screen = struct(new MemoryLayout[] {
+	public static final StructLayout _Screen = struct(new MemoryLayout[] {
 	    ADDRESS.withName("ext_data"),
 	    ADDRESS.withName("display"),
 	    C_XID.withName("root"),
@@ -2352,8 +2483,7 @@ public abstract class XLib {
 	    } finally {
 		checkerror();
 	    }
-	    String ret = name.reinterpret(Long.MAX_VALUE).getString(0, C_CHARSET);
-	    return(ret);
+	    return(nullp(name) ? null : name.reinterpret(Long.MAX_VALUE).getString(0, C_CHARSET));
 	}
 
 	private final MethodHandle XLookupString = ld.downcallHandle(xlib.find("XLookupString").get(), FunctionDescriptor.of(C_INT, ADDRESS, ADDRESS, C_INT, ADDRESS, ADDRESS));
@@ -2632,6 +2762,147 @@ public abstract class XLib {
 	    }
 	}
 
+	static class XrmDatabase implements XLib.XrmDatabase {
+	    private final MemorySegment[] memp;
+	    private final Runnable clean;
+
+	    public XrmDatabase(libX11_so_6 lib, MemorySegment mem) {
+		MemorySegment[] memp = {mem};
+		this.memp = memp;
+		this.clean = Finalizer.finalize(this, () -> {
+		    if(memp[0] != null)
+			lib.XrmDestroyDatabase(memp[0]);
+		});
+	    }
+
+	    MemorySegment mem() {return(memp[0]);}
+
+	    void invalid() {
+		memp[0] = null;
+	    }
+	}
+
+	private final MethodHandle XrmDestroyDatabase = ld.downcallHandle(xlib.find("XrmDestroyDatabase").get(), FunctionDescriptor.ofVoid(ADDRESS));
+	void XrmDestroyDatabase(MemorySegment mem) {
+	    try {
+		XrmDestroyDatabase.invoke(mem);
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    }
+	}
+
+	private final MethodHandle XResourceManagerString = ld.downcallHandle(xlib.find("XResourceManagerString").get(), FunctionDescriptor.of(ADDRESS, ADDRESS));
+	public String XResourceManagerString(XLib.Display dpy) {
+	    MemorySegment rv;
+	    try {
+		rv = (MemorySegment)XResourceManagerString.invoke(((Display)dpy).mem());
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    }
+	    return(nullp(rv) ? null : (rv.reinterpret(Long.MAX_VALUE).getString(0, C_CHARSET)));
+	}
+
+	private final MethodHandle XScreenResourceString = ld.downcallHandle(xlib.find("XScreenResourceString").get(), FunctionDescriptor.of(ADDRESS, ADDRESS));
+	public String XScreenResourceString(XLib.Screen screen) {
+	    MemorySegment rv;
+	    try {
+		rv = (MemorySegment)XScreenResourceString.invoke(((Screen)screen).mem());
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    }
+	    String ret = null;
+	    if(!nullp(rv)) {
+		ret = (rv.reinterpret(Long.MAX_VALUE).getString(0, C_CHARSET));
+		XFree(rv);
+	    }
+	    return(ret);
+	}
+
+	private final MethodHandle XrmInitialize = ld.downcallHandle(xlib.find("XrmInitialize").get(), FunctionDescriptor.ofVoid());
+	public void XrmInitialize() {
+	    try {
+		XrmInitialize.invoke();
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    }
+	}
+
+	private final MethodHandle XrmGetStringDatabase = ld.downcallHandle(xlib.find("XrmGetStringDatabase").get(), FunctionDescriptor.of(ADDRESS, ADDRESS));
+	public XrmDatabase XrmGetStringDatabase(String data) {
+	    if(data == null)
+		return(null);
+	    try(Arena st = Arena.ofConfined()) {
+		MemorySegment rv;
+		try {
+		    rv = (MemorySegment)XrmGetStringDatabase.invoke(st.allocateFrom(data, C_CHARSET));
+		} catch(Throwable e) {
+		    throw(new RuntimeException(e));
+		}
+		return(nullp(rv) ? null : new XrmDatabase(this, rv));
+	    }
+	}
+
+	private final MethodHandle XrmGetFileDatabase = ld.downcallHandle(xlib.find("XrmGetFileDatabase").get(), FunctionDescriptor.of(ADDRESS, ADDRESS));
+	public XrmDatabase XrmGetFileDatabase(String filename) {
+	    try(Arena st = Arena.ofConfined()) {
+		MemorySegment rv;
+		try {
+		    rv = (MemorySegment)XrmGetFileDatabase.invoke(st.allocateFrom(filename, C_CHARSET));
+		} catch(Throwable e) {
+		    throw(new RuntimeException(e));
+		}
+		return(nullp(rv) ? null : new XrmDatabase(this, rv));
+	    }
+	}
+
+	private final MethodHandle XrmMergeDatabases = ld.downcallHandle(xlib.find("XrmMergeDatabases").get(), FunctionDescriptor.ofVoid(ADDRESS, ADDRESS));
+	public XLib.XrmDatabase XrmMergeDatabases(XLib.XrmDatabase source, XLib.XrmDatabase target) {
+	    if(source == null)
+		return(target);
+	    try(Arena st = Arena.ofConfined()) {
+		MemorySegment tbuf = st.allocateFrom(ADDRESS, (target == null) ? MemorySegment.NULL : (((XrmDatabase)target).mem()));
+		try {
+		    XrmMergeDatabases.invoke(((XrmDatabase)source).mem(), tbuf);
+		} catch(Throwable e) {
+		    throw(new RuntimeException(e));
+		}
+		((XrmDatabase)source).invalid();
+		if(target != null)
+		    ((XrmDatabase)target).invalid();
+		MemorySegment rv = tbuf.get(ADDRESS, 0);
+		return(nullp(rv) ? null : new XrmDatabase(this, rv));
+	    }
+	}
+
+	public static final StructLayout _XrmValue = struct(new MemoryLayout[] {
+		C_INT.withName("size"),
+		ADDRESS.withName("addr"),
+	    });
+	private static final VarHandle _XrmValue_size = _XrmValue.varHandle(PathElement.groupElement("size"));
+	private static final VarHandle _XrmValue_addr = _XrmValue.varHandle(PathElement.groupElement("addr"));
+
+	private final MethodHandle XrmGetResource = ld.downcallHandle(xlib.find("XrmGetResource").get(), FunctionDescriptor.of(C_XBool, ADDRESS, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+	public XrmValue XrmGetResource(XLib.XrmDatabase database, String name, String cls) {
+	    if(database == null)
+		return(null);
+	    try(Arena st = Arena.ofConfined()) {
+		int rv;
+		MemorySegment rtbuf = st.allocate(ADDRESS), rvbuf = st.allocate(_XrmValue);
+		try {
+		    rv = (int)XrmGetResource.invoke(((XrmDatabase)database).mem(), st.allocateFrom(name, C_CHARSET), st.allocateFrom(cls, C_CHARSET), rtbuf, rvbuf);
+		} catch(Throwable e) {
+		    throw(new RuntimeException(e));
+		}
+		if(rv == 0)
+		    return(null);
+		MemorySegment rt = rtbuf.get(ADDRESS, 0);
+		int sz = (int)_XrmValue_size.get(rvbuf, 0);
+		MemorySegment data = (MemorySegment)_XrmValue_addr.get(rvbuf, 0);
+		return(new XrmValue(nullp(rt) ? null : rt.reinterpret(Long.MAX_VALUE).getString(0, C_CHARSET),
+				    nullp(data) ? null : memcpy(new byte[sz], data.reinterpret(sz), 0, 0, sz)));
+	    }
+	}
+
 	private final MethodHandle XkbLibraryVersion = ld.downcallHandle(xlib.find("XkbLibraryVersion").get(), FunctionDescriptor.of(C_XBool, ADDRESS, ADDRESS));
 	public boolean XkbLibraryVersion(int[] version) {
 	    try(Arena st = Arena.ofConfined()) {
@@ -2691,6 +2962,250 @@ public abstract class XLib {
 		    supported[0] = (getint(sbuf, 0, C_XBool, false) != 0);
 		return(ret != 0);
 	    }
+	}
+
+	public static final StructLayout _XkbSymMapRec = struct(new MemoryLayout[] {
+	    MemoryLayout.sequenceLayout(XkbNumKbdGroups, C_CHAR).withName("kt_index"),
+	    C_CHAR.withName("group_info"),
+	    C_CHAR.withName("width"),
+	    C_SHORT.withName("offset"),
+	});
+	public static class XkbSymMap extends StructInstance implements XLib.XkbSymMap {
+	    public final XkbClientMap map;
+
+	    private XkbSymMap(XkbClientMap map, MemorySegment mem) {
+		super(mem);
+		this.map = map;
+	    }
+
+	    protected StructLayout $layout() {return(_XkbSymMapRec);}
+	    
+	    private static final VarHandle group_info = _XkbSymMapRec.varHandle(PathElement.groupElement("group_info"));
+	    public int groupinfo() {return((int)group_info.get(mem, 0));}
+
+	    private static final VarHandle width = _XkbSymMapRec.varHandle(PathElement.groupElement("width"));
+	    private static final VarHandle offset = _XkbSymMapRec.varHandle(PathElement.groupElement("offset"));
+	    public XID[][] keysyms() {
+		int gn = groupinfo() & 0x0f;
+		int w = (int)width.get(mem, 0);
+		int off = (int)offset.get(mem, 0);
+		MemorySegment syms = map.syms();
+		XID[][] ret = new XID[gn][w];
+		for(int g = 0; g < gn; g++) {
+		    for(int l = 0; l < w; l++)
+			ret[g][l] = XID.of(getint(syms, C_XID.byteSize() * off++, C_XID, false));
+		}
+		return(ret);
+	    }
+	}
+
+	public static final StructLayout _XkbClientMapRec = struct(new MemoryLayout[] {
+	    C_CHAR.withName("size_types"),
+	    C_CHAR.withName("num_types"),
+	    ADDRESS.withName("types"),
+	    C_SHORT.withName("size_syms"),
+	    C_SHORT.withName("num_syms"),
+	    ADDRESS.withName("syms"),
+	    ADDRESS.withName("key_sym_map"),
+	    ADDRESS.withName("modmap"),
+	});
+	public static class XkbClientMap extends XLib.XkbClientMap {
+	    public final XkbDesc xkb;
+
+	    private XkbClientMap(XkbDesc xkb, MemorySegment mem) {
+		super(mem);
+		this.xkb = xkb;
+	    }
+
+	    protected StructLayout $layout() {return(_XkbClientMapRec);}
+
+	    private static final VarHandle size_syms = _XkbClientMapRec.varHandle(PathElement.groupElement("size_syms"));
+	    private static final VarHandle syms = _XkbClientMapRec.varHandle(PathElement.groupElement("syms"));
+	    MemorySegment syms() {MemorySegment rv = (MemorySegment)syms.get(mem, 0); return(nullp(rv) ? null : rv.reinterpret(((int)size_syms.get(mem, 0)) * C_XID.byteSize()));}
+	    private static final VarHandle key_sym_map = _XkbClientMapRec.varHandle(PathElement.groupElement("key_sym_map"));
+	    public List<XkbSymMap> key_sym_map() {return(new MemArray<XkbSymMap>((MemorySegment)key_sym_map.get(mem, 0),
+										 _XkbSymMapRec,
+										 xkb.max_key_code() + 1,
+										 mem -> new XkbSymMap(this, mem)));}
+
+	    private static final VarHandle modmap = _XkbClientMapRec.varHandle(PathElement.groupElement("modmap"));
+	    public byte[] modmap() {
+		MemorySegment p = (MemorySegment)modmap.get(mem, 0);
+		if(nullp(p))
+		    return(null);
+		byte[] ret = new byte[xkb.max_key_code() + 1];
+		p = p.reinterpret(C_CHAR.byteSize() * ret.length);
+		for(int i = 0; i < ret.length; i++)
+		    ret[i] = (byte)getint(p, C_CHAR.byteSize() * i, C_CHAR, false);
+		return(ret);
+	    }
+	}
+
+	public static final StructLayout _XkbKeyNameRec = struct(new MemoryLayout[] {
+	    MemoryLayout.sequenceLayout(XkbKeyNameLength, C_CHAR).withName("name"),
+	});
+	public static final StructLayout _XkbKeyAliasRec = struct(new MemoryLayout[] {
+	    MemoryLayout.sequenceLayout(XkbKeyNameLength, C_CHAR).withName("real"),
+	    MemoryLayout.sequenceLayout(XkbKeyNameLength, C_CHAR).withName("alias"),
+	});
+	public static final StructLayout _XkbNamesRec = struct(new MemoryLayout[] {
+	    C_Atom.withName("keycodes"),
+	    C_Atom.withName("geometry"),
+	    C_Atom.withName("symbols"),
+	    C_Atom.withName("types"),
+	    C_Atom.withName("compat"),
+	    MemoryLayout.sequenceLayout(XkbNumVirtualMods, C_Atom).withName("vmods"),
+	    MemoryLayout.sequenceLayout(XkbNumIndicators, C_Atom).withName("indicators"),
+	    MemoryLayout.sequenceLayout(XkbNumKbdGroups, C_Atom).withName("groups"),
+	    ADDRESS.withName("keys"),
+	    ADDRESS.withName("key_aliases"),
+	    ADDRESS.withName("radio_groups"),
+	    C_Atom.withName("phys_symbols"),
+	    C_CHAR.withName("num_keys"),
+	    C_CHAR.withName("num_key_aliases"),
+	    C_SHORT.withName("num_rg"),
+	});
+	public static class XkbNames extends XLib.XkbNames {
+	    public final XkbDesc xkb;
+
+	    private XkbNames(XkbDesc xkb, MemorySegment mem) {
+		super(mem);
+		this.xkb = xkb;
+	    }
+
+	    protected StructLayout $layout() {return(_XkbNamesRec);}
+
+	    private static final VarHandle vmods = _XkbNamesRec.varHandle(PathElement.groupElement("vmods"), PathElement.sequenceElement());
+	    public Atom[] vmods() {
+		Atom[] ret = new Atom[XkbNumVirtualMods];
+		for(int i = 0; i < XkbNumVirtualMods; i++)
+		    ret[i] = Atom.of((long)vmods.get(mem, 0, i));
+		return(ret);
+	    }
+
+	    private static String name2str(MemorySegment mem) {
+		byte[] name = memcpy(mem, 0, (int)C_CHAR.byteSize() * XkbKeyNameLength);
+		int l = XkbKeyNameLength;
+		while((l > 0) && (name[l - 1] == 0)) l--;
+		return(new String(name, 0, l, Utils.ascii));
+	    }
+
+	    private static final long kar_real = _XkbKeyAliasRec.byteOffset(PathElement.groupElement("real"));
+	    private static final long kar_alias = _XkbKeyAliasRec.byteOffset(PathElement.groupElement("alias"));
+	    private static Pair<String, String> alias2pair(MemorySegment mem) {
+		return(Pair.of(name2str(mem.asSlice(kar_real,  _XkbKeyNameRec.byteSize())),
+			       name2str(mem.asSlice(kar_alias, _XkbKeyNameRec.byteSize()))));
+	    }
+
+	    private static final VarHandle keys = _XkbNamesRec.varHandle(PathElement.groupElement("keys"));
+	    private static final VarHandle num_keys = _XkbNamesRec.varHandle(PathElement.groupElement("num_keys"));
+	    public List<String> keys() {return(new MemArray<String>((MemorySegment)keys.get(mem, 0), _XkbKeyNameRec,
+								    (int)num_keys.get(mem, 0) & 0xff,
+								    XkbNames::name2str));}
+
+	    private static final VarHandle key_aliases = _XkbNamesRec.varHandle(PathElement.groupElement("key_aliases"));
+	    private static final VarHandle num_key_aliases = _XkbNamesRec.varHandle(PathElement.groupElement("num_key_aliases"));
+	    public List<Pair<String, String>> key_aliases() {
+		return(new MemArray<Pair<String, String>>((MemorySegment)key_aliases.get(mem, 0), _XkbKeyAliasRec,
+							  (int)num_key_aliases.get(mem, 0) & 0xff,
+							  XkbNames::alias2pair));
+	    }
+	}
+
+	public static final StructLayout _XkbDescRec = struct(new MemoryLayout[] {
+	    ADDRESS.withName("dpy"),
+	    C_SHORT.withName("flags"),
+	    C_SHORT.withName("device_spec"),
+	    C_KeyCode.withName("min_key_code"),
+	    C_KeyCode.withName("max_key_code"),
+
+	    ADDRESS.withName("ctrls"),
+	    ADDRESS.withName("server"),
+	    ADDRESS.withName("map"),
+	    ADDRESS.withName("indicators"),
+	    ADDRESS.withName("names"),
+	    ADDRESS.withName("compat"),
+	    ADDRESS.withName("geom"),
+	});
+	public static class XkbDesc extends XLib.XkbDesc {
+	    private XkbDesc(MemorySegment mem) {
+		super(mem);
+	    }
+
+	    protected StructLayout $layout() {return(_XkbDescRec);}
+
+	    private static final VarHandle flags = _XkbDescRec.varHandle(PathElement.groupElement("flags"));
+	    public int flags() {return((int)flags.get(mem, 0) & 0xffff);}
+	    private static final VarHandle device_spec = _XkbDescRec.varHandle(PathElement.groupElement("device_spec"));
+	    public int device_spec() {return((int)device_spec.get(mem, 0) & 0xffff);}
+	    private static final VarHandle min_key_code = _XkbDescRec.varHandle(PathElement.groupElement("min_key_code"));
+	    public int min_key_code() {return((int)min_key_code.get(mem, 0) & 0xff);}
+	    private static final VarHandle max_key_code = _XkbDescRec.varHandle(PathElement.groupElement("max_key_code"));
+	    public int max_key_code() {return((int)max_key_code.get(mem, 0) & 0xff);}
+
+	    private static final VarHandle map = _XkbDescRec.varHandle(PathElement.groupElement("map"));
+	    public XkbClientMap map() {MemorySegment rv = (MemorySegment)map.get(mem, 0); return(nullp(rv) ? null : new XkbClientMap(this, rv));}
+	    private static final VarHandle names = _XkbDescRec.varHandle(PathElement.groupElement("names"));
+	    public XkbNames names() {MemorySegment rv = (MemorySegment)names.get(mem, 0); return(nullp(rv) ? null : new XkbNames(this, rv));}
+	}
+
+	private final MethodHandle XkbFreeKeyboard = ld.downcallHandle(xlib.find("XkbFreeKeyboard").get(), FunctionDescriptor.ofVoid(ADDRESS, C_INT, C_XBool));
+	void XkbFreeKeyboard(XLib.XkbDesc xkb, int which, boolean free_all) {
+	    try {
+		XkbFreeKeyboard.invoke(xkb.mem(), which, free_all ? 1 : 0);
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    } finally {
+		checkerror();
+	    }
+	}
+
+	private final MethodHandle XkbGetKeyboard = ld.downcallHandle(xlib.find("XkbGetKeyboard").get(), FunctionDescriptor.of(ADDRESS, ADDRESS, C_INT, C_INT));
+	public XkbDesc XkbGetKeyboard(XLib.Display dpy, int which, int device_spec) {
+	    MemorySegment rv;
+	    try {
+		rv = (MemorySegment)XkbGetKeyboard.invoke(dpy.mem(), which, device_spec);
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    } finally {
+		checkerror();
+	    }
+	    if(nullp(rv))
+		return(null);
+	    XkbDesc xkb = new XkbDesc(rv);
+	    Finalizer.finalize(xkb, () -> XkbFreeKeyboard(xkb, 0, true));
+	    return(xkb);
+	}
+
+	private final MethodHandle XkbGetMap = ld.downcallHandle(xlib.find("XkbGetMap").get(), FunctionDescriptor.of(ADDRESS, ADDRESS, C_INT, C_INT));
+	public XkbDesc XkbGetMap(XLib.Display dpy, int which, int device_spec) {
+	    MemorySegment rv;
+	    try {
+		rv = (MemorySegment)XkbGetMap.invoke(dpy.mem(), which, device_spec);
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    } finally {
+		checkerror();
+	    }
+	    if(nullp(rv))
+		return(null);
+	    XkbDesc xkb = new XkbDesc(rv);
+	    Finalizer.finalize(xkb, () -> XkbFreeKeyboard(xkb, 0, true));
+	    return(xkb);
+	}
+
+	private final MethodHandle XkbGetNames = ld.downcallHandle(xlib.find("XkbGetNames").get(), FunctionDescriptor.of(C_Status, ADDRESS, C_INT, ADDRESS));
+	public void XkbGetNames(XLib.Display dpy, int which, XLib.XkbDesc xkb) {
+	    int rv;
+	    try {
+		rv = (int)XkbGetNames.invoke(dpy.mem(), which, xkb.mem());
+	    } catch(Throwable e) {
+		throw(new RuntimeException(e));
+	    } finally {
+		checkerror();
+	    }
+	    if(rv != Success)
+		throw(new XStatusException(rv));
 	}
 
 	public XSetWindowAttributes XSetWindowAttributes() {return(new XSetWindowAttributes());}

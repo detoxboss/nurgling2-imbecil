@@ -1037,7 +1037,7 @@ public class Utils {
 	return(ret.toArray(new String[0]));
     }
 
-    static int atoi(String a) {
+    public static int atoi(String a) {
 	try {
 	    return(Integer.parseInt(a));
 	} catch(NumberFormatException e) {
@@ -1094,7 +1094,6 @@ public class Utils {
 		    return(task.run());
 		} catch(RuntimeException | IOException exc) {
 		    if(last != null)
-			{
 			exc.addSuppressed(last);
 		    last = exc;
 		    if(r < retimes.length) {
@@ -1107,7 +1106,6 @@ public class Utils {
 		    } else {
 			throw(exc);
 		    }
-			}
 		}
 	    }
 	} finally {
@@ -1361,8 +1359,52 @@ public class Utils {
 	return(ol);
     }
 
+    /* As outline(), but optionally lays a second, diagonal ring of pixels around the
+     * glyph. The thin ring vanishes against busy backgrounds at high UI scales; the
+     * thick one is what the combat HUD uses to stay readable over the map. */
+    public static BufferedImage outline(BufferedImage img, Color col, boolean thick) {
+	Coord sz = imgsz(img).add(2, 2);
+	BufferedImage ol = TexI.mkbuf(sz);
+	Object fcol = ol.getColorModel().getDataElements(col.getRGB(), null);
+	Raster src = img.getRaster();
+	WritableRaster dst = ol.getRaster();
+	for(int y = 0; y < sz.y; y++) {
+	    for(int x = 0; x < sz.x; x++) {
+		boolean t;
+		if((y == 0) || (x == 0) || (y == sz.y - 1) || (x == sz.x - 1)) {
+		    t = true;
+		} else {
+		    t = src.getSample(x - 1, y - 1, 3) < 250;
+		}
+		if(!t)
+		    continue;
+		if(((x > 1) && (y > 0) && (y < sz.y - 1) && (src.getSample(x - 2, y - 1, 3) >= 250)) ||
+		   ((x > 0) && (y > 1) && (x < sz.x - 1) && (src.getSample(x - 1, y - 2, 3) >= 250)) ||
+		   ((x < sz.x - 2) && (y > 0) && (y < sz.y - 1) && (src.getSample(x, y - 1, 3) >= 250)) ||
+		   ((x > 0) && (y < sz.y - 2) && (x < sz.x - 1) && (src.getSample(x - 1, y, 3) >= 250)))
+		    dst.setDataElements(x, y, fcol);
+		if(thick) {
+		    if(((x > 1) && (y > 1) && (src.getSample(x - 2, y - 2, 3) >= 250)) ||
+		       ((x < sz.x - 2) && (y < sz.y - 2) && (src.getSample(x, y, 3) >= 250)) ||
+		       ((x < sz.x - 2) && (y > 1) && (src.getSample(x, y - 2, 3) >= 250)) ||
+		       ((x > 1) && (y < sz.y - 2) && (src.getSample(x - 2, y, 3) >= 250)))
+			dst.setDataElements(x, y, fcol);
+		}
+	    }
+	}
+	return(ol);
+    }
+
     public static BufferedImage outline2(BufferedImage img, Color col) {
 	BufferedImage ol = outline(img, col);
+	Graphics g = ol.getGraphics();
+	g.drawImage(img, 1, 1, null);
+	g.dispose();
+	return(ol);
+    }
+
+    public static BufferedImage outline2(BufferedImage img, Color col, boolean thick) {
+	BufferedImage ol = outline(img, col, thick);
 	Graphics g = ol.getGraphics();
 	g.drawImage(img, 1, 1, null);
 	g.dispose();
@@ -2717,73 +2759,4 @@ public class Utils {
 	    }
 	}
     };
-
-    static {
-	Console.setscmd("die", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    throw(new Error("Triggered death"));
-		}
-	    });
-	Console.setscmd("sleep", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    long ms = (long)(Double.parseDouble(args[1]) * 1000);
-		    try {
-			Thread.sleep(ms);
-		    } catch(InterruptedException e) {
-			Thread.currentThread().interrupt();
-			throw(new RuntimeException(e));
-		    }
-		}
-	    });
-	Console.setscmd("lockdie", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    Object m1 = new Object(), m2 = new Object();
-		    int[] sync = {0};
-		    new HackThread(() -> {
-			    try {
-				synchronized(m2) {
-				    synchronized(sync) {
-					while(sync[0] != 1)
-					    sync.wait();
-					sync[0] = 2;
-					sync.notifyAll();
-				    }
-				    synchronized(m1) {
-					synchronized(sync) {
-					    sync[0] = 3;
-					    sync.notifyAll();
-					}
-				    }
-				}
-			    } catch(InterruptedException e) {}
-		    }, "Deadlocker").start();
-		    try {
-			synchronized(m1) {
-			    synchronized(sync) {
-				sync[0] = 1;
-				sync.notifyAll();
-				while(sync[0] != 2)
-				    sync.wait();
-			    }
-			    synchronized(m2) {
-				synchronized(sync) {
-				    sync[0] = 3;
-				    sync.notifyAll();
-				}
-			    }
-			}
-		    } catch(InterruptedException e) {}
-		}
-	    });
-	Console.setscmd("threads", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    Utils.dumptg(null, cons.out);
-		}
-	    });
-	Console.setscmd("gc", new Console.Command() {
-		public void run(Console cons, String[] args) {
-		    System.gc();
-		}
-	    });
-    }
 }
