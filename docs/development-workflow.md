@@ -75,9 +75,14 @@ rebasing rewrites hashes, so the next sync re-conflicts on already-integrated co
   conflict at all. After any hafen merge, grep for nurgling's parallel implementation of whatever
   subsystem changed, not just the diff.
 - **Nurgling2 upstream** (`upstream` remote, `aleksandrsvoboda/nurgling2`) → the rest of the tree.
-  Procedure: `docs/fork-sync-guide.md`. The same guide identifies the recurring conflict-prone shared
-  files (`NConfig.java`, `NGItem.java`, `BotRegistry.java`, `messages*.properties`) — keep additions
-  to those small and localized rather than reformatted, so they merge clean.
+  Procedure: `docs/fork-sync-guide.md`. Shared registry/config/i18n files (currently including
+  `NConfig.java`, `BotRegistry.java`, `messages*.properties` — re-derive the current set each sync
+  rather than trusting this list, since it can change cycle to cycle) recur as conflict points across
+  syncs; keep fork additions there small and localized rather than reformatted, so they merge clean.
+  `docs/fork-customization-ledger.md` records why each fork invariant in this territory exists and the
+  minimum hook a merge must not drop. `docs/fork-sync-guide.md`'s "Low-conflict development policy"
+  section is the canonical statement of how to build *new* fork functionality with this in mind —
+  don't restate it here.
 - A uniquely named new file usually avoids *textual* merge conflicts across either boundary, since
   there's no shared file for git to diff line-by-line. It is not immune to conflict outright: two
   branches can still add a same-named file (add/add), or a new file can integrate poorly with
