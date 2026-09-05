@@ -1,11 +1,23 @@
 # Nurgling-Modified Haven Files
 
-This document lists all haven package files that contain nurgling-specific code. These files require special attention during hafen integrations.
+This document lists `src/haven/**` files that carry nurgling-specific code, for use during **official
+Hafen integrations** (`dolda2000/hafen-client` → `src/haven/**`, procedure in
+`docs/hafen-integration-guide.md`). This is the haven-vs-official-Hafen inventory specifically — it is
+a different upstream boundary from the fork's sync against `aleksandrsvoboda/nurgling2`. For
+intentional differences between this fork and that upstream Nurgling2 project (a separate, larger
+surface than just `src/haven/**`), see `docs/fork-customization-ledger.md` instead; this document is
+not that ledger and should not be extended to cover fork-vs-Nurgling2 divergence.
 
-**Last Updated:** 2026-02-27
-**Branch:** hafen-integration-proper-v2
+**Snapshot status:** the per-file list and the summary counts below were last compiled 2026-02-27, on
+branch `hafen-integration-proper-v2`. Neither has been re-verified since — the file's actual current
+modification surface may have drifted (new nurgling changes to `src/haven/**`, or a hafen integration
+resolving/removing an old one) and the counts below should be treated as a historical snapshot, not a
+live fact. Before relying on an exact count, regenerate it against current `src/haven/**`; before
+relying on a specific file's listed conflict strategy, verify that file's current state directly
+per `docs/development-workflow.md`'s guidance on this document ("being on this list is not proof a
+further change there is safe").
 
-## Summary
+## Summary (as of the 2026-02-27 snapshot — not re-verified since)
 
 - **Total haven files modified:** 107
 - **Critical files (must handle carefully):** 14
