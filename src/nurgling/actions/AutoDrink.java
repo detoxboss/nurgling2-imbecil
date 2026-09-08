@@ -57,37 +57,49 @@ public class AutoDrink implements Action
             }
 
             if(hasDrinkableWater(gui)) {
-                noWaterNotified = false;
                 NUtils.getUI().dropLastError();
                 if (gui.menu == null) {
+                    // Menu not ready yet -- back off instead of spinning.
+                    NUtils.addTask(cooldown());
                     continue;
                 }
+                MenuGrid.Pagina drinkPag = null;
                 for (MenuGrid.Pagina pag : gui.menu.paginae) {
                     if (pag.button() != null && pag.button().name().equals("Drink")) {
-                        pag.button().use(new MenuGrid.Interaction(1, 0));
-                        Gob player = NUtils.player();
-                        if (player == null) {
-                            break;
-                        }
-                        WaitPoseOrMsg wops = new WaitPoseOrMsg(player, "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
-                        NUtils.getUI().core.addTask(wops);
-                        if (wops.isError()) {
-                            // Drink command failed despite DrinkMeter reporting water (stale read,
-                            // container just emptied, etc). Back off instead of hammering the button.
-                            reportAutoDrinkIssue(gui, "Auto-drink: drink attempt failed, backing off.");
-                            NUtils.addTask(cooldown());
-                            break;
-                        }
-                        NUtils.addTask(new NTask() {
-                            @Override
-                            public boolean check() {
-                                Gob p = NUtils.player();
-                                return p == null || !NParser.checkName(p.pose(), "gfx/borka/drinkan");
-                            }
-                        });
+                        drinkPag = pag;
                         break;
                     }
                 }
+                if (drinkPag == null) {
+                    // No "Drink" button registered yet -- back off instead of spinning.
+                    NUtils.addTask(cooldown());
+                    continue;
+                }
+                drinkPag.button().use(new MenuGrid.Interaction(1, 0));
+                Gob player = NUtils.player();
+                if (player == null) {
+                    NUtils.addTask(cooldown());
+                    continue;
+                }
+                WaitPoseOrMsg wops = new WaitPoseOrMsg(player, "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
+                NUtils.getUI().core.addTask(wops);
+                if (wops.isError()) {
+                    // Drink command failed despite DrinkMeter reporting water (stale read,
+                    // container just emptied, etc). Back off instead of hammering the button.
+                    reportAutoDrinkIssue(gui, "Auto-drink: drink attempt failed, backing off.");
+                    NUtils.addTask(cooldown());
+                    continue;
+                }
+                // Drink actually began -- clear the notification latch so a later, genuine
+                // failure/no-water episode can notify again.
+                noWaterNotified = false;
+                NUtils.addTask(new NTask() {
+                    @Override
+                    public boolean check() {
+                        Gob p = NUtils.player();
+                        return p == null || !NParser.checkName(p.pose(), "gfx/borka/drinkan");
+                    }
+                });
             }
             else
             {
