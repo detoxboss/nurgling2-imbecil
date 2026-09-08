@@ -106,6 +106,7 @@ public class NConfig
         showInventoryNums,
         hidecredo,
         autoDrink,
+        autoDrinkThreshold,
         autoSaveTableware,
         chipperprop,
         animalrad,
@@ -349,6 +350,7 @@ public class NConfig
         conf.put(Key.kamiCompatMapper, false);
         conf.put(Key.showInventoryNums, true);
         conf.put(Key.autoDrink, false);
+        conf.put(Key.autoDrinkThreshold, 75);
         conf.put(Key.autoSaveTableware, true);
         conf.put(Key.endpoint, "");
         conf.put(Key.questNotified, false);
