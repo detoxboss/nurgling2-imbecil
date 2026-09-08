@@ -43,12 +43,12 @@ public class AutoDrink implements Action
                     double stamina = NUtils.getStamina();
                     if(stamina < 0)
                         return false;
-                    if(!active) {
-                        if(stamina <= getThresholdFraction())
-                            active = true;
-                    } else if(stamina >= FULL_STAMINA) {
+                    if(stamina >= FULL_STAMINA) {
                         active = false;
+                        return false;
                     }
+                    if(!active && stamina <= getThresholdFraction())
+                        active = true;
                     return active;
                 }
             });
