@@ -11,6 +11,8 @@ import haven.res.ui.tt.wear.Wear;
 import monitoring.ItemWatcher;
 import nurgling.iteminfo.NCuriosity;
 import nurgling.iteminfo.NFoodInfo;
+import nurgling.iteminfo.NKilnInfo;
+import nurgling.iteminfo.NSmelterInfo;
 import nurgling.tools.LpExplorer;
 import nurgling.widgets.NQuestInfo;
 
@@ -60,6 +62,16 @@ public class NGItem extends GItem
             }
             else if (inf instanceof NCuriosity) {
                 return ((NCuriosity) inf).needUpdate();
+            }
+            // Every item carries both kiln and smelter tips, so neither may short-circuit
+            // the other: only a positive answer ends the scan.
+            else if (inf instanceof NKilnInfo) {
+                if (((NKilnInfo) inf).needUpdate())
+                    return true;
+            }
+            else if (inf instanceof NSmelterInfo) {
+                if (((NSmelterInfo) inf).needUpdate())
+                    return true;
             }
             if (inf instanceof ISlots) {
                 return this.ui.modshift!=((ISlots)inf).isShifted;
