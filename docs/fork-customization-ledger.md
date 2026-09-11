@@ -281,3 +281,44 @@ that changes consistently with zoom/data level.
 
 **Superseded when:** upstream's own grid overlay (if any) natively labels cells in the same persisted
 grid-coordinate space.
+
+## Auto-drink: configurable threshold, DrinkMeter-based water check, and non-blocking bot concurrency
+
+**Files:** `src/nurgling/actions/AutoDrink.java`, `src/nurgling/NConfig.java`,
+`src/nurgling/widgets/options/QoL.java`, `src/lang/messages.properties`, `src/lang/messages_ru.properties`
+
+**Fork behavior:** Upstream's Auto-drink (`AutoDrink.java`) hardcodes its trigger at a fixed 51%
+stamina fraction, gates itself off entirely whenever any bot is registered on
+`BotsInterruptWidget.waitBot`, and detects water availability by manually re-walking the Belt
+equipment slot and a hand-held bucket — missing the hotbelt, pouches, and general inventory, which
+made the feature silently never trigger for a normal playstyle where water lives on the hotbelt. The
+fork instead: (1) reads a new `NConfig.Key.autoDrinkThreshold` (percent, 1-100, default 75) each cycle
+instead of a hardcoded fraction; (2) latches an "active" cycle at threshold-crossing that only clears
+once stamina reaches `FULL_STAMINA` (0.99), so a brief rise above threshold mid-drink doesn't abort the
+cycle; (3) removed the blanket bot-running exclusion so Auto-drink can inject a Drink command behind
+whatever primary action (manual or bot) is already in progress, per Haven's action-ordering rule that a
+command issued after an in-progress action doesn't cancel it; (4) replaced the manual container walk
+with `gui.drinkMeter.getWater() > 0` (deliberately `getWater()`, not `getTotalDrinkable()`, so Auto-drink
+never consumes tea); (5) inspects `WaitPoseOrMsg.isError()` after issuing Drink and backs off via a
+60-tick cooldown NTask instead of retrying immediately, with a one-shot `gui.error(...)` notification
+per failure episode instead of silence or per-tick spam.
+
+**Why:** See the 2026-09-07 Auto-drink diagnostic session — upstream's implementation had a real,
+reproducible bug (confirmed byte-identical against `upstream/master` at the time), not a fork-introduced
+regression. Fixing it as a fork override rather than waiting on upstream because the water-detection gap
+and lack of a configurable threshold were blocking normal play.
+
+**Minimum hook that must survive:** the `Drink` `MenuGrid.Pagina` button-click dispatch path
+(`pag.button().use(new MenuGrid.Interaction(1, 0))`) must remain a supplemental menu action, never a
+cancel/Escape/click-to-move — that non-interrupting property is the entire point of the feature. The
+`active` latch and `getThresholdFraction()`/`getThresholdPercent()` clamp-to-[1,100] must stay together;
+don't let a merge quietly restore the hardcoded `0.51`. `gui.drinkMeter` (fork-owned widget, not
+upstream) is a hard dependency of the water check.
+
+**Verify:** enable Auto-drink, set a threshold, drink stamina down below it while manually running or
+chopping — confirm the primary action is never interrupted, Drink fires once per depletion (no spam),
+and toggling threshold takes effect without a client restart.
+
+**Superseded when:** upstream ships an equivalent configurable-threshold, DrinkMeter-based, bot-agnostic
+Auto-drink of its own — at which point this override should be diffed against upstream's approach rather
+than assumed to still be correct.

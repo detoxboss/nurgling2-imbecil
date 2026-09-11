@@ -174,7 +174,10 @@ public class NUtils
 
     public static double getStamina()
     {
-        IMeter.Meter stam = getGameUI().getmeter ( "stam", 0 );
+        NGameUI gui = getGameUI();
+        if(gui == null)
+            return -1;
+        IMeter.Meter stam = gui.getmeter ( "stam", 0 );
         if(stam == null)
             return -1;
         return stam.a;

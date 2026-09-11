@@ -1,20 +1,29 @@
 package nurgling.actions;
 
+import haven.Gob;
 import haven.MenuGrid;
-import haven.WItem;
 import nurgling.*;
 import nurgling.tasks.*;
 import nurgling.tools.NAlias;
 import nurgling.tools.NParser;
-import nurgling.widgets.NEquipory;
 
-import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class AutoDrink implements Action
 {
 
     public final AtomicBoolean stop = new AtomicBoolean(false);
+
+    // Stamina fraction (0.0-1.0) considered "full" -- avoids floating-point edge cases
+    // around the meter's true 1.0 ceiling while still meaning "no further drinking needed".
+    private static final double FULL_STAMINA = 0.99;
+
+    // Latched once stamina drops to/below the configured threshold; stays set until stamina
+    // recovers to FULL_STAMINA so a temporary rise above threshold mid-cycle doesn't abort it.
+    private volatile boolean active = false;
+
+    // Suppresses repeated no-water notifications within a single active cycle.
+    private boolean noWaterNotified = false;
 
     public AutoDrink()
     {
@@ -29,87 +38,108 @@ public class AutoDrink implements Action
             NUtils.addTask(new NTask() {
                 @Override
                 public boolean check() {
-                    if(NUtils.getGameUI()==null)
-                        return false;
+                    if(stop.get())
+                        return true;
                     double stamina = NUtils.getStamina();
                     if(stamina < 0)
                         return false;
-                    NGameUI g = NUtils.getGameUI();
-                    boolean botRunning = g != null && g.biw != null && g.biw.waitBot.get();
-                    return (!botRunning && stamina < 0.51) || stop.get();
+                    if(stamina >= FULL_STAMINA) {
+                        active = false;
+                        return false;
+                    }
+                    if(!active && stamina <= getThresholdFraction())
+                        active = true;
+                    return active;
                 }
             });
             if(stop.get()) {
                 return Results.SUCCESS();
             }
 
-            if(checkWater()) {
+            if(hasDrinkableWater(gui)) {
                 NUtils.getUI().dropLastError();
-                NGameUI gameUI = NUtils.getGameUI();
-                if (gameUI == null || gameUI.menu == null) {
+                if (gui.menu == null) {
+                    // Menu not ready yet -- back off instead of spinning.
+                    NUtils.addTask(cooldown());
                     continue;
                 }
-                for (MenuGrid.Pagina pag : gameUI.menu.paginae) {
+                MenuGrid.Pagina drinkPag = null;
+                for (MenuGrid.Pagina pag : gui.menu.paginae) {
                     if (pag.button() != null && pag.button().name().equals("Drink")) {
-
-                        pag.button().use(new MenuGrid.Interaction(1, 0));
-                        WaitPoseOrMsg wops = new WaitPoseOrMsg(NUtils.player(), "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
-                        NUtils.getUI().core.addTask(wops);
-                        NUtils.addTask(new NTask() {
-                            @Override
-                            public boolean check() {
-                                return NUtils.player() == null || !NParser.checkName(NUtils.player().pose(), "gfx/borka/drinkan");
-                            }
-                        });
+                        drinkPag = pag;
+                        break;
                     }
                 }
+                if (drinkPag == null) {
+                    // No "Drink" button registered yet -- back off instead of spinning.
+                    NUtils.addTask(cooldown());
+                    continue;
+                }
+                drinkPag.button().use(new MenuGrid.Interaction(1, 0));
+                Gob player = NUtils.player();
+                if (player == null) {
+                    NUtils.addTask(cooldown());
+                    continue;
+                }
+                WaitPoseOrMsg wops = new WaitPoseOrMsg(player, "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
+                NUtils.getUI().core.addTask(wops);
+                if (wops.isError()) {
+                    // Drink command failed despite DrinkMeter reporting water (stale read,
+                    // container just emptied, etc). Back off instead of hammering the button.
+                    reportAutoDrinkIssue(gui, "Auto-drink: drink attempt failed, backing off.");
+                    NUtils.addTask(cooldown());
+                    continue;
+                }
+                // Drink actually began -- clear the notification latch so a later, genuine
+                // failure/no-water episode can notify again.
+                noWaterNotified = false;
+                NUtils.addTask(new NTask() {
+                    @Override
+                    public boolean check() {
+                        Gob p = NUtils.player();
+                        return p == null || !NParser.checkName(p.pose(), "gfx/borka/drinkan");
+                    }
+                });
             }
             else
             {
-                NUtils.addTask(new NTask(){
-                    int count = 0;
-                    @Override
-                    public boolean check()
-                    {
-                        return count++>60;
-                    }
-                });
+                reportAutoDrinkIssue(gui, "Auto-drink: no water available.");
+                NUtils.addTask(cooldown());
             }
         }
         return Results.SUCCESS();
     }
 
-    boolean checkWater() throws InterruptedException
-    {
-        NEquipory equipment = NUtils.getEquipment();
-        if (equipment == null) {
-            return false;
+    private void reportAutoDrinkIssue(NGameUI gui, String message) {
+        if (!noWaterNotified && gui != null) {
+            gui.error(message);
+            noWaterNotified = true;
         }
-        // Check waterskins in belt
-        WItem wbelt = equipment.findItem (NEquipory.Slots.BELT.idx);
-        if(wbelt!=null && wbelt.item.contents!=null) {
-            ArrayList<WItem> witems = ((NInventory) wbelt.item.contents).getItems(new NAlias("Waterskin"));
-            if (!witems.isEmpty()) {
-                for (WItem item : witems) {
-                    NGItem ngItem = ((NGItem) item.item);
-                    if (!ngItem.content().isEmpty()) {
-                        if (ngItem.content().get(0).name().contains("Water")) {
-                            return true;
-                        }
-                    }
-                }
+    }
+
+    private static NTask cooldown() {
+        return new NTask() {
+            int count = 0;
+            @Override
+            public boolean check() {
+                return count++ > 60;
             }
-        }
-        // Check bucket in hands
-        WItem bucket = equipment.findBucket("Water");
-        if (bucket != null) {
-            NGItem ngItem = ((NGItem) bucket.item);
-            if (!ngItem.content().isEmpty()) {
-                if (ngItem.content().get(0).name().contains("Water")) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        };
+    }
+
+    private static int getThresholdPercent() {
+        Object v = NConfig.get(NConfig.Key.autoDrinkThreshold);
+        int pct = (v instanceof Number) ? ((Number) v).intValue() : 75;
+        if (pct < 1) pct = 1;
+        if (pct > 100) pct = 100;
+        return pct;
+    }
+
+    private static double getThresholdFraction() {
+        return getThresholdPercent() / 100.0;
+    }
+
+    boolean hasDrinkableWater(NGameUI gui) {
+        return gui != null && gui.drinkMeter != null && gui.drinkMeter.getWater() > 0;
     }
 }
