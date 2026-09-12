@@ -322,3 +322,99 @@ and toggling threshold takes effect without a client restart.
 **Superseded when:** upstream ships an equivalent configurable-threshold, DrinkMeter-based, bot-agnostic
 Auto-drink of its own — at which point this override should be diffed against upstream's approach rather
 than assumed to still be correct.
+
+## Expanded Kin/Village permission group palette, numeric IDs, and client-side group labels
+
+**Files:** `src/haven/BuddyWnd.java` (`ncolors`, `named`/`gc`, `GroupRect`, `GroupSelector`,
+`BuddyInfo`, `BuddyList.ItemWidget`, the `@RName("grp")` factory), `src/nurgling/widgets/NLabeledGroupSelector.java`,
+`src/nurgling/conf/NGroupLabels.java`, `src/nurgling/widgets/NKinSettings.java`, `src/nurgling/NConfig.java`
+(`Key.kinGroupLabels`, `Key.villageGroupLabels`), `src/lang/messages.properties`,
+`src/lang/messages_ru.properties`.
+
+**Fork behavior:**
+
+- `BuddyWnd.ncolors` raised from upstream's 8 to 40 selectable Kin/Village permission groups, backed
+  by a 255-entry `gc[]` palette (unchanged from the prior 28-group PR) so any server-sent group id up
+  to 254 still resolves to *some* colour via `gcolor()`'s bounds-checked lookup even though only
+  groups 0..39 are colour-picker-selectable. Colours 0..27 are byte-for-byte the values shipped in the
+  original 28-group work; groups 28..39 add 12 new colours chosen for visual distinctness and
+  legibility as coloured player-name text against Haven's dark UI. The picker grid auto-derives its
+  layout from `ncolors` (`cols = min(10, ncolors)`, `rows = ceil(ncolors / cols)`), which lands on
+  10x4 for 40 groups without any layout-constant changes.
+- Every `GroupRect` colour tile now draws its own numeric group id centered on the tile
+  (`BuddyWnd.numtex(int)`: a small bold stroked white-on-black digit label, built once per id and
+  cached, so it reads over any tile colour and scales with `UI.scale`). This applies to **every**
+  `GroupSelector`/`GroupRect` instance, including `MapWnd`'s unrelated map-marker colour picker and
+  `NKinSettings`'s per-group notification-preference picker (which duplicates `GroupRect` locally and
+  now calls the same shared `BuddyWnd.numtex(int)` helper) — the id number itself is inert,
+  presentation-only information appropriate anywhere the shared palette is used.
+- A new `nurgling.widgets.NLabeledGroupSelector extends BuddyWnd.GroupSelector` adds a compact,
+  client-side-only label editor (a caption + `TextEntry`) beneath the colour tiles, and enriches
+  `GroupRect`'s tooltip (via the newly-`protected` `GroupSelector.grouptip(int)` hook) to show the
+  custom label when one is set. **Only** two call sites use it: `BuddyWnd.BuddyInfo`'s per-buddy Kin
+  selector, and the `@RName("grp")` factory that the (server-resource-driven) Village permission UI
+  asks for its group-selector widgets by name — this is the *only* seam this fork has into that
+  resource UI; the Village panel's own layout/reflow code is not in this tree (see the "Village
+  layout" note below). `MapWnd`'s marker picker and `NKinSettings`'s notification picker deliberately
+  keep constructing the plain `BuddyWnd.GroupSelector` and never gain the label editor.
+- `nurgling.conf.NGroupLabels` persists the labels through `NConfig.Key.kinGroupLabels` and
+  `NConfig.Key.villageGroupLabels` — two separate keys so the same numeric group id can carry a
+  different meaning in Kin vs. Village without one overwriting the other. Labels never touch the
+  group id, a buddy's name, or any server message; an empty value clears the stored label.
+  **Persistence scope:** both keys go through `NConfig.get`/`set`'s existing per-world ("genus")
+  profile resolution — the same mechanism `NKinProp` (per-group Kin notification prefs) already uses
+  — rather than a new global/ambient store. That means labels are scoped per world/server the
+  character plays on, shared by every session on that world, and don't leak across worlds. No
+  per-character sub-scoping exists in `NConfig`'s current profile model, so this fork does not
+  introduce one for labels either; if a future need arises to distinguish characters sharing one
+  world's profile, that's a `NConfig` profile-model change, not something to special-case here.
+- `BuddyWnd.BuddyInfo.update()` now calls `grp.update(buddy.group)` instead of directly overwriting
+  the `group` field, so a buddy's group changing out from under an open Kin panel (e.g. another client
+  changing it) keeps the tile highlighting and the label editor's displayed group in sync — this was a
+  latent staleness gap in the pre-40-group code that the label editor's own refresh hook exposed.
+- The Kin buddy list (`BuddyWnd.BuddyList.ItemWidget.draw()`) now renders `Name [N]` — the bracketed
+  group id in neutral light-gray text after the (still group-coloured) name — via a new
+  `Buddy.grouptag()` cached `Text`, entirely at the draw layer. `Buddy.name`, sorting, and searching
+  are untouched.
+
+**Village UI is only partially reachable from this tree — read before touching layout again:** the
+Village member-list rows, the "Groups:"/member-detail panel framing, and the "Banish" button are
+rendered by a **server-distributed resource**, not by any file in this git repository (confirmed: no
+`Village`/`Realm`/"Banish" source exists anywhere under `src/`). The `@RName("grp")` factory above is
+the *only* point where that resource asks the client for a widget by name and gets back fork code —
+everything around it (member row text, panel sizing, button placement) is opaque compiled resource
+code this fork cannot edit without first running `haven.Resource get-code` against a **live, connected
+client** (`docs/resource-upgrade-strategy.md`), which is not possible in an offline dev environment.
+Concretely, this means:
+  - `NLabeledGroupSelector` reports its true (now-taller, up to 4 rows plus the label editor) size
+    through the ordinary `pack()`/`resize()`/`cresize()` path, so *if* the Village resource's own
+    layout positions things like "Banish" relative to the selector's actual `sz` (the same idiom this
+    file itself uses everywhere, e.g. `grp.c.y + grp.sz.y + margin2`), the containing panel reflows
+    correctly for free. This cannot be verified from source and needs a live-game check (see below).
+  - Adding a `[group]` suffix to Village member-list rows (mirroring the Kin list change above) is
+    **not implemented** — there is no seam into that rendering from this tree at all. Doing so would
+    require fetching and partially vendoring the Village resource's source per
+    `docs/resource-upgrade-strategy.md`, which is a real fork-divergence decision (ongoing maintenance
+    burden across every future Village resource version bump) and was intentionally not made
+    unilaterally here. If this is wanted, the next step is running `get-code` against a live client to
+    see how small the actual seam is before deciding.
+  - If, after live testing, the four-row selector still overlaps "Banish" (i.e. the resource's Banish
+    placement turns out to be a baked constant rather than relative to the selector's size), the same
+    `get-code`-and-vendor decision applies — this cannot be fixed from `BuddyWnd.java` alone.
+
+**Minimum hook that must survive:** `ncolors` staying in sync with `named.length` (enforced by the
+existing static-init `IllegalStateException` check); `gc[]` staying sized for the full server group
+range regardless of `ncolors`; the `@RName("grp")` factory continuing to hand back a `GroupSelector`
+(or subclass) rather than some other widget type, since that's the resource UI's only extension point
+into this code; `NConfig.Key.kinGroupLabels`/`villageGroupLabels` staying distinct keys.
+
+**Verify:** `ant test && ant jar`; in-game, confirm groups 0/7/8/27/28/39 are selectable and show the
+right colour and digit(s) in both Kin and Village, that assigning group 39 to a buddy sends `39` (not
+a remapped index), that the Kin list shows `Name [N]`, that Kin and Village labels save/reload after a
+client restart and stay independent of each other, and — the still-open item — whether the Village
+member-detail panel now lays out all four selector rows plus the label editor without clipping behind
+"Banish".
+
+**Superseded when:** upstream ships an equivalent expanded permission-group system with its own
+numeric-id display and label support — at which point this override should be diffed against
+upstream's approach, not assumed to still be the better choice.
