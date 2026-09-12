@@ -139,7 +139,7 @@ public class NAlarmWdg extends Widget
                             }
                             
                             NKinProp kinProp = NKinProp.get(group);
-                            Color arrowColor = BuddyWnd.gc[group];
+                            Color arrowColor = BuddyWnd.gcolor(group);
                             
                             // Check if should be in alarm (only WHITE and RED groups)
                             boolean isWhiteOrRed = (arrowColor.equals(Color.WHITE) || arrowColor.equals(Color.RED));
@@ -361,7 +361,7 @@ public class NAlarmWdg extends Widget
             return true;
         } else if (buddy.b != null) {
             // Known player - check if WHITE or RED
-            Color groupColor = BuddyWnd.gc[buddy.b.group];
+            Color groupColor = BuddyWnd.gcolor(buddy.b.group);
             return (groupColor.equals(Color.WHITE) || groupColor.equals(Color.RED));
         }
         return false;

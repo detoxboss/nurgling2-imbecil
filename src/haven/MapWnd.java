@@ -34,6 +34,7 @@ import java.nio.channels.*;
 import java.awt.Color;
 import java.awt.event.KeyEvent;
 import java.awt.image.*;
+import java.util.concurrent.ThreadLocalRandom;
 import haven.render.*;
 import haven.iosys.tk.*;
 import haven.MapFile.Marker;
@@ -354,7 +355,7 @@ public class MapWnd extends Window implements Console.Directory {
     }
 
     public void mark(Location loc, boolean onmap, String name) {
-	mark(loc, onmap, name, BuddyWnd.gc[new Random().nextInt(BuddyWnd.gc.length)]);
+	mark(loc, onmap, name, BuddyWnd.gcolor(ThreadLocalRandom.current().nextInt(BuddyWnd.ncolors)));
     }
 
     public void mark(Location loc, boolean onmap, String name, Color color) {
@@ -835,9 +836,9 @@ public class MapWnd extends Window implements Console.Directory {
 		tool.namesel.commit();
 		if(mark instanceof PMarker) {
 		    PMarker pm = (PMarker)mark;
-		    colsel = tool.add(new GroupSelector(Math.max(0, Utils.index(BuddyWnd.gc, pm.color))) {
+		    colsel = tool.add(new GroupSelector(BuddyWnd.pcolor(pm.color)) {
 			    public void changed(int group) {
-				pm.color = BuddyWnd.gc[group];
+				pm.color = BuddyWnd.gcolor(group);
 				view.file.update(mark);
 				uploadpmarker(mark);
 			    }

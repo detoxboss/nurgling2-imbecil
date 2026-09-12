@@ -275,7 +275,7 @@ public class Requestor implements Action {
                                     Buddy buddy = borka.getattr(Buddy.class);
                                     if (buddy != null &&  buddy.b!=null) {
                                         propb.put("name", buddy.b.name);
-                                        propb.put("type", Integer.toHexString(BuddyWnd.gc[buddy.b.group].getRGB()));
+                                        propb.put("type", Integer.toHexString(BuddyWnd.gcolor(buddy.b.group).getRGB()));
                                     }
                                     propb.put("gridID", String.valueOf(gb.id));
                                     JSONObject cb = new JSONObject();

@@ -45,8 +45,8 @@ public class Player extends GobIcon.Icon {
 
     public Color color() {
 	int grp = group();
-	if((grp >= 0) && (grp < BuddyWnd.gc.length))
-	    return(BuddyWnd.gc[grp]);
+	if(grp >= 0)
+	    return(BuddyWnd.gcolor(grp));
 	return(Color.WHITE);
     }
 
@@ -56,7 +56,7 @@ public class Player extends GobIcon.Icon {
 	if(group < 0)
 	    return(img.img);
 	BufferedImage buf = PUtils.copy(img.img);
-	PUtils.colmul(buf.getRaster(), BuddyWnd.gc[group]);
+	PUtils.colmul(buf.getRaster(), BuddyWnd.gcolor(group));
 	return(buf);
     }
 

@@ -19,7 +19,7 @@ public class Factory implements GobIcon.Icon.Factory {
 
     public Collection<GobIcon.Icon> enumerate(OwnerContext owner, Resource res, Message sdt) {
 	Collection<GobIcon.Icon> ret = new ArrayList<>();
-	for(int i = 0; i < BuddyWnd.gc.length; i++)
+	for(int i = 0; i < BuddyWnd.ncolors; i++)
 	    ret.add(new Player(owner, res, i));
 	ret.add(new DeadPlayer(owner, res));
 	return(ret);

@@ -496,8 +496,7 @@ NMiniMap extends MiniMap {
             if(bw != null && name != null) {
                 for(BuddyWnd.Buddy b : bw) {
                     if(name.equals(b.name))
-                        return((b.group >= 0 && b.group < BuddyWnd.gc.length)
-                               ? BuddyWnd.gc[b.group] : PEER_DEFAULT);
+                        return((b.group >= 0) ? BuddyWnd.gcolor(b.group) : PEER_DEFAULT);
                 }
             }
         } catch(RuntimeException ignore) {

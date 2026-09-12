@@ -52,7 +52,13 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     public static final int offset = UI.scale(35);
     public static final Tex online = Resource.loadtex("gfx/hud/online");
     public static final Tex offline = Resource.loadtex("gfx/hud/offline");
-    public static final Color[] gc = new Color[] {
+    public static final int ncolors = 28;
+    /**
+     * The server accepts kin groups beyond what the picker exposes; keep the backing table large
+     * enough for server IDs and only expose {@link #ncolors} entries as selectable in the UI.
+     */
+    public static final Color[] gc = new Color[255];
+    private static final Color[] named = {
 	new Color(255, 255, 255),
 	new Color(0, 255, 0),
 	new Color(255, 0, 0),
@@ -61,7 +67,46 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	new Color(255, 255, 0),
 	new Color(255, 0, 255),
 	new Color(255, 0, 128),
+	new Color(255, 128, 0),
+	new Color(128, 255, 0),
+	new Color(255, 128, 255),
+	new Color(128, 128, 255),
+	new Color(128, 255, 255),
+	new Color(255, 200, 128),
+	new Color(200, 255, 128),
+	new Color(255, 128, 64),
+	new Color(128, 255, 64),
+	new Color(64, 255, 128),
+	new Color(64, 128, 255),
+	new Color(128, 64, 255),
+	new Color(255, 64, 192),
+	new Color(255, 64, 64),
+	new Color(255, 192, 0),
+	new Color(192, 255, 0),
+	new Color(0, 255, 192),
+	new Color(0, 192, 255),
+	new Color(192, 0, 255),
+	new Color(255, 0, 192),
     };
+    static {
+	if(named.length != ncolors)
+	    throw(new IllegalStateException("named.length (" + named.length + ") != ncolors (" + ncolors + ")"));
+	System.arraycopy(named, 0, gc, 0, named.length);
+	Arrays.fill(gc, named.length, gc.length, named[0]);
+    }
+    public static Color gcolor(int group) {
+	return(((group >= 0) && (group < gc.length)) ? gc[group] : gc[0]);
+    }
+
+    public static int pcolor(Color color) {
+	/* Marker colors outside the selectable palette map back to the default selectable group. */
+	for(int i = 0; i < ncolors; i++) {
+	    if(Objects.equals(gc[i], color))
+		return(i);
+	}
+	return(0);
+    }
+
 	private Comparator<Buddy> bcmp;
     private Comparator<Buddy> alphacmp = new Comparator<Buddy>() {
 	private Collator c = Collator.getInstance();
@@ -209,7 +254,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 		g.chcolor(Color.LIGHT_GRAY);
 		g.frect(Coord.z, selsz);
 	    }
-	    g.chcolor(gc[group]);
+	    g.chcolor(gcolor(group));
 	    g.frect(offset, colsz);
 	    g.chcolor();
 	}
@@ -229,15 +274,17 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     }
 
     public static class GroupSelector extends Widget {
+	private static final int cols = Math.min(10, ncolors);
+	private static final int rows = Math.max(1, (ncolors + cols - 1) / cols);
 	public int group;
-	public GroupRect[] groups = new GroupRect[gc.length];
+	public GroupRect[] groups = new GroupRect[ncolors];
 
 	public GroupSelector(int group) {
-	    super(new Coord(gc.length * margin3, margin3));
+	    super(new Coord(cols * margin3, rows * margin3));
 	    this.group = group;
-	    for (int i = 0; i < gc.length; ++i) {
+	    for (int i = 0; i < ncolors; ++i) {
 		groups[i] = new GroupRect(this, i, group == i);
-		add(groups[i], new Coord(i * margin3, 0));
+		add(groups[i], new Coord((i % cols) * margin3, (i / cols) * margin3));
 	    }
 	}
 
@@ -247,10 +294,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public void update(int group) {
 	    if(group == this.group)
 		return;
-	    if(this.group >= 0)
+	    if((this.group >= 0) && (this.group < groups.length))
 		groups[this.group].unselect();
 	    this.group = group;
-	    if(group >= 0)
+	    if((group >= 0) && (group < groups.length))
 		groups[group].select();
 	}
 
@@ -422,7 +469,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			    g.aimage(online, Coord.of(sz.y / 2), 0.5, 0.5);
 			else if(item.online == 0)
 			    g.aimage(offline, Coord.of(sz.y / 2), 0.5, 0.5);
-			g.chcolor(gc[b.group]);
+			g.chcolor(gcolor(b.group));
 			g.aimage(b.rname().tex(), Coord.of(sz.y + margin1, sz.y / 2), 0.0, 0.5);
 			if(b.lastOnline!=null)
 				g.aimage(b.lastOnline.tex(), Coord.of(sz.x - b.lastOnline.tex().sz().x - margin1,sz.y / 2), 0.0, 0.5);

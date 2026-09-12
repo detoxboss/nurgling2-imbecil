@@ -58,7 +58,7 @@ public class Buddy extends GAttrib implements InfoPart {
 	if(bw != null)
 	    b = bw.find(id);
 	if(b != null) {
-	    Color col = BuddyWnd.gc[rgrp = b.group];
+	    Color col = BuddyWnd.gcolor(rgrp = b.group);
 	    cmp.add(InfoPart.rendertext(rnm = b.name, col), Coord.z);
 	    NGameUI.gobIdToKinName.put(gob.id, rnm);
 	}
