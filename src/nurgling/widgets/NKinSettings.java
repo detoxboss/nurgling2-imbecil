@@ -149,6 +149,7 @@ public class NKinSettings extends Window
             g.chcolor(BuddyWnd.gcolor(group));
             g.frect(offset, colsz);
             g.chcolor();
+            g.aimage(BuddyWnd.numtex(group), offset.add(colsz.div(2)), 0.5, 0.5);
         }
 
         @Override

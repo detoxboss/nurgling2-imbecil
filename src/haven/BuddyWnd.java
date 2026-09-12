@@ -32,6 +32,7 @@ import nurgling.i18n.L10n;
 import nurgling.widgets.*;
 
 import java.awt.Color;
+import java.awt.Font;
 import java.util.*;
 import java.text.Collator;
 import static haven.PType.*;
@@ -52,7 +53,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     public static final int offset = UI.scale(35);
     public static final Tex online = Resource.loadtex("gfx/hud/online");
     public static final Tex offline = Resource.loadtex("gfx/hud/offline");
-    public static final int ncolors = 28;
+    public static final int ncolors = 40;
     /**
      * The server accepts kin groups beyond what the picker exposes; keep the backing table large
      * enough for server IDs and only expose {@link #ncolors} entries as selectable in the UI.
@@ -87,6 +88,20 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	new Color(0, 192, 255),
 	new Color(192, 0, 255),
 	new Color(255, 0, 192),
+	// Groups 28..39: added to grow the selectable palette from 28 to 40 groups. Colours
+	// 0..27 above are untouched so no existing buddy's on-screen colour changes.
+	new Color(255, 96, 0),
+	new Color(96, 255, 0),
+	new Color(0, 255, 150),
+	new Color(0, 150, 255),
+	new Color(150, 0, 255),
+	new Color(255, 0, 150),
+	new Color(255, 150, 200),
+	new Color(150, 255, 200),
+	new Color(200, 150, 255),
+	new Color(255, 215, 90),
+	new Color(180, 220, 255),
+	new Color(255, 255, 200),
     };
     static {
 	if(named.length != ncolors)
@@ -206,6 +221,17 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	    return(rname);
 	}
 
+	/** "[N]" suffix shown next to the name in the buddy list; presentation only, never touches {@link #name}. */
+	private Text grouptag = null;
+	private int grouptagGroup = -1;
+	public Text grouptag() {
+	    if((grouptag == null) || (grouptagGroup != group)) {
+		grouptag = Text.render("[" + group + "]");
+		grouptagGroup = group;
+	    }
+	    return(grouptag);
+	}
+
 	public Map<String, Runnable> opts() {
 	    Map<String, Runnable> opts = new LinkedHashMap<>();
 	    if(online >= 0) {
@@ -234,6 +260,14 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	}
     }
 
+    /** Small stroked digit label drawn inside a {@link GroupRect}; white-on-black stays readable over any {@link #gc} colour. */
+    private static final Text.Foundry numfnd = new Text.Foundry(Text.sans.deriveFont(Font.BOLD), 9).aa(true);
+    private static final Map<Integer, Tex> numtexcache = new HashMap<>();
+    /** Shared so other selector-style pickers (e.g. {@code NKinSettings}) can draw the same numbers without duplicating the font/cache. */
+    public static Tex numtex(int group) {
+	return(numtexcache.computeIfAbsent(group, g -> Text.renderstroked(Integer.toString(g), Color.WHITE, Color.BLACK, numfnd).tex()));
+    }
+
     public static class GroupRect extends Widget {
 	final private static Coord offset = UI.scale(new Coord(2, 2));
 	final private static Coord selsz = UI.scale(new Coord(19, 19));
@@ -257,6 +291,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	    g.chcolor(gcolor(group));
 	    g.frect(offset, colsz);
 	    g.chcolor();
+	    g.aimage(numtex(group), offset.add(colsz.div(2)), 0.5, 0.5);
 	}
 
 	public boolean mousedown(MouseDownEvent ev) {
@@ -270,6 +305,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 
 	public void unselect() {
 	    selected = false;
+	}
+
+	public Object tooltip(Coord c, Widget prev) {
+	    return(Text.render(selector.grouptip(group)).tex());
 	}
     }
 
@@ -289,6 +328,11 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	}
 
 	protected void changed(int group) {
+	}
+
+	/** Overridden by {@code NLabeledGroupSelector} to append a custom label; plain group number here. */
+	protected String grouptip(int group) {
+	    return(L10n.get("group.tooltip", group));
 	}
 
 	public void update(int group) {
@@ -351,7 +395,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     @RName("grp")
     public static class $grp implements Factory {
 	public Widget create(UI ui, Object[] args) {
-	    return(new GroupSelector(INT.of(args[0])) {
+	    /* This factory is how the (server-resource-driven) Village permission UI asks for a
+	     * group selector by name, for both its top-level and per-member pickers, so the label
+	     * editor added here covers both of those Village states as well as Kin below. */
+	    return(new NLabeledGroupSelector(INT.of(args[0]), NGroupLabels.Scope.VILLAGE) {
 		    public void changed(int group) {
 			wdgmsg("ch", group);
 		    }
@@ -379,7 +426,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			buddy.chname(text);
 		    }
 		}, margin2, ava.c.y + ava.sz.y + margin2);
-	    this.grp = add(new GroupSelector(buddy.group) {
+	    this.grp = add(new NLabeledGroupSelector(buddy.group, NGroupLabels.Scope.KIN) {
 		    public void changed(int group) {
 			buddy.chgrp(group);
 		    }
@@ -435,7 +482,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public void update() {
 	    nick.settext(buddy.name);
 	    nick.commit();
-	    grp.group = buddy.group;
+	    grp.update(buddy.group);
 	    setatime();
 	    setopts();
 	}
@@ -470,7 +517,11 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			else if(item.online == 0)
 			    g.aimage(offline, Coord.of(sz.y / 2), 0.5, 0.5);
 			g.chcolor(gcolor(b.group));
-			g.aimage(b.rname().tex(), Coord.of(sz.y + margin1, sz.y / 2), 0.0, 0.5);
+			Tex nametex = b.rname().tex();
+			Coord namec = Coord.of(sz.y + margin1, sz.y / 2);
+			g.aimage(nametex, namec, 0.0, 0.5);
+			g.chcolor(Color.LIGHT_GRAY);
+			g.aimage(b.grouptag().tex(), Coord.of(namec.x + nametex.sz().x + margin1, namec.y), 0.0, 0.5);
 			if(b.lastOnline!=null)
 				g.aimage(b.lastOnline.tex(), Coord.of(sz.x - b.lastOnline.tex().sz().x - margin1,sz.y / 2), 0.0, 0.5);
 			g.chcolor();
