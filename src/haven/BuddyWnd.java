@@ -90,13 +90,23 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     };
     static {
 	if(named.length != ncolors)
-	    throw(new RuntimeException("named.length (" + named.length + ") != ncolors (" + ncolors + ")"));
+	    throw(new IllegalStateException("named.length (" + named.length + ") != ncolors (" + ncolors + ")"));
 	System.arraycopy(named, 0, gc, 0, named.length);
 	Arrays.fill(gc, named.length, gc.length, named[0]);
     }
     public static Color gcolor(int group) {
 	return(((group >= 0) && (group < gc.length)) ? gc[group] : gc[0]);
     }
+
+    public static int pcolor(Color color) {
+	/* Marker colors outside the selectable palette map back to the default selectable group. */
+	for(int i = 0; i < ncolors; i++) {
+	    if(Objects.equals(gc[i], color))
+		return(i);
+	}
+	return(0);
+    }
+
 	private Comparator<Buddy> bcmp;
     private Comparator<Buddy> alphacmp = new Comparator<Buddy>() {
 	private Collator c = Collator.getInstance();

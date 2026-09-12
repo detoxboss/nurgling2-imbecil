@@ -86,19 +86,19 @@ public class NKinSettings extends Window
     }
 
     public static final int margin3 = 4 * UI.scale(5);
+    private static final int selectorCols = Math.min(10, BuddyWnd.ncolors);
+    private static final int selectorRows = Math.max(1, (BuddyWnd.ncolors + selectorCols - 1) / selectorCols);
 
     public class GroupSelector extends Widget {
-        private static final int cols = Math.min(10, BuddyWnd.ncolors);
-        private static final int rows = Math.max(1, (BuddyWnd.ncolors + cols - 1) / cols);
         public int group;
         public GroupRect[] groups = new GroupRect[BuddyWnd.ncolors];
 
         public GroupSelector(int group) {
-            super(new Coord(cols * margin3, rows * margin3));
+            super(new Coord(selectorCols * margin3, selectorRows * margin3));
             this.group = group;
             for (int i = 0; i < BuddyWnd.ncolors; ++i) {
                 groups[i] = new GroupRect(this, i, group == i);
-                add(groups[i], new Coord((i % cols) * margin3, (i / cols) * margin3));
+                add(groups[i], new Coord((i % selectorCols) * margin3, (i / selectorCols) * margin3));
             }
         }
 
