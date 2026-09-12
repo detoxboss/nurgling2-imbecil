@@ -343,8 +343,8 @@ public class NGob
             // Get buddy color if available
             Color buddyColor = null;
             haven.res.ui.obj.buddy.Buddy buddy = gob.getattr(haven.res.ui.obj.buddy.Buddy.class);
-            if (buddy != null && buddy.buddy() != null && buddy.buddy().group >= 0 && buddy.buddy().group < BuddyWnd.gc.length) {
-                buddyColor = BuddyWnd.gc[buddy.buddy().group];
+            if (buddy != null && buddy.buddy() != null && buddy.buddy().group >= 0) {
+                buddyColor = BuddyWnd.gcolor(buddy.buddy().group);
             }
 
             synchronized (((NMapView) gui.map).tempMarkList)
@@ -415,8 +415,8 @@ public class NGob
             // Get buddy color if available
             Color buddyColor = null;
             haven.res.ui.obj.buddy.Buddy buddy = parent.getattr(haven.res.ui.obj.buddy.Buddy.class);
-            if (buddy != null && buddy.buddy() != null && buddy.buddy().group >= 0 && buddy.buddy().group < BuddyWnd.gc.length) {
-                buddyColor = BuddyWnd.gc[buddy.buddy().group];
+            if (buddy != null && buddy.buddy() != null && buddy.buddy().group >= 0) {
+                buddyColor = BuddyWnd.gcolor(buddy.buddy().group);
             }
 
             synchronized (((NMapView) gui.map).tempMarkList) {

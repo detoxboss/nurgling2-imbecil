@@ -2590,8 +2590,8 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
                         
                         // Update buddy color
                         haven.res.ui.obj.buddy.Buddy buddy = g.getattr(haven.res.ui.obj.buddy.Buddy.class);
-                        if(buddy != null && buddy.buddy() != null && buddy.buddy().group >= 0 && buddy.buddy().group < BuddyWnd.gc.length) {
-                            cm.buddyColor = BuddyWnd.gc[buddy.buddy().group];
+                        if(buddy != null && buddy.buddy() != null && buddy.buddy().group >= 0) {
+                            cm.buddyColor = BuddyWnd.gcolor(buddy.buddy().group);
                         } else {
                             cm.buddyColor = null;
                         }

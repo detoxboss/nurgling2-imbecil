@@ -88,15 +88,17 @@ public class NKinSettings extends Window
     public static final int margin3 = 4 * UI.scale(5);
 
     public class GroupSelector extends Widget {
+        private static final int cols = Math.min(10, BuddyWnd.ncolors);
+        private static final int rows = Math.max(1, (BuddyWnd.ncolors + cols - 1) / cols);
         public int group;
-        public GroupRect[] groups = new GroupRect[BuddyWnd.gc.length];
+        public GroupRect[] groups = new GroupRect[BuddyWnd.ncolors];
 
         public GroupSelector(int group) {
-            super(new Coord(BuddyWnd.gc.length * margin3, margin3));
+            super(new Coord(cols * margin3, rows * margin3));
             this.group = group;
-            for (int i = 0; i < BuddyWnd.gc.length; ++i) {
+            for (int i = 0; i < BuddyWnd.ncolors; ++i) {
                 groups[i] = new GroupRect(this, i, group == i);
-                add(groups[i], new Coord(i * margin3, 0));
+                add(groups[i], new Coord((i % cols) * margin3, (i / cols) * margin3));
             }
         }
 
@@ -111,10 +113,10 @@ public class NKinSettings extends Window
         public void update(int group) {
             if(group == this.group)
                 return;
-            if(this.group >= 0)
+            if((this.group >= 0) && (this.group < groups.length))
                 groups[this.group].unselect();
             this.group = group;
-            if(group >= 0)
+            if((group >= 0) && (group < groups.length))
                 groups[group].select();
         }
 
@@ -144,7 +146,7 @@ public class NKinSettings extends Window
                 g.chcolor(Color.LIGHT_GRAY);
                 g.frect(Coord.z, selsz);
             }
-            g.chcolor(BuddyWnd.gc[group]);
+            g.chcolor(BuddyWnd.gcolor(group));
             g.frect(offset, colsz);
             g.chcolor();
         }

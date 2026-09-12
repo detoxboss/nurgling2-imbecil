@@ -354,7 +354,7 @@ public class MapWnd extends Window implements Console.Directory {
     }
 
     public void mark(Location loc, boolean onmap, String name) {
-	mark(loc, onmap, name, BuddyWnd.gc[new Random().nextInt(BuddyWnd.gc.length)]);
+	mark(loc, onmap, name, BuddyWnd.gcolor(new Random().nextInt(BuddyWnd.ncolors)));
     }
 
     public void mark(Location loc, boolean onmap, String name, Color color) {
@@ -837,7 +837,7 @@ public class MapWnd extends Window implements Console.Directory {
 		    PMarker pm = (PMarker)mark;
 		    colsel = tool.add(new GroupSelector(Math.max(0, Utils.index(BuddyWnd.gc, pm.color))) {
 			    public void changed(int group) {
-				pm.color = BuddyWnd.gc[group];
+				pm.color = BuddyWnd.gcolor(group);
 				view.file.update(mark);
 				uploadpmarker(mark);
 			    }
