@@ -322,3 +322,125 @@ and toggling threshold takes effect without a client restart.
 **Superseded when:** upstream ships an equivalent configurable-threshold, DrinkMeter-based, bot-agnostic
 Auto-drink of its own — at which point this override should be diffed against upstream's approach rather
 than assumed to still be correct.
+
+## Kin/Village permission groups: compact quick-picker + client-side numeric dropdown
+
+**Files:** `src/haven/BuddyWnd.java` (`ncolors`, `nquick`, `named`/`gc`, `GroupSelector`, `BuddyInfo`,
+`BuddyList.ItemWidget`, the `@RName("grp")` factory), `src/nurgling/widgets/NExtendedGroupSelector.java`,
+`src/nurgling/widgets/NGroupLabelPopup.java`, `src/nurgling/conf/NGroupLabels.java`,
+`src/nurgling/NConfig.java` (`Key.kinGroupLabels`, `Key.villageGroupLabels`), `src/lang/messages.properties`,
+`src/lang/messages_ru.properties`.
+
+**History — read before touching this again:** an earlier version of this work (PR #7, merged) grew
+`BuddyWnd.GroupSelector` itself from a one-row, 8-square grid into a multi-row grid (28, then 40,
+colour squares) so every group had its own always-visible tile. Live testing proved this broke the
+**server-distributed** Village permission window: that resource UI has no source in this repository
+(confirmed — nothing under `src/` implements the Village member list, its "Groups:"/member-detail
+panel, or "Banish"/"Forget"), and it positions those buttons assuming the `grp` widget it requests by
+name stays roughly one row tall. With 3-4 rows, Banish/Forget ended up drawn on top of groups ~20-29,
+making them unclickable and turning a click there into an accidental Banish/Forget instead. Vendoring
+the Village resource (`haven.Resource get-code` against a live client, `docs/resource-upgrade-strategy.md`)
+to fix its layout assumptions was deliberately rejected — this fork syncs against upstream Nurgling2
+frequently and a vendored copy of a server resource is exactly the kind of long-lived, version-bumping
+maintenance burden that policy tries to avoid for a single UI convenience feature. **Do not re-attempt
+growing `BuddyWnd.GroupSelector`'s row count to expose more groups as colour squares — this is the
+second time that specific approach has been tried and broken the Village window; the fix below is the
+replacement, not an addition to it.**
+
+**Fork behavior (current):** Three distinct, separately-named concepts, kept from being confused with
+each other or with `gc.length`:
+
+- `BuddyWnd.ncolors = 40` — the total number of distinct, assignable Kin/Village permission groups
+  (`0..39`). Colours 0..27 are byte-for-byte what PR #7 shipped; groups 28..39 add 12 more distinct
+  colours. This is what map-marker enumeration (`MapWnd`), minimap player-icon enumeration
+  (`res/gfx/hud/mmap/plo/Factory.java`), and `pcolor()`'s reverse lookup iterate over — unrelated to
+  how many of them get a picker button.
+- `BuddyWnd.nquick = 8` — how many low-numbered groups get an always-visible, one-click colour square
+  on `BuddyWnd.GroupSelector`'s row. **This class is otherwise untouched from its original upstream
+  shape**: one row, `nquick` squares, safely ignores/no-ops on any current-group value `>= nquick`
+  (its existing bounds checks in `update()` already handled this correctly - no logic change was
+  needed there, only shrinking the constant it sizes itself from). `MapWnd`'s map-marker colour picker
+  and `NKinSettings`'s per-group notification picker (which duplicates `GroupRect`/`GroupSelector`
+  locally, not a subclass) both construct this class directly and are consequently back to being
+  exactly as simple as before this whole feature existed — **zero changes were made to either file**.
+- `gc.length` (255) — unchanged from PR #7: the safe backing table for any server-sent group id
+  0..254, regardless of how many are selectable.
+
+Access to the full `0..ncolors-1` range, for the two places a person actually assigns/inspects a
+group (the Kin per-buddy panel, and the Village permission UI), is added by a new, Nurgling-owned
+`nurgling.widgets.NExtendedGroupSelector` — composition, not inheritance: it holds an ordinary,
+unmodified `BuddyWnd.GroupSelector` (`nquick` colour squares) plus a `haven.Dropbox<Integer>` listing
+all `0..ncolors-1` (each row: colour swatch + `"N"` or `"N - Label"`) plus a small button opening the
+label-editor popup — laid out side by side, so the composite is exactly as tall as the wrapped
+selector and only modestly wider. This is the same strategy proven by the Brodgar client (irongete):
+keep the server-facing selector's shape untouched, and reach higher-numbered groups through a
+client-side control that drives the *existing* selector through its own normal API rather than
+inventing a parallel one.
+
+**The critical dispatch path (must survive any refactor of this file):** choosing group N in the
+dropdown calls `quick.select(N)` — the exact same public method a mouse click on one of `quick`'s own
+colour squares calls — which internally does `update(N)` then invokes `quick`'s own (overridden)
+`changed(N)`, which forwards to `NExtendedGroupSelector`'s own overridable `changed(int)`. The two
+places that construct this class (the `grp` `@RName` factory, and `BuddyInfo`) override exactly that
+method the same way they previously overrode `GroupSelector.changed` directly (`wdgmsg("ch", group)`
+for Village, `buddy.chgrp(group)` for Kin) - **unchanged**. `NExtendedGroupSelector`/`Dropbox` never
+call `wdgmsg` themselves and never invent a protocol message; the owning UI (Village resource or
+`BuddyWnd.BuddyInfo`) remains solely responsible for that, exactly as before. The reverse direction
+(server/Kin-update driven) goes through a `update(int)` method on `NExtendedGroupSelector` that pushes
+the new group onto both the quick squares and the dropdown's displayed value without re-notifying the
+owner — `BuddyInfo.update()` calls `grp.update(buddy.group)` for this (previously a raw
+`grp.group = buddy.group;` field write that never actually refreshed the quick-square highlighting; a
+latent bug this exposed and fixed as a side effect, not a scope increase).
+
+Because `NExtendedGroupSelector` wraps `GroupSelector` rather than replacing it, and reports a size
+exactly matching the wrapped selector's own height, the Village resource's Banish/Forget positioning
+(which assumes a roughly-one-row selector) is undisturbed with **zero changes to any Village-adjacent
+layout code** — nothing needed to be injected below the selector, and the label editor lives in a
+separate popup window instead of an inline control that would have grown the row.
+
+**Client-side custom labels:** `nurgling.conf.NGroupLabels` (unchanged in approach from the earlier
+attempt) persists labels through two separate `NConfig.Key` slots, `kinGroupLabels` and
+`villageGroupLabels`, so the same numeric group id can carry an independent meaning in each context
+(e.g. Kin group 4 = "Close Friend", Village group 4 = "Market Staff" — both valid simultaneously).
+Labels never touch the group id, a buddy's name, or any server message; an empty label clears the
+stored entry. **Persistence scope:** both keys go through `NConfig.get`/`set`'s existing per-world
+("genus") profile resolution — the same mechanism `NKinProp` (per-group Kin notification prefs)
+already uses — rather than a new global/ambient store, so labels are scoped per world/server and
+shared by every session on it, with no cross-world leakage. `NConfig`'s profile model has no
+per-character sub-scoping today, so this fork does not invent one for labels either.
+
+The editor itself is `nurgling.widgets.NGroupLabelPopup`, a small free-floating `Window` (never a
+child of `NExtendedGroupSelector` or anything Village-owned) opened by a compact button next to the
+dropdown. It saves on Enter, on the Save button, and — critically — on every close path including the
+titlebar cross and Escape (`destroy()` is the single, idempotent save point every path routes
+through), so an edit is never silently lost. Because it is a free-floating window rather than an
+inline control, it cannot affect either `BuddyWnd.GroupSelector`'s or the Village resource's layout no
+matter how long a label gets.
+
+**Kin list display:** `BuddyWnd.BuddyList.ItemWidget` renders `Name [N]` (bracketed group id in
+neutral light-gray text after the still group-coloured name) via a cached `Buddy.grouptag()`,
+draw-layer only — `Buddy.name`, sorting, and searching are untouched. The equivalent for the Village
+member list was **not implemented**: that list is rendered entirely by the same source-less Village
+resource discussed above, and there is no seam into it from this tree beyond the `grp` widget factory
+already used for the selector itself.
+
+**Minimum hook that must survive:** `BuddyWnd.GroupSelector` must stay a plain, one-row,
+`nquick`-square widget with no dependency on `NExtendedGroupSelector`, `NGroupLabels`, or any other
+nurgling class — the moment it grows past roughly one row again, the Village layout bug this entry
+exists to fix comes back. `ncolors`/`nquick`/`gc.length` must stay three distinct constants (`nquick
+<= ncolors <= gc.length`). `NExtendedGroupSelector.quick.select(int)` must remain the sole path a
+dropdown selection uses to change the current group — never a direct `wdgmsg` call from
+Nurgling-owned code. The `grp` `@RName` factory must keep returning a `GroupSelector`-compatible
+widget (currently `NExtendedGroupSelector`), since that factory is this fork's only extension point
+into the Village resource.
+
+**Verify:** `ant test && ant jar`; in-game, confirm the Village permission window's Banish/Forget sit
+exactly where they did before any of this work, that groups 0/7/8/20/39 are selectable via the
+dropdown in both Kin and Village and via colour square for 0..7, that assigning group 39 sends `39`
+(not a remapped index), that Kin/Village labels persist independently across a client restart, and
+that `NKinSettings`/`MapWnd` are visually and behaviorally unchanged.
+
+**Superseded when:** upstream ships an equivalent expanded permission-group system, or the Village
+permission window's own client-side implementation changes such that a taller in-place selector no
+longer breaks its layout — at which point this override (and the "do not re-attempt" note above)
+should be re-evaluated against whatever upstream's approach is, not assumed to still be necessary.
