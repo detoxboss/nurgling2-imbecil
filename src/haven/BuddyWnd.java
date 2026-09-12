@@ -52,7 +52,21 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     public static final int offset = UI.scale(35);
     public static final Tex online = Resource.loadtex("gfx/hud/online");
     public static final Tex offline = Resource.loadtex("gfx/hud/offline");
-    public static final int ncolors = 28;
+    /**
+     * Total number of distinct, assignable Kin/Village permission groups (0..{@code ncolors}-1).
+     * Not the same concept as {@link #nquick} (how many of them get a one-click colour square on
+     * the compact {@link GroupSelector} row) or {@code gc.length} (the safe server-range backing
+     * table below) - keep those three distinct rather than substituting one for another.
+     */
+    public static final int ncolors = 40;
+    /**
+     * How many low-numbered groups get an always-visible, one-click colour square on the compact
+     * {@link GroupSelector} row. Groups {@code nquick..ncolors-1} are still fully assignable, just
+     * only reachable through the numeric dropdown ({@code nurgling.widgets.NExtendedGroupSelector}),
+     * not a colour square - this is what keeps the selector exactly one row tall regardless of how
+     * many groups {@link #ncolors} grows to.
+     */
+    public static final int nquick = 8;
     /**
      * The server accepts kin groups beyond what the picker exposes; keep the backing table large
      * enough for server IDs and only expose {@link #ncolors} entries as selectable in the UI.
@@ -87,6 +101,22 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	new Color(0, 192, 255),
 	new Color(192, 0, 255),
 	new Color(255, 0, 192),
+	// Groups 28..39: added to grow the assignable range from 28 to 40 groups. Colours
+	// 0..27 above are untouched so no existing buddy's on-screen colour changes. None of
+	// these get a quick-square button (see nquick above) - they're reachable only through
+	// the numeric dropdown in nurgling.widgets.NExtendedGroupSelector.
+	new Color(255, 96, 0),
+	new Color(96, 255, 0),
+	new Color(0, 255, 150),
+	new Color(0, 150, 255),
+	new Color(150, 0, 255),
+	new Color(255, 0, 150),
+	new Color(255, 150, 200),
+	new Color(150, 255, 200),
+	new Color(200, 150, 255),
+	new Color(255, 215, 90),
+	new Color(180, 220, 255),
+	new Color(255, 255, 200),
     };
     static {
 	if(named.length != ncolors)
@@ -206,6 +236,17 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	    return(rname);
 	}
 
+	/** "[N]" suffix shown next to the name in the buddy list; presentation only, never touches {@link #name}. */
+	private Text grouptag = null;
+	private int grouptagGroup = -1;
+	public Text grouptag() {
+	    if((grouptag == null) || (grouptagGroup != group)) {
+		grouptag = Text.render("[" + group + "]");
+		grouptagGroup = group;
+	    }
+	    return(grouptag);
+	}
+
 	public Map<String, Runnable> opts() {
 	    Map<String, Runnable> opts = new LinkedHashMap<>();
 	    if(online >= 0) {
@@ -273,16 +314,25 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	}
     }
 
+    /**
+     * Compact, one-row quick-colour picker for groups {@code 0..nquick-1}. Deliberately kept close
+     * to its original upstream shape: a server-provided UI (the Village permission window) embeds
+     * this widget by name (see the {@code grp} factory below) and lays out its own controls
+     * (Banish/Forget, member rows) assuming this stays roughly one row tall - growing it here to fit
+     * more than {@link #nquick} groups previously broke that layout. Access to the full 0..{@link
+     * #ncolors}-1 range is added separately, client-side, by {@code nurgling.widgets.NExtendedGroupSelector},
+     * which wraps an instance of this class unmodified rather than changing its shape.
+     */
     public static class GroupSelector extends Widget {
-	private static final int cols = Math.min(10, ncolors);
-	private static final int rows = Math.max(1, (ncolors + cols - 1) / cols);
+	private static final int cols = Math.min(10, nquick);
+	private static final int rows = Math.max(1, (nquick + cols - 1) / cols);
 	public int group;
-	public GroupRect[] groups = new GroupRect[ncolors];
+	public GroupRect[] groups = new GroupRect[nquick];
 
 	public GroupSelector(int group) {
 	    super(new Coord(cols * margin3, rows * margin3));
 	    this.group = group;
-	    for (int i = 0; i < ncolors; ++i) {
+	    for (int i = 0; i < nquick; ++i) {
 		groups[i] = new GroupRect(this, i, group == i);
 		add(groups[i], new Coord((i % cols) * margin3, (i / cols) * margin3));
 	    }
@@ -351,7 +401,11 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     @RName("grp")
     public static class $grp implements Factory {
 	public Widget create(UI ui, Object[] args) {
-	    return(new GroupSelector(INT.of(args[0])) {
+	    /* This factory is how the server-resource-driven Village permission UI asks for a group
+	     * selector by name, for both its top-level and per-member pickers. NExtendedGroupSelector
+	     * wraps the plain, unmodified GroupSelector rather than changing it, so this stays exactly
+	     * as tall as before and the Village resource's own Banish/Forget layout is undisturbed. */
+	    return(new NExtendedGroupSelector(INT.of(args[0]), NGroupLabels.Scope.VILLAGE) {
 		    public void changed(int group) {
 			wdgmsg("ch", group);
 		    }
@@ -363,7 +417,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public final Buddy buddy;
 	private final Avaview ava;
 	private final TextEntry nick;
-	private final GroupSelector grp;
+	private final NExtendedGroupSelector grp;
 	private long atime, utime;
 	private Label atimel = null;
 	private Button[] opts = {};
@@ -379,7 +433,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			buddy.chname(text);
 		    }
 		}, margin2, ava.c.y + ava.sz.y + margin2);
-	    this.grp = add(new GroupSelector(buddy.group) {
+	    this.grp = add(new NExtendedGroupSelector(buddy.group, NGroupLabels.Scope.KIN) {
 		    public void changed(int group) {
 			buddy.chgrp(group);
 		    }
@@ -435,7 +489,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public void update() {
 	    nick.settext(buddy.name);
 	    nick.commit();
-	    grp.group = buddy.group;
+	    grp.update(buddy.group);
 	    setatime();
 	    setopts();
 	}
@@ -470,7 +524,11 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			else if(item.online == 0)
 			    g.aimage(offline, Coord.of(sz.y / 2), 0.5, 0.5);
 			g.chcolor(gcolor(b.group));
-			g.aimage(b.rname().tex(), Coord.of(sz.y + margin1, sz.y / 2), 0.0, 0.5);
+			Tex nametex = b.rname().tex();
+			Coord namec = Coord.of(sz.y + margin1, sz.y / 2);
+			g.aimage(nametex, namec, 0.0, 0.5);
+			g.chcolor(Color.LIGHT_GRAY);
+			g.aimage(b.grouptag().tex(), Coord.of(namec.x + nametex.sz().x + margin1, namec.y), 0.0, 0.5);
 			if(b.lastOnline!=null)
 				g.aimage(b.lastOnline.tex(), Coord.of(sz.x - b.lastOnline.tex().sz().x - margin1,sz.y / 2), 0.0, 0.5);
 			g.chcolor();
