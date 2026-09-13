@@ -370,7 +370,6 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	protected void changed(int group) {
 	}
 
-	/** Overridden by {@code NLabeledGroupSelector} to append a custom label; plain group number here. */
 	protected String grouptip(int group) {
 	    return(L10n.get("group.tooltip", group));
 	}
@@ -448,7 +447,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	    /* This factory is how the (server-resource-driven) Village permission UI asks for a
 	     * group selector by name, for both its top-level and per-member pickers, so the label
 	     * editor added here covers both of those Village states as well as Kin below. */
-	    return(new NLabeledGroupSelector(INT.of(args[0]), NGroupLabels.Scope.VILLAGE) {
+	    return(new GroupSelector(INT.of(args[0])) {
 		    public void changed(int group) {
 			wdgmsg("ch", group);
 		    }
@@ -476,7 +475,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			buddy.chname(text);
 		    }
 		}, margin2, ava.c.y + ava.sz.y + margin2);
-	    this.grp = add(new NLabeledGroupSelector(buddy.group, NGroupLabels.Scope.KIN) {
+	    this.grp = add(new GroupSelector(buddy.group) {
 		    public void changed(int group) {
 			buddy.chgrp(group);
 		    }
