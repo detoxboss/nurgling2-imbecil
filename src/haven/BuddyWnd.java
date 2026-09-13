@@ -53,7 +53,21 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     public static final int offset = UI.scale(35);
     public static final Tex online = Resource.loadtex("gfx/hud/online");
     public static final Tex offline = Resource.loadtex("gfx/hud/offline");
+    /**
+     * Total number of distinct, assignable Kin/Village permission groups (0..{@code ncolors}-1).
+     * Not the same concept as {@link #nquick} (how many of them get a one-click colour square on
+     * the compact {@link GroupSelector} row) or {@code gc.length} (the safe server-range backing
+     * table below) - keep those three distinct rather than substituting one for another.
+     */
     public static final int ncolors = 40;
+    /**
+     * How many low-numbered groups get an always-visible, one-click colour square on the compact
+     * {@link GroupSelector} row. Groups {@code nquick..ncolors-1} are still fully assignable, just
+     * only reachable through the numeric companion control ({@code nurgling.widgets.NGroupSelectorAugmenter}),
+     * not a colour square - this is what keeps the selector exactly one row tall regardless of how
+     * many groups {@link #ncolors} grows to.
+     */
+    public static final int nquick = 8;
     /**
      * The server accepts kin groups beyond what the picker exposes; keep the backing table large
      * enough for server IDs and only expose {@link #ncolors} entries as selectable in the UI.
@@ -88,8 +102,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	new Color(0, 192, 255),
 	new Color(192, 0, 255),
 	new Color(255, 0, 192),
-	// Groups 28..39: added to grow the selectable palette from 28 to 40 groups. Colours
-	// 0..27 above are untouched so no existing buddy's on-screen colour changes.
+	// Groups 28..39: added to grow the assignable range from 28 to 40 groups. Colours
+	// 0..27 above are untouched so no existing buddy's on-screen colour changes. None of
+	// these get a quick-square button (see nquick above) - they're reachable only through
+	// the numeric companion control (nurgling.widgets.NGroupSelectorAugmenter/-Companion).
 	new Color(255, 96, 0),
 	new Color(96, 255, 0),
 	new Color(0, 255, 150),
@@ -312,16 +328,40 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	}
     }
 
+    /**
+     * Compact, one-row quick-colour picker for groups {@code 0..nquick-1}. Kept byte-for-byte close to
+     * its original upstream shape, because it is not only Kin that embeds it: the Village and Realm
+     * permission windows and the personal-claim ("Stake") permission window are all server-distributed
+     * resource code with no source in this repository, and each constructs and lays out an instance of
+     * this exact class directly (not through any {@code @RName} factory - see the reverted {@code grp}
+     * factory below) assuming it stays roughly one row tall. Growing this class itself to show more than
+     * {@link #nquick} groups previously broke those resource windows' own Banish/Forget/permission-row
+     * layouts.
+     *
+     * <p>Access to the full 0..{@link #ncolors}-1 range (or a narrower range, for the claim window - see
+     * {@code nurgling.widgets.NGroupSelectorAugmenter}) is added without touching this class's shape or
+     * API, via the two narrow lifecycle hooks below: whichever code constructs and {@code add()}s an
+     * instance, {@link #attached()} lets a Nurgling-owned companion detect it once it is genuinely part
+     * of a live widget tree (not merely constructed - a resource window commonly finishes building its
+     * whole child tree in its own constructor before that constructor's own instance is itself attached
+     * to anything, so classifying by ancestor before {@link #attached()} fires would be unreliable), and
+     * {@link #dispose()} lets that companion clean itself up when this selector's subtree is torn down,
+     * however that teardown was triggered.
+     */
     public static class GroupSelector extends Widget {
-	private static final int cols = Math.min(10, ncolors);
-	private static final int rows = Math.max(1, (ncolors + cols - 1) / cols);
+	private static final int cols = Math.min(10, nquick);
+	private static final int rows = Math.max(1, (nquick + cols - 1) / cols);
+	/** This class's own footprint (currently {@code cols x rows} one row), so a client-side
+	 *  extension can size itself to fit wherever a plain instance of this class already fits,
+	 *  without duplicating the cols/rows formula above. */
+	public static final Coord basesz = new Coord(cols * margin3, rows * margin3);
 	public int group;
-	public GroupRect[] groups = new GroupRect[ncolors];
+	public GroupRect[] groups = new GroupRect[nquick];
 
 	public GroupSelector(int group) {
 	    super(new Coord(cols * margin3, rows * margin3));
 	    this.group = group;
-	    for (int i = 0; i < ncolors; ++i) {
+	    for (int i = 0; i < nquick; ++i) {
 		groups[i] = new GroupRect(this, i, group == i);
 		add(groups[i], new Coord((i % cols) * margin3, (i / cols) * margin3));
 	    }
@@ -348,6 +388,16 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public void select(int group) {
 	    update(group);
 	    changed(group);
+	}
+
+	protected void attached() {
+	    super.attached();
+	    NGroupSelectorAugmenter.attached(this);
+	}
+
+	public void dispose() {
+	    NGroupSelectorAugmenter.detached(this);
+	    super.dispose();
 	}
     }
 

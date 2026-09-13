@@ -323,145 +323,243 @@ and toggling threshold takes effect without a client restart.
 Auto-drink of its own — at which point this override should be diffed against upstream's approach rather
 than assumed to still be correct.
 
-## Expanded Kin/Village permission group palette, numeric IDs, and client-side group labels
+## Kin/Village/Realm/claim permission groups: companion-selector overlay on a lifecycle hook
 
-**Files:** `src/haven/BuddyWnd.java` (`ncolors`, `named`/`gc`, `GroupRect`, `GroupSelector`,
-`BuddyInfo`, `BuddyList.ItemWidget`, the `@RName("grp")` factory), `src/nurgling/widgets/NLabeledGroupSelector.java`,
-`src/nurgling/conf/NGroupLabels.java`, `src/nurgling/widgets/NKinSettings.java`, `src/nurgling/NConfig.java`
-(`Key.kinGroupLabels`, `Key.villageGroupLabels`), `src/lang/messages.properties`,
+**Files:** `src/haven/BuddyWnd.java` (`ncolors`, `nquick`, `named`/`gc`, `GroupSelector.basesz` +
+`attached()`/`dispose()` hooks; `BuddyInfo`, `BuddyList.ItemWidget`, the `@RName("grp")` factory - all
+of which are now **unchanged from plain upstream** except the `ncolors`/`nquick` split), `src/haven/Polity.java`
+(`Member.group`, `MemberList.makeitem`, `uimsg("add")`), `src/nurgling/widgets/NGroupSelectorAugmenter.java`,
+`src/nurgling/widgets/NGroupSelectorCompanion.java`, `src/nurgling/widgets/NGroupLabelPopup.java`,
+`src/nurgling/conf/NGroupLabels.java`, `src/nurgling/widgets/NKinSettings.java`,
+`src/nurgling/NConfig.java` (`Key.kinGroupLabels`, `Key.villageGroupLabels`), `src/lang/messages.properties`,
 `src/lang/messages_ru.properties`.
 
-**Fork behavior:**
+**History — read before touching this again.** Three earlier versions of this work were tried and
+rejected, each by a real, specific failure:
 
-- `BuddyWnd.ncolors` raised from upstream's 8 to 40 selectable Kin/Village permission groups, backed
-  by a 255-entry `gc[]` palette (unchanged from the prior 28-group PR) so any server-sent group id up
-  to 254 still resolves to *some* colour via `gcolor()`'s bounds-checked lookup even though only
-  groups 0..39 are colour-picker-selectable. Colours 0..27 are byte-for-byte the values shipped in the
-  original 28-group work; groups 28..39 add 12 new colours chosen for visual distinctness and
-  legibility as coloured player-name text against Haven's dark UI. The picker grid auto-derives its
-  layout from `ncolors` (`cols = min(10, ncolors)`, `rows = ceil(ncolors / cols)`), which lands on
-  10x4 for 40 groups without any layout-constant changes.
-- Every `GroupRect` colour tile now draws its own numeric group id centered on the tile
-  (`BuddyWnd.numtex(int)`: a small bold stroked white-on-black digit label, built once per id and
-  cached, so it reads over any tile colour and scales with `UI.scale`). This applies to **every**
-  `GroupSelector`/`GroupRect` instance, including `MapWnd`'s unrelated map-marker colour picker and
-  `NKinSettings`'s per-group notification-preference picker (which duplicates `GroupRect` locally and
-  now calls the same shared `BuddyWnd.numtex(int)` helper) — the id number itself is inert,
-  presentation-only information appropriate anywhere the shared palette is used.
-- A new `nurgling.widgets.NLabeledGroupSelector extends BuddyWnd.GroupSelector` adds a compact,
-  client-side-only label editor (a caption + `TextEntry`) beneath the colour tiles, and enriches
-  `GroupRect`'s tooltip (via the newly-`protected` `GroupSelector.grouptip(int)` hook) to show the
-  custom label when one is set. **Only** two call sites use it: `BuddyWnd.BuddyInfo`'s per-buddy Kin
-  selector, and the `@RName("grp")` factory that the (server-resource-driven) Village permission UI
-  asks for its group-selector widgets by name — this is the *only* seam this fork has into that
-  resource UI; the Village panel's own layout/reflow code is not in this tree (see the "Village
-  layout" note below). `MapWnd`'s marker picker and `NKinSettings`'s notification picker deliberately
-  keep constructing the plain `BuddyWnd.GroupSelector` and never gain the label editor.
-- `nurgling.conf.NGroupLabels` persists the labels through `NConfig.Key.kinGroupLabels` and
-  `NConfig.Key.villageGroupLabels` — two separate keys so the same numeric group id can carry a
-  different meaning in Kin vs. Village without one overwriting the other. Labels never touch the
-  group id, a buddy's name, or any server message; an empty value clears the stored label.
-  **Persistence scope:** both keys go through `NConfig.get`/`set`'s existing per-world ("genus")
-  profile resolution — the same mechanism `NKinProp` (per-group Kin notification prefs) already uses
-  — rather than a new global/ambient store. That means labels are scoped per world/server the
-  character plays on, shared by every session on that world, and don't leak across worlds. No
-  per-character sub-scoping exists in `NConfig`'s current profile model, so this fork does not
-  introduce one for labels either; if a future need arises to distinguish characters sharing one
-  world's profile, that's a `NConfig` profile-model change, not something to special-case here.
-- `BuddyWnd.BuddyInfo.update()` now calls `grp.update(buddy.group)` instead of directly overwriting
-  the `group` field, so a buddy's group changing out from under an open Kin panel (e.g. another client
-  changing it) keeps the tile highlighting and the label editor's displayed group in sync — this was a
-  latent staleness gap in the pre-40-group code that the label editor's own refresh hook exposed.
-- The Kin buddy list (`BuddyWnd.BuddyList.ItemWidget.draw()`) now renders `Name [N]` — the bracketed
-  group id in neutral light-gray text after the (still group-coloured) name — via a new
-  `Buddy.grouptag()` cached `Text`, entirely at the draw layer. `Buddy.name`, sorting, and searching
-  are untouched.
+1. PR #7 (merged) grew `BuddyWnd.GroupSelector` itself from a one-row, 8-square grid into a multi-row
+   grid (28, then 40, colour squares). Live testing proved this broke the Village permission window:
+   it positions Banish/Forget assuming the selector stays roughly one row tall, so with 3-4 rows they
+   drew on top of groups ~20-29, making those unclickable and turning a click there into an accidental
+   Banish/Forget.
+2. The first replacement kept `GroupSelector` compact but added a visible `nquick`-square row **plus**
+   a dropdown **plus** an edit button side by side in one `NExtendedGroupSelector`. That combined width
+   (~350px) was never checked against the ~160px a one-row `GroupSelector` actually occupies
+   (`BuddyWnd.width` is `UI.scale(263)`, and the Village window is no wider) - live testing showed the
+   dropdown and edit button clipped almost entirely off the Kin panel, and invisible on both Village
+   selectors.
+3. The second replacement fixed the width (dropdown + edit button only, capped at the one-row
+   footprint) and wired it in by having the `@RName("grp")` factory and `BuddyWnd.BuddyInfo` construct
+   the new control directly, on the theory that `grp` was the Village permission UI's creation path.
+   **Live testing proved this theory wrong**: Kin's dropdown worked (because `BuddyInfo` constructs its
+   own selector directly, in this tree), but both Village selectors still showed only the original
+   8 squares - `grp` was never their creation path. Cross-checked against a real reference client that
+   had already traced this exact architecture (irongete's `brodgar-io-client`, commits `87230ee3`,
+   `a580b7fc`, `715251e0` - see "Verification against a reference client" below): the Village, Realm,
+   and personal-claim ("Stake") permission windows are server-distributed resource code (`ui/vlg`,
+   `ui/realm`, `ui/land`) that **construct `BuddyWnd.GroupSelector` directly in their own Java
+   constructors**, never through any `@RName` factory. `@RName("grp")` is the wire protocol's generic
+   widget-creation path; these windows are bespoke compiled classes with no reason to use it once they
+   already have compile-time access to `haven.BuddyWnd.GroupSelector`.
 
-**Village UI is only partially reachable from this tree — read before touching layout again:** the
-Village member-list rows, the "Groups:"/member-detail panel framing, and the "Banish" button are
-rendered by a **server-distributed resource**, not by any file in this git repository (confirmed: no
-`Village`/`Realm`/"Banish" source exists anywhere under `src/`). The `@RName("grp")` factory above is
-the *only* point where that resource asks the client for a widget by name and gets back fork code —
-everything around it (member row text, panel sizing, button placement) is opaque compiled resource
-code this fork cannot edit without first running `haven.Resource get-code` against a **live, connected
-client** (`docs/resource-upgrade-strategy.md`), which is not possible in an offline dev environment.
-Concretely, this means:
-  - `NLabeledGroupSelector` reports its true (now-taller, up to 4 rows plus the label editor) size
-    through the ordinary `pack()`/`resize()`/`cresize()` path, so *if* the Village resource's own
-    layout positions things like "Banish" relative to the selector's actual `sz` (the same idiom this
-    file itself uses everywhere, e.g. `grp.c.y + grp.sz.y + margin2`), the containing panel reflows
-    correctly for free. This cannot be verified from source and needs a live-game check (see below).
-  - Adding a `[group]` suffix to Village member-list rows (mirroring the Kin list change above) is
-    **not implemented** — there is no seam into that rendering from this tree at all. Doing so would
-    require fetching and partially vendoring the Village resource's source per
-    `docs/resource-upgrade-strategy.md`, which is a real fork-divergence decision (ongoing maintenance
-    burden across every future Village resource version bump) and was intentionally not made
-    unilaterally here. If this is wanted, the next step is running `get-code` against a live client to
-    see how small the actual seam is before deciding.
-  - If, after live testing, the four-row selector still overlaps "Banish" (i.e. the resource's Banish
-    placement turns out to be a baked constant rather than relative to the selector's size), the same
-    `get-code`-and-vendor decision applies — this cannot be fixed from `BuddyWnd.java` alone.
+**Do not re-attempt any of the three rejected approaches** (growing `GroupSelector`'s row count;
+laying a visible quick-square row out beside the dropdown; wiring the compact control in via `$grp` or
+by having first-party call sites construct it directly). The design below is the replacement for all
+three, not an addition to any of them.
 
-**Minimum hook that must survive:** `ncolors` staying in sync with `named.length` (enforced by the
-existing static-init `IllegalStateException` check); `gc[]` staying sized for the full server group
-range regardless of `ncolors`; the `@RName("grp")` factory continuing to hand back a `GroupSelector`
-(or subclass) rather than some other widget type, since that's the resource UI's only extension point
-into this code; `NConfig.Key.kinGroupLabels`/`villageGroupLabels` staying distinct keys.
+**Verification against a reference client.** `irongete/brodgar-io-client` (a separate, unrelated Haven
+& Hearth client fork) had already solved the identical problem and documented it in commit messages
+readable via `gh api repos/irongete/brodgar-io-client/commits/<sha>`. Three commits were fetched and
+read in full before any of this was implemented:
 
-**Verify:** `ant test && ant jar`; in-game, confirm groups 0/7/8/27/28/39 are selectable and show the
-right colour and digit(s) in both Kin and Village, that assigning group 39 to a buddy sends `39` (not
-a remapped index), that the Kin list shows `Name [N]`, that Kin and Village labels save/reload after a
-client restart and stay independent of each other, and — the still-open item — whether the Village
-member-detail panel now lays out all four selector rows plus the label editor without clipping behind
-"Banish".
+- `87230ee38c12e14679f8bc056de9885e528ee2b0` ("a group is a number, not a colour") - the same
+  out-of-bounds palette crash this fork already fixed in PR #7, and confirms `ui/vlg`'s `Village` /
+  `ui/realm`'s `Realm` construct `BuddyWnd.GroupSelector` directly (quoting an actual crash stack
+  frame, `haven.res.ui.vlg.Village$VMember.draw`).
+- `a580b7fce8f656d51572a6278e1fd50298b81c36` ("a row says which group it is in...") - the exact
+  `Polity.Member.group`/`uimsg("add")` change this fork's `Polity.java` diff now carries (verified
+  byte-for-byte against that commit's own diff before writing it here), and the finding that driving
+  the claim window's selector above group 7 is a **silent failure that measures as a client-side
+  problem**, not a crash.
+- `715251e03ad1d40975bad4bb90785fa24ee6b107` ("the claim's permission table answers for the whole
+  group space") - a full vendored copy of `ui/land`'s `Landwindow.java` (fetched and read in full),
+  which **conclusively identifies the claim-window limitation as an 8-long `int bflags[]` array inside
+  that resource's own, otherwise-unmodified Java code** (`bflags[group.group]`, read/written by
+  `updflags()` and the `"shared"` wdgmsg/uimsg), not a server data-model limit - Brodgar fixed it there
+  by vendoring exactly that one array's size to 255. **This fork deliberately does not do that** (see
+  "Personal claim ('Stake') window" below) - the 0..7 restriction here is this fork choosing not to
+  carry that vendored patch, correctly attributed to its real cause rather than described as a server
+  limitation.
 
-**Superseded when:** upstream ships an equivalent expanded permission-group system with its own
-numeric-id display and label support — at which point this override should be diffed against
-upstream's approach, not assumed to still be the better choice.
-## Per-instance gob Configure overrides
+Confidence levels differ across what was verified: `Landwindow`'s exact class
+(`haven.res.ui.land.Landwindow`), field (`BuddyWnd.GroupSelector group`), and construction pattern
+(`group = add(new BuddyWnd.GroupSelector(0) {...}, coord)`) come from a directly-read vendored copy -
+high confidence. `Village`'s exact class name (`haven.res.ui.vlg.Village`) is inferred from crash-report
+prose (a real stack trace element quoted twice across two commits, not from an independently vendored
+copy) - see the constant's own doc comment in `NGroupSelectorAugmenter.java` for the fallback behavior
+if it's ever wrong (Village simply gets no companion, not a misattributed one).
 
-**Files:** `src/nurgling/tools/GobCustomize.java`, `src/nurgling/widgets/GobConfigWindow.java`,
-`src/nurgling/contextmenu/ConfigureGobAction.java`, `src/nurgling/overlays/NGobConfigMarker.java`,
-`src/nurgling/overlays/NGobConfigLabel.java`, `src/nurgling/NConfig.java` (`Key.gobInstanceConf`),
-`src/lang/messages.properties`, `src/lang/messages_ru.properties`
+**Fork behavior (current):**
 
-**Fork behavior:** Upstream's Ctrl+RMB "Configure" window (scale/tint/marker/caption) resolves and
-persists settings by resource path alone (`GobCustomize.conf: res -> Settings`), so any edit applies
-to every gob of that resource type at once — configuring one cupboard silently reskins every cupboard.
-The fork adds a second settings layer, `GobCustomize.instConf: hash -> Settings`, keyed by
-`NGob#hash` (the SHA-256 of resource name + map grid id + in-grid position — the same identity
-`Container`/`ContainerDao` already use to persist individual storage containers). The Configure window
-gained a "This object" / "All objects of this type" scope choice (`RadioGroup`, defaulting to "this
-object" whenever the clicked gob has a resolvable hash), and is now retargeted by hash rather than by
-resource path so that opening it on two different physical gobs of the same resource never collides.
-`GobCustomize.effectiveSettings(gob)` resolves instance override, else type-wide setting, else
-defaults, and is what `apply(Gob)`/`scaleOf(Gob)` actually use — so both the attribute-based scaling
-path (`NGobCustomScale`/`NGobCustomTint`) and `CSprite`'s (`src/haven/resutil/CSprite.java`, untouched)
-scale-on-tick path pick up instance overrides for free.
+- Three previously-conflated concepts stay three distinct, separately-named constants, none used as a
+  stand-in for another: `BuddyWnd.ncolors = 40` (total assignable Kin/Village groups), `BuddyWnd.nquick
+  = 8` (how many groups get a colour square on the *plain* `GroupSelector`), `gc.length = 255` (safe
+  server-range backing table). `GroupSelector` itself is **back to being exactly what plain upstream
+  Nurgling2/Hafen ships** - one row, `nquick` squares, the same bounds-checked `update()`/`select()` it
+  always had - plus two narrow lifecycle hooks (below). `$grp` and `BuddyWnd.BuddyInfo` are likewise
+  back to constructing a plain `GroupSelector` directly, byte-for-byte identical to before this whole
+  feature existed except for the `ncolors`/`nquick` split.
+- The seam is now the two lifecycle hooks added to `GroupSelector` itself:
+  ```java
+  protected void attached() {
+      super.attached();
+      NGroupSelectorAugmenter.attached(this);
+  }
+  public void dispose() {
+      NGroupSelectorAugmenter.detached(this);
+      super.dispose();
+  }
+  ```
+  `attached()` (not `added()`) is used deliberately: a resource window commonly finishes building its
+  entire child tree, synchronously, inside its own constructor - which runs *before* the wire protocol
+  attaches that constructor's own widget instance to anything. Classifying a `GroupSelector` by walking
+  its ancestor chain at `added()` time would be unreliable (the chain isn't fully linked to the live
+  root yet for a selector nested inside a not-yet-attached sub-panel, e.g. Village's per-member panel).
+  `attached()` fires only once every ancestor up to the live root is genuinely connected (Hafen's own
+  `Widget.attached()` recursion guarantees this), making ancestor-based classification reliable
+  regardless of construction order. `dispose()` (not `destroy()`) is used for teardown for the mirror
+  reason: `Widget.destroy()` only reliably fires on the widget an `ui.destroy()` call directly targets;
+  a cascading teardown from an ancestor calls `rdispose()` → `dispose()` on descendants, never their
+  own `destroy()` override. `dispose()` is the one hook Hafen guarantees on every widget in a torn-down
+  subtree regardless of where the teardown was triggered.
+- `nurgling.widgets.NGroupSelectorAugmenter` is the classifier: on `attached()`, it walks the new
+  `GroupSelector`'s ancestor chain and decides whether to attach a companion, by structural/resource
+  identity, never a localized caption:
+  - `getparent(MapWnd.class) != null` → **leave alone** (map-marker picker; simple by design).
+  - `getparent(BuddyWnd.BuddyInfo.class) != null` → Kin scope, groups 0..`ncolors`-1.
+  - `getparent(NKinSettings.class) != null` → Kin scope, groups 0..`ncolors`-1 (see below).
+  - immediate parent's runtime class is `haven.res.ui.land.Landwindow` → Kin scope, groups
+    0..`nquick`-1 **only** (see "Personal claim" below).
+  - `getparent(Polity.class)` resolves and that instance's runtime class is `haven.res.ui.vlg.Village`
+    → Village scope, groups 0..`ncolors`-1 (covers **both** the top-level and per-member selectors -
+    both are `Polity`-descended `GroupSelector`s constructed the same way).
+  - any other `Polity` subtype (Realm, or anything future) → **leave alone**. Not sharing the Village
+    label namespace with Realm was an explicit requirement; without an independently-verified
+    `haven.res.ui.realm.Realm` class-name match this fork does not guess one is safe to add.
+  - anything else unmatched → **leave alone** (the safe default for every branch above, and for
+    whatever this list hasn't anticipated).
+- For a classified selector, `NGroupSelectorAugmenter` builds a `nurgling.widgets.NGroupSelectorCompanion`
+  (a dropdown + a small `...` button, sized to `GroupSelector.basesz` so it never exceeds the footprint
+  a plain selector already occupies), calls `sel.hide()` (which Hafen's own `Widget.draw`/pointer-event
+  dispatch both already skip for invisible widgets - confirmed by reading `Widget.draw(GOut,boolean)`
+  and `PointerEvent.propagation` - so this removes both the visible squares and their click handling
+  with zero risk to `sel`'s own `update()`/`select()` continuing to work programmatically), and adds
+  the companion as a sibling at `sel.c` inside `sel.parent`. **The real `GroupSelector` is never
+  replaced, copied, or reconstructed** - resource code that holds a reference to it keeps working
+  unmodified, including calling `select()`/`update()` on it or reading/writing its public `group` field
+  directly.
+- **The critical dispatch path**, unchanged in principle since the second rejected attempt: choosing a
+  group in the companion's dropdown calls `real.select(item)` - the exact public method a colour-square
+  click on the real, resource-or-first-party-owned `GroupSelector` already calls - which runs *that
+  selector's own* `changed(int)` override (Village's/Realm's/Landwindow's own compiled code, or
+  `BuddyInfo`'s/`$grp`'s anonymous override) and sends *its* protocol message. Neither
+  `NGroupSelectorCompanion` nor `NGroupSelectorAugmenter` ever call `wdgmsg` themselves, and neither
+  needs to know what message a given selector's owner sends.
+- Because resource code (or the server re-driving a selector) can change `real.group` without going
+  through `select()` - e.g. `BuddyInfo.update()` calling the selector's own `update(int)` directly, a
+  raw field write, or logic entirely inside a resource class this fork cannot see - the companion
+  mirrors `real.group` into its own displayed value on every `tick()`, a Java-native per-instance
+  pattern rather than a global polling timer, exactly as this feature's design review specified.
+- `Polity.Member` (the base class both `Village.VMember` and `Realm.RMember` - published resource
+  code with no source here - subclass) gains a `public int group = -1` field, populated from
+  `uimsg("add")`'s optional second wire argument when present, and copied forward on re-`add` (a
+  member's own row is rebuilt whenever its polity re-sends it). `Polity.MemberList.makeitem()` (this
+  fork's own code, not resource-provided, and reused unmodified by whatever `MemberList` subclass a
+  Polity uses, since only `Member`/`VMember`/`RMember` are subclassed per the reference commits) draws
+  the `"[N]"` tag *after* calling `item.draw(g)`, deliberately outside `Member.draw()` itself - since
+  it cannot be verified whether `VMember`/`RMember` call `super.draw()` (no vendored copy of either to
+  check), drawing from the wrapper runs regardless of what the subclass's own override does or doesn't
+  call. Guarded to `group >= 0` so polities that send no group argument (a plain Kin-less generic
+  Polity, if one ever exists) draw nothing extra.
+- **Personal claim ("Stake") window.** `haven.res.ui.land.Landwindow` is server-distributed resource
+  code that persists only 8 permission rows (`int bflags[] = new int[8]` in the unmodified, currently
+  served version) - a client-side array bound inside that resource's own code, not a server data-model
+  limit (see "Verification against a reference client" above). This fork's companion offers **only**
+  0..`nquick`-1 there, under the Kin label namespace (a claim's permissions are granted to the owning
+  character's own Kin groups, not a separate namespace) - never the full 0..`ncolors`-1 range, and this
+  fork does **not** vendor `ui/land` to widen that array, even though doing so is now known to be a
+  one-line fix. Vendoring a version-pinned (`@FromResource`) copy of a frequently-served resource is
+  exactly the long-lived, version-bumping maintenance burden this fork's low-divergence policy exists
+  to avoid, for a capability (claim permissions above group 7) nobody has asked for yet.
+- **Client-side custom labels.** `nurgling.conf.NGroupLabels` persists labels through two separate
+  `NConfig.Key` slots (`kinGroupLabels`, `villageGroupLabels`) so the same numeric group id can carry
+  an independent meaning in Kin vs. Village. Each scope is additionally keyed by an `owner` string
+  nested one level inside that per-world map:
+  - **Kin** - the owning character's `haven.GameUI#chrid`, so two characters played on the same world
+    can give the same Kin group number different meanings (resolved via
+    `selector.getparent(GameUI.class).chrid` - never an ambient "current session" accessor).
+  - **Village** - the polity's own `Polity.name`. This is a deliberate tradeoff, not an oversight: the
+    wire protocol exposes no durable numeric village id to the client at this seam, so a village's
+    display name is the most stable identity available. Renaming a village orphans its old labels, and
+    two differently-charter'd villages sharing an identical name on one world would share a namespace.
+    Both are judged rare and low-stakes (client-side presentation, no data loss) enough to accept
+    rather than block the feature on an id the protocol doesn't give us - documented here rather than
+    silently made world-global.
+  - Both `owner` keys are computed once, in `NGroupSelectorAugmenter.classify()`, where the selector's
+    ancestor context is already being resolved anyway - not re-derived per keystroke.
+  - The top-level Village permission selector and the per-member Village selector resolve to the
+    **same** owner key (both being descendants of the same `Polity` instance), so they always show the
+    same labels for the same village, as required.
+- `nurgling.widgets.NGroupLabelPopup` (unchanged in approach from the previous attempt - review found
+  no bug in its save/persistence logic, only in its session resolution) is a small free-floating
+  `Window`, never a child of the companion or anything resource-owned, opened by the companion's `...`
+  button. It saves on Enter, the Save button, and every close path (titlebar cross, Escape) through one
+  idempotent `destroy()`-time save, and now resolves its attach point via
+  `owner.getparent(GameUI.class)` - the companion's own owning session - instead of the ambient
+  `NUtils.getGameUI()` accessor a previous draft used; this fork runs multiple sessions in one process,
+  and a popup opened from one session's panel must land in that session's own widget tree, not
+  whichever session happens to be foregrounded elsewhere.
+- **Kin list display**: `BuddyWnd.BuddyList.ItemWidget` renders `Name [N]` (bracketed group id, neutral
+  colour, after the still group-coloured name) via a cached `Buddy.grouptag()`, draw-layer only -
+  `Buddy.name`, sorting, and searching are untouched. The Village/Realm member-list equivalent is the
+  `Polity.Member.group`/`makeitem()` mechanism described above, not this one - the two are separate
+  numbering systems (`BuddyWnd.Buddy.group` is a personal Kin classification; `Polity.Member.group` is
+  a polity's own per-member group) and must never be conflated.
+- `nurgling.widgets.NKinSettings` no longer duplicates `GroupSelector`/`GroupRect` in its own inner
+  classes; it constructs a real `BuddyWnd.GroupSelector` directly (`getparent(NKinSettings.class)`
+  classifies it into the Kin scope like any other), so it participates in the same companion mechanism
+  and label namespace as the Kin panel, while `NKinProp.get(group)`/`set(...)` still key off the exact
+  numeric group selected, unchanged.
 
-**Why:** Requested because the type-wide-only behavior made the feature unusable for anything the
-player wanted to mark individually (e.g. one labeled "seed cupboard" among many identical cupboards).
-`NGob#hash` was deliberately reused rather than `Gob.id` (a session-local network object id that does
-not survive relog) specifically because it is the identity this fork already trusts for
-cross-session-persisted per-object state.
+**Minimum hook that must survive:** `BuddyWnd.GroupSelector` must stay exactly the plain, one-row,
+`nquick`-square widget it always was, with **no** dependency on any Nurgling class in its own body
+beyond the two lifecycle-hook calls - the moment resource windows' own assumption of a roughly-one-row
+selector breaks again, the Banish/Forget overlap bug this whole rewrite exists to fix comes back.
+`attached()`/`dispose()` (not `added()`/`destroy()`) must remain the hook pair, for the ordering and
+cascading-teardown reasons above. `NGroupSelectorCompanion` must never be added as a replacement for a
+real selector, only as a sibling alongside a hidden one, and must keep driving it via `real.select(int)`
+- never a direct `wdgmsg` call. `Polity.MemberList.makeitem()`'s tag-drawing must stay in the wrapper,
+not moved into `Member.draw()`, unless a vendored `VMember`/`RMember` copy someday proves both call
+`super.draw()`. The `CLASS_LANDWINDOW`/`CLASS_VILLAGE` string constants in `NGroupSelectorAugmenter`
+are resource-version-sensitive by nature (a class rename in a future `ui/vlg`/`ui/land` publish would
+silently stop matching, degrading to "leave alone" rather than breaking) - re-verify them the same way
+(a vendored copy for `Landwindow`, a live crash/log check for `Village`) if Village or claim companions
+stop appearing after a game update.
 
-**Minimum hook that must survive:** `GobCustomize.instConf`/`effectiveSettings`/`updateInstance`/
-`commitInstance`/`setInstance`/`applyOne` and the `gobInstanceConf` config key must keep existing
-alongside upstream's own `conf`/`gobConf`, as an additive second layer — never collapsed back into a
-single resource-keyed map. `apply(Gob)` and `scaleOf(Gob)` must keep resolving through
-`effectiveSettings`, not `settings(res)` directly, or instance overrides silently stop rendering.
-`GobConfigWindow.open` must keep retargeting by hash (falling back to `res` only when hash is
-unavailable) rather than by resource path alone, or the two-cupboards-cross-target bug this exists to
-fix comes back. `applyOne` must keep scoping its reapply to the caller-supplied `Glob` rather than
-scanning every open session by a bare hash match, per this fork's existing explicit-session-ownership
-convention (see the `NGameUI`/`NMiniMap` entries above).
+**Verify:** `ant test && ant jar`; in-game, confirm the Kin panel shows a compact dropdown + `...`
+button with no visible quick squares and no clipping; that both Village selectors (top-level and
+per-member) show the same control, fitting exactly where the original 8-square selector fit, with
+Banish/Forget undisturbed; that the claim ("Stake") window's selector offers only groups 0..7; that
+groups 0/7/8/20/39 are selectable everywhere they should be and assigning 39 sends `39` (not a
+remapped index); that Kin and Village labels persist independently, are scoped per-character
+(Kin) and per-village-name (Village) as described, and the dropdown reflects a saved label
+immediately; that the Edit popup opens in the correct session with two sessions open; that
+`NKinSettings`/`MapWnd` behave exactly as before this feature existed structurally, just reachable
+through the shared companion mechanism (`NKinSettings`) or left alone (`MapWnd`); and that
+switching Village members repeatedly leaves no duplicated or leaked companions.
 
-**Verify:** two gobs of the same resource (e.g. two cupboards); configure one under "this object" with
-a distinct scale/tint/marker/caption — confirm only that one changes. Then configure "all objects of
-this type" — confirm the other, unconfigured gobs pick up the type setting while the instance-overridden
-one keeps its own. Relog and confirm the instance override survives. Reset each scope independently and
-confirm resetting one never clears the other.
-
-**Superseded when:** upstream ships an equivalent per-instance override for this window, keyed by a
-persistent per-object identity of its own — at which point this override should be diffed against
-upstream's approach rather than assumed to still be correct.
+**Superseded when:** upstream ships an equivalent expanded permission-group system, or the Village/
+Realm/claim resource windows' own implementations change such that a different seam becomes available
+or this one stops matching (see the class-name re-verification note above) - at which point this
+override, and the three "do not re-attempt" notes in the History section, should be re-evaluated
+against whatever the new situation is, not assumed to still be necessary.
