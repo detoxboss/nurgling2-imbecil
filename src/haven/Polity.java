@@ -48,6 +48,15 @@ public abstract class Polity extends Widget {
     public class Member {
 	public final Integer id;
 	public final int order;
+	/**
+	 * This member's group in whatever concrete polity this is, off the wire, or -1 for a polity
+	 * that sends no such argument. Village and Realm keep this in a field of their own resource
+	 * subclass ({@code Village.VMember.grp}/{@code Realm.RMember.grp}, published code with no
+	 * source in this repository), so the base class reads the same wire argument they already do,
+	 * to make it available generically without vendoring either resource. Presentation only - never
+	 * confuse with {@link BuddyWnd.Buddy#group}, a different, personal-Kin numbering.
+	 */
+	public int group = -1;
 
 	public Member(Integer id) {
 	    this.id = id;
@@ -57,6 +66,7 @@ public abstract class Polity extends Widget {
 	public Member(Member p) {
 	    this.id = p.id;
 	    this.order = p.order;
+	    this.group = p.group;
 	}
 
 	public Text rname() {
@@ -64,6 +74,18 @@ public abstract class Polity extends Widget {
 		return(self);
 	    BuddyWnd.Buddy b = getparent(GameUI.class).buddies.find(id);
 	    return((b == null) ? unk : b.rname());
+	}
+
+	private Text grouptag = null;
+	private int grouptagGroup = Integer.MIN_VALUE;
+	/** "[N]" tag for {@link #group}; drawn by {@link MemberList#makeitem} regardless of whether a
+	 *  concrete polity's own Member subclass overrides {@link #draw} without calling super. */
+	Text grouptag() {
+	    if((grouptag == null) || (grouptagGroup != group)) {
+		grouptag = Text.render("[" + group + "]");
+		grouptagGroup = group;
+	    }
+	    return(grouptag);
 	}
 
 	public void draw(GOut g) {
@@ -110,7 +132,16 @@ public abstract class Polity extends Widget {
 			return(true);
 		    }
 
-		    public void draw(GOut g) {item.draw(g);}
+		    public void draw(GOut g) {
+			item.draw(g);
+			/* Drawn here rather than left to Member.draw() itself, since a concrete polity's
+			 * Member subclass may override draw() without calling super - this runs regardless. */
+			if(item.group >= 0) {
+			    g.chcolor(210, 210, 210, 255);
+			    g.aimage(item.grouptag().tex(), Coord.of(g.sz().x - UI.scale(5), UI.scale(10)), 1.0, 0.5);
+			    g.chcolor();
+			}
+		    }
 		});
 	}
 
@@ -221,7 +252,10 @@ public abstract class Polity extends Widget {
 	} else if(msg == "add") {
 	    Integer id = INT.of(args[0]);
 	    synchronized(this) {
-		add(parsememb(args, memb.get(id)));
+		Member pm = parsememb(args, memb.get(id));
+		if(args.length > 1)
+		    pm.group = INT.of(args[1]);
+		add(pm);
 	    }
 	} else if(msg == "rm") {
 	    Integer id = INT.of(args[0]);
