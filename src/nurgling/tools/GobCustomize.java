@@ -1,5 +1,6 @@
 package nurgling.tools;
 
+import haven.Glob;
 import haven.Gob;
 import nurgling.NConfig;
 import nurgling.NGameUI;
@@ -18,19 +19,28 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Per-resource display settings that apply to every gob of a type at once - the model behind
- * the Ctrl+RMB "Configure" window.
+ * Display settings behind the Ctrl+RMB "Configure" window, in two layers:
  *
- * <p>Settings are keyed by {@link nurgling.NGob#name}, the gob's resource path, so configuring
- * one oak configures every oak. Only resources that differ from the defaults are stored, which
- * keeps the config file proportional to what the user actually changed rather than to the number
- * of resources in the game.
+ * <ul>
+ * <li>{@link #conf} - keyed by {@link nurgling.NGob#name}, the gob's resource path, so configuring
+ * one oak "for all objects of this type" configures every oak.
+ * <li>{@link #instConf} - keyed by {@link nurgling.NGob#hash}, the world-position identity already
+ * used to remember individual containers (see {@link Container}), so a "this object" edit affects
+ * only the one physical gob that was clicked. {@code hash} survives client restart/relog (it is
+ * derived from resource name + map grid id + in-grid position, not the session-local {@code Gob.id}),
+ * which is why it - not {@code Gob.id} - is the right key for a persisted per-instance override.
+ * </ul>
  *
- * <p>The authoritative copy lives in memory ({@link #conf}) rather than in the config map.
- * Dragging a slider has to repaint the world on every pixel, and {@link nurgling.NCore} flushes a
- * dirty config to disk on the very next tick - so writing through to {@code NConfig} per drag step
- * would mean a file write per frame. {@link #update} therefore only touches memory, and
- * {@link #commit} publishes the finished value.
+ * <p>{@link #effectiveSettings} resolves a gob's actual settings as instance override, else
+ * type-wide setting, else {@link #DEFAULTS}. Only resources/instances that differ from the defaults
+ * are stored, which keeps the config file proportional to what the user actually changed.
+ *
+ * <p>The authoritative copy of each layer lives in memory ({@link #conf}, {@link #instConf}) rather
+ * than in the config map. Dragging a slider has to repaint the world on every pixel, and
+ * {@link nurgling.NCore} flushes a dirty config to disk on the very next tick - so writing through to
+ * {@code NConfig} per drag step would mean a file write per frame. {@link #update}/{@link
+ * #updateInstance} therefore only touch memory, and {@link #commit}/{@link #commitInstance} publish
+ * the finished value.
  */
 public class GobCustomize {
     /* Option names as they appear in the config file. */
@@ -100,6 +110,9 @@ public class GobCustomize {
     /** res name -> settings. A resource at its defaults is absent rather than present-and-default. */
     private static volatile Map<String, Settings> conf = null;
 
+    /** gob hash -> settings, for the "this object" scope. Same absent-when-default convention. */
+    private static volatile Map<String, Settings> instConf = null;
+
     private static volatile int seq = 0;
 
     public static int seq() {
@@ -112,18 +125,30 @@ public class GobCustomize {
             synchronized (GobCustomize.class) {
                 cur = conf;
                 if (cur == null)
-                    conf = cur = load();
+                    conf = cur = load(NConfig.Key.gobConf);
+            }
+        }
+        return cur;
+    }
+
+    private static Map<String, Settings> instConf() {
+        Map<String, Settings> cur = instConf;
+        if (cur == null) {
+            synchronized (GobCustomize.class) {
+                cur = instConf;
+                if (cur == null)
+                    instConf = cur = load(NConfig.Key.gobInstanceConf);
             }
         }
         return cur;
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Settings> load() {
+    private static Map<String, Settings> load(NConfig.Key key) {
         Map<String, Settings> res = new ConcurrentHashMap<>();
         // getGlobal, not get: this is read once and cached, and must not depend on which
         // session's config the calling thread happens to resolve to.
-        Object o = NConfig.getGlobal(NConfig.Key.gobConf);
+        Object o = NConfig.getGlobal(key);
         if (!(o instanceof Map))
             return res;
         for (Map.Entry<String, Object> entry : ((Map<String, Object>) o).entrySet()) {
@@ -137,6 +162,9 @@ public class GobCustomize {
                     boolOpt(opts.get(KEY_MARKER)),
                     boolOpt(opts.get(KEY_LABEL)),
                     strOpt(opts.get(KEY_LABEL_TEXT)));
+            // A stale entry (e.g. an instance hash for a gob that no longer exists) simply never
+            // matches a live gob again - see effectiveSettings/applyOne - so it is kept as harmless
+            // clutter rather than something that needs active detection here.
             if (!s.isDefault())
                 res.put(entry.getKey(), s);
         }
@@ -166,7 +194,7 @@ public class GobCustomize {
         return Math.max(SCALE_MIN, Math.min(SCALE_MAX, pct));
     }
 
-    /** Settings for a resource; {@link #DEFAULTS} when the user has never touched it. */
+    /** Type-wide settings for a resource; {@link #DEFAULTS} when the user has never touched it. */
     public static Settings settings(String res) {
         if (res == null)
             return DEFAULTS;
@@ -174,14 +202,33 @@ public class GobCustomize {
         return (s == null) ? DEFAULTS : s;
     }
 
+    /**
+     * Effective settings for one physical gob: its own instance override if it has one, else the
+     * type-wide setting for {@code res}, else {@link #DEFAULTS}. This is also the correct base for
+     * a new instance override - see {@link nurgling.widgets.GobConfigWindow} - so that the first
+     * edit made under "this object" starts from what the object already looks like.
+     */
+    public static Settings effectiveSettings(String res, String hash) {
+        if (hash != null) {
+            Settings s = instConf().get(hash);
+            if (s != null)
+                return s;
+        }
+        return settings(res);
+    }
+
+    public static Settings effectiveSettings(Gob gob) {
+        if (gob == null || gob.ngob == null)
+            return DEFAULTS;
+        return effectiveSettings(gob.ngob.name, gob.ngob.hash);
+    }
+
     public static int scalePercent(String res) {
         return settings(res).scale;
     }
 
     public static float scaleOf(Gob gob) {
-        if (gob == null || gob.ngob == null)
-            return 1.0f;
-        return scalePercent(gob.ngob.name) / 100.0f;
+        return effectiveSettings(gob).scale / 100.0f;
     }
 
     /**
@@ -205,10 +252,40 @@ public class GobCustomize {
                 prev.hasLabel() != s.hasLabel());
     }
 
-    /** Writes the current in-memory settings to the config file. */
+    /**
+     * Publishes a new override for one physical gob (identified by its {@link nurgling.NGob#hash})
+     * and shows it immediately, without saving; {@link #commitInstance} makes it permanent. Mirrors
+     * {@link #update}, but only ever touches the one gob found in {@code owner} - never every
+     * session's object cache - since an instance edit is inherently one-gob-at-a-time.
+     *
+     * @param owner the clicked gob's own {@link Glob}, so the reapply cannot cross into another
+     *              session's world even if two sessions happen to share a hash (same resource, same
+     *              map position in two different worlds).
+     */
+    public static void updateInstance(Glob owner, String hash, Settings s) {
+        if (hash == null || s == null)
+            return;
+        if (s.isDefault())
+            instConf().remove(hash);
+        else
+            instConf().put(hash, s);
+        seq++;
+        applyOne(owner, hash);
+    }
+
+    /** Writes the current in-memory type-wide settings to the config file. */
     public static void commit() {
+        commit(NConfig.Key.gobConf, conf());
+    }
+
+    /** Writes the current in-memory instance overrides to the config file. */
+    public static void commitInstance() {
+        commit(NConfig.Key.gobInstanceConf, instConf());
+    }
+
+    private static void commit(NConfig.Key key, Map<String, Settings> map) {
         Map<String, Object> out = new HashMap<>();
-        for (Map.Entry<String, Settings> entry : conf().entrySet()) {
+        for (Map.Entry<String, Settings> entry : map.entrySet()) {
             Settings s = entry.getValue();
             Map<String, Object> opts = new HashMap<>();
             if (s.scale != SCALE_DEFAULT)
@@ -226,19 +303,29 @@ public class GobCustomize {
             if (!opts.isEmpty())
                 out.put(entry.getKey(), opts);
         }
-        NConfig.set(NConfig.Key.gobConf, out);
+        NConfig.set(key, out);
         NConfig.needUpdate();
     }
 
-    /** Convenience for callers that change a setting outside a drag. */
+    /** Convenience for callers that change a type-wide setting outside a drag. */
     public static void set(String res, Settings s) {
         update(res, s);
         commit();
     }
 
     /**
-     * Brings one gob in line with its type's settings. Cheap and idempotent, so it is safe to call
-     * from {@link nurgling.NGob} whenever a gob's resource name is resolved.
+     * Convenience for callers that change an instance override outside a drag. Passing
+     * {@link #DEFAULTS} removes the override, falling back to the type-wide setting (or none) -
+     * this is how the window's Reset button behaves under the "this object" scope.
+     */
+    public static void setInstance(Glob owner, String hash, Settings s) {
+        updateInstance(owner, hash, s);
+        commitInstance();
+    }
+
+    /**
+     * Brings one gob in line with its effective settings. Cheap and idempotent, so it is safe to
+     * call from {@link nurgling.NGob} whenever a gob's resource name is resolved.
      */
     public static void apply(Gob gob) {
         apply(gob, true, true, true, true);
@@ -247,8 +334,7 @@ public class GobCustomize {
     private static void apply(Gob gob, boolean doScale, boolean doTint, boolean doMarker, boolean doLabel) {
         if (gob == null || gob.ngob == null)
             return;
-        String res = gob.ngob.name;
-        Settings s = settings(res);
+        Settings s = effectiveSettings(gob);
 
         if (doScale) {
             NGobCustomScale scale = gob.getattr(NGobCustomScale.class);
@@ -275,11 +361,11 @@ public class GobCustomize {
         // Only ever added here - a marker whose setting goes away takes itself off, see
         // NGobConfigMarker.
         if (doMarker && s.marker && !hasol(gob, NGobConfigMarker.class))
-            gob.addol(new Gob.Overlay(gob, new NGobConfigMarker(gob, res)), true);
+            gob.addol(new Gob.Overlay(gob, new NGobConfigMarker(gob)), true);
 
         // Same deal: the caption reads its text live and drops itself when there is none left.
         if (doLabel && s.hasLabel() && !hasol(gob, NGobConfigLabel.class))
-            gob.addol(new Gob.Overlay(gob, new NGobConfigLabel(gob, res)), true);
+            gob.addol(new Gob.Overlay(gob, new NGobConfigLabel(gob)), true);
     }
 
     /**
@@ -321,5 +407,29 @@ public class GobCustomize {
             for (Gob gob : gobs)
                 apply(gob, doScale, doTint, doMarker, doLabel);
         }
+    }
+
+    /**
+     * Re-applies one physical gob's effective settings, if it is currently loaded in {@code owner}.
+     * Used for the "this object" scope instead of {@link #applyAll}: an instance edit only ever
+     * concerns one gob, in the one session/world it was clicked from, so there is no reason to scan
+     * every open session by a bare hash match. A no-longer-loaded gob (walked away, unloaded,
+     * destroyed) is simply not found and this is a safe no-op - the persisted override still applies
+     * next time that gob (or, in principle, another object that happens to share its hash) loads.
+     */
+    public static void applyOne(Glob owner, String hash) {
+        if (owner == null || hash == null)
+            return;
+        Gob target = null;
+        synchronized (owner.oc) {
+            for (Gob gob : owner.oc) {
+                if (gob != null && gob.ngob != null && hash.equals(gob.ngob.hash)) {
+                    target = gob;
+                    break;
+                }
+            }
+        }
+        if (target != null)
+            apply(target);
     }
 }

@@ -5,9 +5,10 @@ import nurgling.actions.Action;
 import nurgling.widgets.GobConfigWindow;
 
 /**
- * Opens the per-type settings window for whatever object was clicked. Offered on every gob that
- * has a resolved resource name, since the settings behind it are generic display options rather
- * than anything tied to a particular kind of object.
+ * Opens the settings window for whatever object was clicked, defaulting to an override for just
+ * that object (see {@link GobConfigWindow}). Offered on every gob that has a resolved resource
+ * name, since the settings behind it are generic display options rather than anything tied to a
+ * particular kind of object.
  */
 public class ConfigureGobAction implements GobContextAction {
 
@@ -34,6 +35,6 @@ public class ConfigureGobAction implements GobContextAction {
 
     @Override
     public void performUi(Gob gob) {
-        GobConfigWindow.open(gob.ngob.name);
+        GobConfigWindow.open(gob.ngob.name, gob.ngob.hash, gob.glob);
     }
 }

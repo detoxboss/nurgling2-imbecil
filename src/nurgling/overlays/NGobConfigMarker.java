@@ -7,7 +7,7 @@ import nurgling.tools.GobCustomize;
 
 /**
  * The permanent version of the marker the Ctrl+F object search drops above its hits, switched on
- * per object type from the "Configure" window.
+ * from the "Configure" window - per object type, or (via an instance override) for one gob only.
  *
  * <p>A distinct class rather than a plain {@link NTexMarker} so it can be told apart from the
  * search's own markers, which use the same texture and can sit on the same gob.
@@ -27,7 +27,7 @@ public class NGobConfigMarker extends NTexMarker {
         return tex;
     }
 
-    public NGobConfigMarker(Gob owner, String res) {
-        super(owner, tex(), () -> !GobCustomize.settings(res).marker);
+    public NGobConfigMarker(Gob owner) {
+        super(owner, tex(), () -> !GobCustomize.effectiveSettings(owner).marker);
     }
 }

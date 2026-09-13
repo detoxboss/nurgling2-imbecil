@@ -418,3 +418,50 @@ member-detail panel now lays out all four selector rows plus the label editor wi
 **Superseded when:** upstream ships an equivalent expanded permission-group system with its own
 numeric-id display and label support — at which point this override should be diffed against
 upstream's approach, not assumed to still be the better choice.
+## Per-instance gob Configure overrides
+
+**Files:** `src/nurgling/tools/GobCustomize.java`, `src/nurgling/widgets/GobConfigWindow.java`,
+`src/nurgling/contextmenu/ConfigureGobAction.java`, `src/nurgling/overlays/NGobConfigMarker.java`,
+`src/nurgling/overlays/NGobConfigLabel.java`, `src/nurgling/NConfig.java` (`Key.gobInstanceConf`),
+`src/lang/messages.properties`, `src/lang/messages_ru.properties`
+
+**Fork behavior:** Upstream's Ctrl+RMB "Configure" window (scale/tint/marker/caption) resolves and
+persists settings by resource path alone (`GobCustomize.conf: res -> Settings`), so any edit applies
+to every gob of that resource type at once — configuring one cupboard silently reskins every cupboard.
+The fork adds a second settings layer, `GobCustomize.instConf: hash -> Settings`, keyed by
+`NGob#hash` (the SHA-256 of resource name + map grid id + in-grid position — the same identity
+`Container`/`ContainerDao` already use to persist individual storage containers). The Configure window
+gained a "This object" / "All objects of this type" scope choice (`RadioGroup`, defaulting to "this
+object" whenever the clicked gob has a resolvable hash), and is now retargeted by hash rather than by
+resource path so that opening it on two different physical gobs of the same resource never collides.
+`GobCustomize.effectiveSettings(gob)` resolves instance override, else type-wide setting, else
+defaults, and is what `apply(Gob)`/`scaleOf(Gob)` actually use — so both the attribute-based scaling
+path (`NGobCustomScale`/`NGobCustomTint`) and `CSprite`'s (`src/haven/resutil/CSprite.java`, untouched)
+scale-on-tick path pick up instance overrides for free.
+
+**Why:** Requested because the type-wide-only behavior made the feature unusable for anything the
+player wanted to mark individually (e.g. one labeled "seed cupboard" among many identical cupboards).
+`NGob#hash` was deliberately reused rather than `Gob.id` (a session-local network object id that does
+not survive relog) specifically because it is the identity this fork already trusts for
+cross-session-persisted per-object state.
+
+**Minimum hook that must survive:** `GobCustomize.instConf`/`effectiveSettings`/`updateInstance`/
+`commitInstance`/`setInstance`/`applyOne` and the `gobInstanceConf` config key must keep existing
+alongside upstream's own `conf`/`gobConf`, as an additive second layer — never collapsed back into a
+single resource-keyed map. `apply(Gob)` and `scaleOf(Gob)` must keep resolving through
+`effectiveSettings`, not `settings(res)` directly, or instance overrides silently stop rendering.
+`GobConfigWindow.open` must keep retargeting by hash (falling back to `res` only when hash is
+unavailable) rather than by resource path alone, or the two-cupboards-cross-target bug this exists to
+fix comes back. `applyOne` must keep scoping its reapply to the caller-supplied `Glob` rather than
+scanning every open session by a bare hash match, per this fork's existing explicit-session-ownership
+convention (see the `NGameUI`/`NMiniMap` entries above).
+
+**Verify:** two gobs of the same resource (e.g. two cupboards); configure one under "this object" with
+a distinct scale/tint/marker/caption — confirm only that one changes. Then configure "all objects of
+this type" — confirm the other, unconfigured gobs pick up the type setting while the instance-overridden
+one keeps its own. Relog and confirm the instance override survives. Reset each scope independently and
+confirm resetting one never clears the other.
+
+**Superseded when:** upstream ships an equivalent per-instance override for this window, keyed by a
+persistent per-object identity of its own — at which point this override should be diffed against
+upstream's approach rather than assumed to still be correct.
