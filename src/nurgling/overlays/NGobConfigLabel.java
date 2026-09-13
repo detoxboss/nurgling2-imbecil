@@ -12,10 +12,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A caption drawn just under every gob of one resource type, set from the "Configure" window.
+ * A caption drawn just under a gob, set from the "Configure" window - either for every gob of the
+ * resource type, or (via an instance override) for just this one.
  *
- * <p>The text is read from {@link GobCustomize} on every frame rather than being baked into the
- * sprite, so editing it in the window updates every object of the type as it is typed.
+ * <p>The text is read from {@link GobCustomize#effectiveSettings(Gob)} on every frame rather than
+ * being baked into the sprite, so editing it in the window updates its target live as it is typed.
  *
  * <p>Like {@link NGobConfigMarker} it removes itself instead of being removed - see that class for
  * why - by reporting done from {@link #tick} once the option is switched off or the text is cleared.
@@ -42,15 +43,15 @@ public class NGobConfigLabel extends Sprite implements RenderTree.Node, PView.Re
         return t;
     }
 
-    private final String res;
+    private final Gob gob;
 
-    public NGobConfigLabel(Gob owner, String res) {
+    public NGobConfigLabel(Gob owner) {
         super(owner, null);
-        this.res = res;
+        this.gob = owner;
     }
 
     private String text() {
-        GobCustomize.Settings s = GobCustomize.settings(res);
+        GobCustomize.Settings s = GobCustomize.effectiveSettings(gob);
         return s.label ? s.labelText : "";
     }
 

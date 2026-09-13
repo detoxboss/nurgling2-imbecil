@@ -32,6 +32,7 @@ import nurgling.i18n.L10n;
 import nurgling.widgets.*;
 
 import java.awt.Color;
+import java.awt.Font;
 import java.util.*;
 import java.text.Collator;
 import static haven.PType.*;
@@ -275,6 +276,14 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	}
     }
 
+    /** Small stroked digit label drawn inside a {@link GroupRect}; white-on-black stays readable over any {@link #gc} colour. */
+    private static final Text.Foundry numfnd = new Text.Foundry(Text.sans.deriveFont(Font.BOLD), 9).aa(true);
+    private static final Map<Integer, Tex> numtexcache = new HashMap<>();
+    /** Shared so other selector-style pickers (e.g. {@code NKinSettings}) can draw the same numbers without duplicating the font/cache. */
+    public static Tex numtex(int group) {
+	return(numtexcache.computeIfAbsent(group, g -> Text.renderstroked(Integer.toString(g), Color.WHITE, Color.BLACK, numfnd).tex()));
+    }
+
     public static class GroupRect extends Widget {
 	final private static Coord offset = UI.scale(new Coord(2, 2));
 	final private static Coord selsz = UI.scale(new Coord(19, 19));
@@ -298,6 +307,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	    g.chcolor(gcolor(group));
 	    g.frect(offset, colsz);
 	    g.chcolor();
+	    g.aimage(numtex(group), offset.add(colsz.div(2)), 0.5, 0.5);
 	}
 
 	public boolean mousedown(MouseDownEvent ev) {
@@ -311,6 +321,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 
 	public void unselect() {
 	    selected = false;
+	}
+
+	public Object tooltip(Coord c, Widget prev) {
+	    return(Text.render(selector.grouptip(group)).tex());
 	}
     }
 
@@ -354,6 +368,11 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	}
 
 	protected void changed(int group) {
+	}
+
+	/** Overridden by {@code NLabeledGroupSelector} to append a custom label; plain group number here. */
+	protected String grouptip(int group) {
+	    return(L10n.get("group.tooltip", group));
 	}
 
 	public void update(int group) {
@@ -426,7 +445,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     @RName("grp")
     public static class $grp implements Factory {
 	public Widget create(UI ui, Object[] args) {
-	    return(new GroupSelector(INT.of(args[0])) {
+	    /* This factory is how the (server-resource-driven) Village permission UI asks for a
+	     * group selector by name, for both its top-level and per-member pickers, so the label
+	     * editor added here covers both of those Village states as well as Kin below. */
+	    return(new NLabeledGroupSelector(INT.of(args[0]), NGroupLabels.Scope.VILLAGE) {
 		    public void changed(int group) {
 			wdgmsg("ch", group);
 		    }
@@ -454,7 +476,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			buddy.chname(text);
 		    }
 		}, margin2, ava.c.y + ava.sz.y + margin2);
-	    this.grp = add(new GroupSelector(buddy.group) {
+	    this.grp = add(new NLabeledGroupSelector(buddy.group, NGroupLabels.Scope.KIN) {
 		    public void changed(int group) {
 			buddy.chgrp(group);
 		    }
