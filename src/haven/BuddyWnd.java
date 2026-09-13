@@ -62,7 +62,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     /**
      * How many low-numbered groups get an always-visible, one-click colour square on the compact
      * {@link GroupSelector} row. Groups {@code nquick..ncolors-1} are still fully assignable, just
-     * only reachable through the numeric dropdown ({@code nurgling.widgets.NExtendedGroupSelector}),
+     * only reachable through the numeric companion control ({@code nurgling.widgets.NGroupSelectorAugmenter}),
      * not a colour square - this is what keeps the selector exactly one row tall regardless of how
      * many groups {@link #ncolors} grows to.
      */
@@ -104,7 +104,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	// Groups 28..39: added to grow the assignable range from 28 to 40 groups. Colours
 	// 0..27 above are untouched so no existing buddy's on-screen colour changes. None of
 	// these get a quick-square button (see nquick above) - they're reachable only through
-	// the numeric dropdown in nurgling.widgets.NExtendedGroupSelector.
+	// the numeric companion control (nurgling.widgets.NGroupSelectorAugmenter/-Companion).
 	new Color(255, 96, 0),
 	new Color(96, 255, 0),
 	new Color(0, 255, 150),
@@ -315,13 +315,24 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     }
 
     /**
-     * Compact, one-row quick-colour picker for groups {@code 0..nquick-1}. Deliberately kept close
-     * to its original upstream shape: a server-provided UI (the Village permission window) embeds
-     * this widget by name (see the {@code grp} factory below) and lays out its own controls
-     * (Banish/Forget, member rows) assuming this stays roughly one row tall - growing it here to fit
-     * more than {@link #nquick} groups previously broke that layout. Access to the full 0..{@link
-     * #ncolors}-1 range is added separately, client-side, by {@code nurgling.widgets.NExtendedGroupSelector},
-     * which wraps an instance of this class unmodified rather than changing its shape.
+     * Compact, one-row quick-colour picker for groups {@code 0..nquick-1}. Kept byte-for-byte close to
+     * its original upstream shape, because it is not only Kin that embeds it: the Village and Realm
+     * permission windows and the personal-claim ("Stake") permission window are all server-distributed
+     * resource code with no source in this repository, and each constructs and lays out an instance of
+     * this exact class directly (not through any {@code @RName} factory - see the reverted {@code grp}
+     * factory below) assuming it stays roughly one row tall. Growing this class itself to show more than
+     * {@link #nquick} groups previously broke those resource windows' own Banish/Forget/permission-row
+     * layouts.
+     *
+     * <p>Access to the full 0..{@link #ncolors}-1 range (or a narrower range, for the claim window - see
+     * {@code nurgling.widgets.NGroupSelectorAugmenter}) is added without touching this class's shape or
+     * API, via the two narrow lifecycle hooks below: whichever code constructs and {@code add()}s an
+     * instance, {@link #attached()} lets a Nurgling-owned companion detect it once it is genuinely part
+     * of a live widget tree (not merely constructed - a resource window commonly finishes building its
+     * whole child tree in its own constructor before that constructor's own instance is itself attached
+     * to anything, so classifying by ancestor before {@link #attached()} fires would be unreliable), and
+     * {@link #dispose()} lets that companion clean itself up when this selector's subtree is torn down,
+     * however that teardown was triggered.
      */
     public static class GroupSelector extends Widget {
 	private static final int cols = Math.min(10, nquick);
@@ -358,6 +369,16 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public void select(int group) {
 	    update(group);
 	    changed(group);
+	}
+
+	protected void attached() {
+	    super.attached();
+	    NGroupSelectorAugmenter.attached(this);
+	}
+
+	public void dispose() {
+	    NGroupSelectorAugmenter.detached(this);
+	    super.dispose();
 	}
     }
 
@@ -405,11 +426,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     @RName("grp")
     public static class $grp implements Factory {
 	public Widget create(UI ui, Object[] args) {
-	    /* This factory is how the server-resource-driven Village permission UI asks for a group
-	     * selector by name, for both its top-level and per-member pickers. NExtendedGroupSelector
-	     * wraps the plain, unmodified GroupSelector rather than changing it, so this stays exactly
-	     * as tall as before and the Village resource's own Banish/Forget layout is undisturbed. */
-	    return(new NExtendedGroupSelector(INT.of(args[0]), NGroupLabels.Scope.VILLAGE) {
+	    return(new GroupSelector(INT.of(args[0])) {
 		    public void changed(int group) {
 			wdgmsg("ch", group);
 		    }
@@ -421,7 +438,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 	public final Buddy buddy;
 	private final Avaview ava;
 	private final TextEntry nick;
-	private final NExtendedGroupSelector grp;
+	private final GroupSelector grp;
 	private long atime, utime;
 	private Label atimel = null;
 	private Button[] opts = {};
@@ -437,7 +454,7 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
 			buddy.chname(text);
 		    }
 		}, margin2, ava.c.y + ava.sz.y + margin2);
-	    this.grp = add(new NExtendedGroupSelector(buddy.group, NGroupLabels.Scope.KIN) {
+	    this.grp = add(new GroupSelector(buddy.group) {
 		    public void changed(int group) {
 			buddy.chgrp(group);
 		    }

@@ -15,12 +15,13 @@ import nurgling.i18n.L10n;
  * Small, Nurgling-owned popup for editing one group's client-side custom label.
  *
  * <p>Deliberately a free-floating {@link Window} added to the root/GameUI, never a child of
- * {@link NExtendedGroupSelector} or anything the server-provided Village permission window owns -
+ * {@link NGroupSelectorCompanion} or anything the server-provided Village permission window owns -
  * so it can never affect either one's size or layout, no matter how long a label gets.
  */
 public class NGroupLabelPopup extends Window {
-    private final NExtendedGroupSelector owner;
+    private final NGroupSelectorCompanion owner;
     private final NGroupLabels.Scope scope;
+    private final String labelOwner;
     private final int group;
     private final TextEntry entry;
     private boolean saved = false;
@@ -32,20 +33,24 @@ public class NGroupLabelPopup extends Window {
      * never an ambient "current session" accessor - this fork runs multiple sessions in one
      * process, and a popup opened from one session's Kin/Village panel must land in that same
      * session's widget tree, not whichever session happens to be foregrounded elsewhere.
+     *
+     * @param labelOwner the {@link NGroupLabels} owner key (a character id for Kin, a village name
+     *                   for Village) that scopes which label namespace this edits.
      */
-    public static void open(NExtendedGroupSelector owner, NGroupLabels.Scope scope, int group) {
+    public static void open(NGroupSelectorCompanion owner, NGroupLabels.Scope scope, String labelOwner, int group) {
         owner.closeLabelPopup();
-        NGroupLabelPopup popup = new NGroupLabelPopup(owner, scope, group);
+        NGroupLabelPopup popup = new NGroupLabelPopup(owner, scope, labelOwner, group);
         owner.setLabelPopup(popup);
         GameUI gui = owner.getparent(GameUI.class);
         Widget host = (gui != null) ? gui : owner.ui.root;
         host.add(popup, owner.ui.mc);
     }
 
-    private NGroupLabelPopup(NExtendedGroupSelector owner, NGroupLabels.Scope scope, int group) {
+    private NGroupLabelPopup(NGroupSelectorCompanion owner, NGroupLabels.Scope scope, String labelOwner, int group) {
         super(UI.scale(new Coord(220, 90)), title(scope, group));
         this.owner = owner;
         this.scope = scope;
+        this.labelOwner = labelOwner;
         this.group = group;
 
         int margin = UI.scale(10);
@@ -53,7 +58,7 @@ public class NGroupLabelPopup extends Window {
         add(new Label(L10n.get("group.popup_label")), new Coord(margin, y));
         y += UI.scale(18);
 
-        entry = add(new TextEntry(UI.scale(200), NGroupLabels.get(scope, group)) {
+        entry = add(new TextEntry(UI.scale(200), NGroupLabels.get(scope, labelOwner, group)) {
             {dshow = true;}
             public void activate(String text) {
                 destroy();
@@ -81,7 +86,7 @@ public class NGroupLabelPopup extends Window {
     public void destroy() {
         if(!saved) {
             saved = true;
-            NGroupLabels.set(scope, group, entry.text());
+            NGroupLabels.set(scope, labelOwner, group, entry.text());
         }
         owner.clearLabelPopup(this);
         super.destroy();
