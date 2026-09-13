@@ -12,49 +12,63 @@ import nurgling.conf.NGroupLabels;
 import java.awt.Color;
 
 /**
- * Client-side-only extension of the shared, unmodified {@link BuddyWnd.GroupSelector}: the same
- * compact one-row quick-colour squares (groups {@code 0..BuddyWnd.nquick-1}), plus a numeric
- * dropdown giving access to the full {@code 0..BuddyWnd.ncolors-1} range, plus a small "Edit" button
- * for a client-side custom label - all without growing past the wrapped selector's own height.
+ * Client-side-only Kin/Village group control: a single dropdown listing all {@code 0..BuddyWnd.ncolors-1}
+ * groups (colour swatch + number + optional custom label), plus a small button opening the
+ * label-editor popup - sized to fit in the same footprint the plain, unmodified
+ * {@link BuddyWnd.GroupSelector} already occupies (see {@link BuddyWnd.GroupSelector#basesz}), so it
+ * drops into the Kin panel and the server-provided Village permission window without growing either
+ * one's row.
+ *
+ * <p>An earlier version of this class kept the 8 quick-colour squares visible next to the dropdown.
+ * That made the control roughly 350px wide against a ~160px budget (BuddyWnd itself is only
+ * {@code UI.scale(263)} wide, and the Village window is no wider), so most of it was clipped off both
+ * panels in practice. The quick squares are dropped from the visible layout entirely; the dropdown
+ * alone covers the same groups they did (0..7) plus everything above.
  *
  * <p>This is the Brodgar-style seam: rather than reshaping {@code BuddyWnd.GroupSelector} itself
  * (which broke the server-provided Village permission window's layout when it was tried), this class
- * wraps an ordinary instance of it and drives it through its own public {@code select}/{@code update}
- * methods - exactly the path a normal mouse click on one of its colour squares already uses. Whatever
- * the owning UI (Kin panel, or the Village resource via the {@code grp} widget factory) does in its
- * own {@code changed(int)} override keeps working unchanged; this class never sends a wdgmsg itself.
+ * keeps a plain, unmodified instance of it purely as an internal dispatch delegate - never added to
+ * this widget's own child/render tree, so it has no visual footprint at all - and drives it through
+ * its own public {@code select}/{@code update} methods, exactly the path a normal mouse click on one
+ * of its colour squares would have used. Whatever the owning UI (Kin panel, or the Village resource
+ * via the {@code grp} widget factory) does in its own {@code changed(int)} override keeps working
+ * unchanged; this class never sends a wdgmsg itself.
  */
 public class NExtendedGroupSelector extends Widget {
     private static final int gap = BuddyWnd.margin1;
-    private static final int dropw = UI.scale(160);
+    private static final int rowh = BuddyWnd.GroupSelector.basesz.y;
+    private static final int editw = rowh;
+    private static final int dropw = BuddyWnd.GroupSelector.basesz.x - gap - editw;
 
-    public final BuddyWnd.GroupSelector quick;
+    /** Never added as a child - see the class comment. Exists purely so a dropdown pick can be
+     *  dispatched through the exact same select()/update()/changed() path a real colour-square
+     *  click on an ordinary GroupSelector would use, without this class inventing its own. */
+    private final BuddyWnd.GroupSelector delegate;
     private final GroupDropbox dropdown;
     private final EditButton edit;
     private final NGroupLabels.Scope scope;
     private NGroupLabelPopup labelPopup;
 
     public NExtendedGroupSelector(int group, NGroupLabels.Scope scope) {
-        super(Coord.z);
+        super(new Coord(dropw + gap + editw, rowh));
         this.scope = scope;
-        quick = add(new BuddyWnd.GroupSelector(group) {
+        delegate = new BuddyWnd.GroupSelector(group) {
             protected void changed(int group) {
                 dropdownSync(group);
                 NExtendedGroupSelector.this.changed(group);
             }
-        }, Coord.z);
-        dropdown = add(new GroupDropbox(group), quick.sz.x + gap, 0);
-        edit = add(new EditButton(), dropdown.c.x + dropdown.sz.x + gap, 0);
-        resize(new Coord(edit.c.x + edit.sz.x, quick.sz.y));
+        };
+        dropdown = add(new GroupDropbox(group), 0, 0);
+        edit = add(new EditButton(), dropdown.sz.x + gap, 0);
     }
 
     /** Overridden by the owning UI (Kin panel / Village {@code grp} factory), exactly like {@link BuddyWnd.GroupSelector#changed}. */
     protected void changed(int group) {
     }
 
-    /** Reflects an externally-driven group change (e.g. the server updating a Kin buddy's group) onto both the quick squares and the dropdown, without re-notifying the owner. */
+    /** Reflects an externally-driven group change (e.g. the server updating a Kin buddy's group) onto both the delegate and the dropdown, without re-notifying the owner. */
     public void update(int group) {
-        quick.update(group);
+        delegate.update(group);
         dropdownSync(group);
     }
 
@@ -92,7 +106,7 @@ public class NExtendedGroupSelector extends Widget {
 
     private class GroupDropbox extends Dropbox<Integer> {
         GroupDropbox(int group) {
-            super(dropw, 10, quick.sz.y);
+            super(dropw, 10, rowh);
             sel = group;
         }
 
@@ -113,19 +127,19 @@ public class NExtendedGroupSelector extends Widget {
             g.chcolor();
         }
 
-        /** The critical dispatch: drive the wrapped, unmodified GroupSelector through its own public
-         *  select() - the exact path a normal colour-square click already takes - rather than sending
-         *  any protocol message ourselves. */
+        /** The critical dispatch: drive the hidden, unmodified GroupSelector delegate through its
+         *  own public select() - the exact path a normal colour-square click would take - rather
+         *  than sending any protocol message ourselves. */
         public void change(Integer item) {
             super.change(item);
-            quick.select(item);
+            delegate.select(item);
         }
     }
 
-    /** Fixed-size (matches the selector's own row height) button opening the label-editor popup for whichever group is currently selected. */
+    /** Fixed-size (matches the control's own row height) button opening the label-editor popup for whichever group is currently selected. */
     private class EditButton extends Widget {
         EditButton() {
-            super(new Coord(quick.sz.y, quick.sz.y));
+            super(new Coord(editw, rowh));
         }
 
         public void draw(GOut g) {

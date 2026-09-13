@@ -326,6 +326,10 @@ public class BuddyWnd extends Widget implements Iterable<BuddyWnd.Buddy> {
     public static class GroupSelector extends Widget {
 	private static final int cols = Math.min(10, nquick);
 	private static final int rows = Math.max(1, (nquick + cols - 1) / cols);
+	/** This class's own footprint (currently {@code cols x rows} one row), so a client-side
+	 *  extension can size itself to fit wherever a plain instance of this class already fits,
+	 *  without duplicating the cols/rows formula above. */
+	public static final Coord basesz = new Coord(cols * margin3, rows * margin3);
 	public int group;
 	public GroupRect[] groups = new GroupRect[nquick];
 

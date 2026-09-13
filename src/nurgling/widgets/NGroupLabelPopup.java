@@ -2,12 +2,12 @@ package nurgling.widgets;
 
 import haven.Button;
 import haven.Coord;
+import haven.GameUI;
 import haven.Label;
 import haven.TextEntry;
 import haven.UI;
 import haven.Widget;
 import haven.Window;
-import nurgling.NUtils;
 import nurgling.conf.NGroupLabels;
 import nurgling.i18n.L10n;
 
@@ -25,12 +25,20 @@ public class NGroupLabelPopup extends Window {
     private final TextEntry entry;
     private boolean saved = false;
 
-    /** Opens a popup for {@code group}, replacing any popup this selector already had open. */
+    /**
+     * Opens a popup for {@code group}, replacing any popup this selector already had open.
+     *
+     * <p>Attaches to {@code owner}'s OWN owning session ({@code owner.getparent(GameUI.class)}),
+     * never an ambient "current session" accessor - this fork runs multiple sessions in one
+     * process, and a popup opened from one session's Kin/Village panel must land in that same
+     * session's widget tree, not whichever session happens to be foregrounded elsewhere.
+     */
     public static void open(NExtendedGroupSelector owner, NGroupLabels.Scope scope, int group) {
         owner.closeLabelPopup();
         NGroupLabelPopup popup = new NGroupLabelPopup(owner, scope, group);
         owner.setLabelPopup(popup);
-        Widget host = (NUtils.getGameUI() != null) ? NUtils.getGameUI() : owner.ui.root;
+        GameUI gui = owner.getparent(GameUI.class);
+        Widget host = (gui != null) ? gui : owner.ui.root;
         host.add(popup, owner.ui.mc);
     }
 
