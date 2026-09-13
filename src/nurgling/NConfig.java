@@ -65,6 +65,10 @@ public class NConfig
         invert_hor,
         invert_ver,
         kinprop,
+        /** Client-side only: numeric Kin group -> custom label. Never sent to the server. */
+        kinGroupLabels,
+        /** Client-side only: numeric Village permission group -> custom label. Never sent to the server. */
+        villageGroupLabels,
         show_drag_menu,
         cowsprop,
         horseprop,
