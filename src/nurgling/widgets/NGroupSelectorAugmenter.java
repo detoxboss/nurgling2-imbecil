@@ -25,10 +25,10 @@ import java.util.WeakHashMap;
  *
  * <p>Classification is by structural/resource identity, never by a localized caption: first-party
  * ancestors ({@link BuddyWnd.BuddyInfo}, {@link NKinSettings}) are checked by class directly; Village
- * is checked by its runtime class's fully-qualified name, since we hold no compile-time reference to
- * classes we do not vendor. Everything else that reaches this point - the personal claim ("Stake")
- * window and Field Cairn among them - is handled by a generalized fallback rather than a further
- * per-window class-name guess; see that fallback's own comment in {@link #classify} for why.
+ * and the personal claim window are each checked by their own runtime class's fully-qualified name,
+ * since we hold no compile-time reference to classes we do not vendor. Everything else that reaches
+ * this point - Field Cairn among them - is handled by a generalized fallback; see that fallback's own
+ * comment in {@link #classify} for why, and for the range it's offered.
  */
 public class NGroupSelectorAugmenter {
     /**
@@ -38,6 +38,10 @@ public class NGroupSelectorAugmenter {
      * misattributed one; confirm against a live client before relying on it further.
      */
     private static final String CLASS_VILLAGE = "haven.res.ui.vlg.Village";
+    /** Verified against a vendored copy of this exact resource (see the ledger entry): its own
+     *  {@code int bflags[] = new int[8]} genuinely bounds it to 8 rows, so it is matched by name and
+     *  capped accordingly rather than left to the generic fallback below. */
+    private static final String CLASS_LANDWINDOW = "haven.res.ui.land.Landwindow";
 
     private static final WeakHashMap<BuddyWnd.GroupSelector, NGroupSelectorCompanion> companions = new WeakHashMap<>();
 
@@ -45,11 +49,13 @@ public class NGroupSelectorAugmenter {
         final NGroupLabels.Scope scope;
         final int lo, hi;
         final String owner;
-        Target(NGroupLabels.Scope scope, int lo, int hi, String owner) {
+        final boolean warnAboveNquick;
+        Target(NGroupLabels.Scope scope, int lo, int hi, String owner, boolean warnAboveNquick) {
             this.scope = scope;
             this.lo = lo;
             this.hi = hi;
             this.owner = owner;
+            this.warnAboveNquick = warnAboveNquick;
         }
     }
 
@@ -59,7 +65,7 @@ public class NGroupSelectorAugmenter {
         Target t = classify(sel);
         if(t == null)
             return;
-        NGroupSelectorCompanion companion = new NGroupSelectorCompanion(sel, t.scope, t.owner, t.lo, t.hi);
+        NGroupSelectorCompanion companion = new NGroupSelectorCompanion(sel, t.scope, t.owner, t.lo, t.hi, t.warnAboveNquick);
         companions.put(sel, companion);
         sel.hide();
         sel.parent.add(companion, sel.c);
@@ -86,31 +92,44 @@ public class NGroupSelectorAugmenter {
         /* Kin per-buddy panel and the Kin notification-settings picker: both first-party, both want
          * the full assignable range under the Kin label namespace. */
         if(sel.getparent(BuddyWnd.BuddyInfo.class) != null)
-            return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.ncolors - 1, chrid(sel));
+            return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.ncolors - 1, chrid(sel), false);
         if(sel.getparent(NKinSettings.class) != null)
-            return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.ncolors - 1, chrid(sel));
+            return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.ncolors - 1, chrid(sel), false);
 
         Polity polity = sel.getparent(Polity.class);
         if(polity != null) {
             if(CLASS_VILLAGE.equals(polity.getClass().getName()))
-                return new Target(NGroupLabels.Scope.VILLAGE, 0, BuddyWnd.ncolors - 1, polity.name);
+                return new Target(NGroupLabels.Scope.VILLAGE, 0, BuddyWnd.ncolors - 1, polity.name, true);
             /* Realm, or any other/future Polity subtype: deliberately left alone rather than guessing
              * it should share the Village label namespace. */
             return null;
         }
 
+        Widget parent = sel.parent;
+        if((parent != null) && CLASS_LANDWINDOW.equals(parent.getClass().getName())) {
+            /* The personal claim's row picks which of the claim's own eight permission rows is being
+             * edited - a client-side array bound in the unmodified ui/land resource itself (measured,
+             * not assumed: see the ledger entry), not a server data-model limit. Groups above the
+             * eighth are not offered here, and it uses the Kin label namespace (a claim's permissions
+             * are granted to the owning character's own Kin groups, not a separate namespace). No
+             * warning needed - the range offered never reaches nquick. */
+            return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.nquick - 1, chrid(sel), false);
+        }
+
         /* Everything else reaching here is a GroupSelector built by resource code with no source in
          * this repo: BuddyInfo/NKinSettings/MapWnd (the only first-party construction sites - verified
-         * by a repo-wide search for "new GroupSelector(") and Village are all excluded above. The
-         * personal claim ("Stake"/ui/land) and Field Cairn are both known instances of this; neither
-         * has a class name we can verify without vendoring or a crash report naming it, so rather than
-         * guess one (Field Cairn) or keep a guess with no better evidence than this fallback already
-         * has (Landwindow), every unrecognized resource selector is treated the same way. Every known
-         * instance caps its real permission storage at nquick (8) rows, so only 0..7 are offered here,
-         * under the Kin label namespace (these windows grant permissions to the owning character's own
-         * Kin groups, not a separate namespace). If a resource window is ever found that embeds a
+         * by a repo-wide search for "new GroupSelector(") and Village/Landwindow are all excluded
+         * above. Field Cairn is the known instance of this today; its Java class has never been read
+         * (no crash report, reference-client commit, or vendored copy names it, unlike Village or
+         * Landwindow), so it cannot be matched by name. Per the game's own developers (who can see the
+         * server-side storage, unlike this fork), Field Cairn's permission storage is NOT capped at 8
+         * rows the way the personal claim's is - it supports the full assignable range - so this
+         * fallback offers 0..ncolors-1, under the Kin label namespace, with the same cross-client
+         * crash warning Village gets above nquick (Field Cairn's ground permission-color overlay is
+         * shared world state rendered by every nearby client, exactly like Village's, so the same risk
+         * applies until proven otherwise live). If a resource window is ever found that embeds a
          * GroupSelector for a non-permission purpose (the way MapWnd's marker-colour picker does), add
          * an explicit exclusion for it above, the same shape as the MapWnd one. */
-        return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.nquick - 1, chrid(sel));
+        return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.ncolors - 1, chrid(sel), true);
     }
 }

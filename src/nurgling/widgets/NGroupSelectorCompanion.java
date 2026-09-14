@@ -41,17 +41,19 @@ public class NGroupSelectorCompanion extends Widget {
      *  stable identity available - see {@link NGroupLabels}'s own doc for the tradeoff). */
     private final String owner;
     private final int lo, hi;
+    private final boolean warnAboveNquick;
     private final GroupDropbox dropdown;
     private final EditButton edit;
     private NGroupLabelPopup labelPopup;
 
-    NGroupSelectorCompanion(BuddyWnd.GroupSelector real, NGroupLabels.Scope scope, String owner, int lo, int hi) {
+    NGroupSelectorCompanion(BuddyWnd.GroupSelector real, NGroupLabels.Scope scope, String owner, int lo, int hi, boolean warnAboveNquick) {
         super(new Coord(dropw + gap + editw, rowh));
         this.real = real;
         this.scope = scope;
         this.owner = owner;
         this.lo = lo;
         this.hi = hi;
+        this.warnAboveNquick = warnAboveNquick;
         dropdown = add(new GroupDropbox(real.group), 0, 0);
         edit = add(new EditButton(), dropdown.sz.x + gap, 0);
     }
@@ -86,18 +88,20 @@ public class NGroupSelectorCompanion extends Widget {
     }
 
     /**
-     * Village member/permission group colors above {@link BuddyWnd#nquick} are rendered by every
-     * viewing client (member list [N] tags, ground permission-color overlays), including players on an
-     * unmodified client whose own compiled GroupSelector has no such group - assigning one there will
-     * crash them, with no fix reachable from this fork (their binary, not ours). Warn the picker rather
-     * than silently letting it happen. The claim/Field-Cairn/other fallback scope is never at risk of
-     * this: {@link NGroupSelectorAugmenter} caps it to 0..nquick-1 before a companion is even built.
+     * Group colors above {@link BuddyWnd#nquick} in a context {@link NGroupSelectorAugmenter} flagged
+     * as {@code warnAboveNquick} (Village, and the Field-Cairn-and-unknown fallback) are rendered by
+     * every viewing client (member list [N] tags, ground permission-color overlays), including players
+     * on an unmodified client whose own compiled GroupSelector may have no such group - assigning one
+     * there could crash them, with no fix reachable from this fork (their binary, not ours). Warn the
+     * picker rather than silently letting it happen. Contexts the augmenter did not flag either never
+     * reach this range (the personal claim is capped at 0..nquick-1 before a companion is even built)
+     * or never leave this client (Kin group assignments are purely local, never sent to other players).
      */
     private void warnIfRisky(int group) {
-        if((scope == NGroupLabels.Scope.VILLAGE) && (group >= BuddyWnd.nquick)) {
+        if(warnAboveNquick && (group >= BuddyWnd.nquick)) {
             GameUI gui = getparent(GameUI.class);
             if(gui != null)
-                gui.error(L10n.get("group.village_high_warn"));
+                gui.error(L10n.get("group.high_group_warn"));
         }
     }
 
