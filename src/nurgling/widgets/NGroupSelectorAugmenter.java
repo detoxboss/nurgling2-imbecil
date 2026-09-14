@@ -24,13 +24,13 @@ import java.util.WeakHashMap;
  * class itself, not on whoever created it.
  *
  * <p>Classification is by structural/resource identity, never by a localized caption: first-party
- * ancestors ({@link BuddyWnd.BuddyInfo}, {@link NKinSettings}) are checked by class directly; resource
- * windows are checked by their runtime class's fully-qualified name, since we hold no compile-time
- * reference to classes we do not vendor.
+ * ancestors ({@link BuddyWnd.BuddyInfo}, {@link NKinSettings}) are checked by class directly; Village
+ * is checked by its runtime class's fully-qualified name, since we hold no compile-time reference to
+ * classes we do not vendor. Everything else that reaches this point - the personal claim ("Stake")
+ * window and Field Cairn among them - is handled by a generalized fallback rather than a further
+ * per-window class-name guess; see that fallback's own comment in {@link #classify} for why.
  */
 public class NGroupSelectorAugmenter {
-    /** Verified against a vendored copy of this exact resource (see the ledger entry). */
-    private static final String CLASS_LANDWINDOW = "haven.res.ui.land.Landwindow";
     /**
      * Inferred from crash-report prose in the reference commits (a real stack trace naming this exact
      * class), not from an independently vendored copy - if this string is wrong, the practical failure
@@ -90,16 +90,6 @@ public class NGroupSelectorAugmenter {
         if(sel.getparent(NKinSettings.class) != null)
             return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.ncolors - 1, chrid(sel));
 
-        Widget parent = sel.parent;
-        if((parent != null) && CLASS_LANDWINDOW.equals(parent.getClass().getName())) {
-            /* The personal claim's row picks which of the claim's own eight permission rows is being
-             * edited - a client-side array bound in the unmodified ui/land resource itself (measured,
-             * not assumed: see the ledger entry), not a server data-model limit. Groups above the
-             * eighth are not offered here, and it uses the Kin label namespace (a claim's permissions
-             * are granted to the owning character's own Kin groups, not a separate namespace). */
-            return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.nquick - 1, chrid(sel));
-        }
-
         Polity polity = sel.getparent(Polity.class);
         if(polity != null) {
             if(CLASS_VILLAGE.equals(polity.getClass().getName()))
@@ -109,6 +99,18 @@ public class NGroupSelectorAugmenter {
             return null;
         }
 
-        return null;
+        /* Everything else reaching here is a GroupSelector built by resource code with no source in
+         * this repo: BuddyInfo/NKinSettings/MapWnd (the only first-party construction sites - verified
+         * by a repo-wide search for "new GroupSelector(") and Village are all excluded above. The
+         * personal claim ("Stake"/ui/land) and Field Cairn are both known instances of this; neither
+         * has a class name we can verify without vendoring or a crash report naming it, so rather than
+         * guess one (Field Cairn) or keep a guess with no better evidence than this fallback already
+         * has (Landwindow), every unrecognized resource selector is treated the same way. Every known
+         * instance caps its real permission storage at nquick (8) rows, so only 0..7 are offered here,
+         * under the Kin label namespace (these windows grant permissions to the owning character's own
+         * Kin groups, not a separate namespace). If a resource window is ever found that embeds a
+         * GroupSelector for a non-permission purpose (the way MapWnd's marker-colour picker does), add
+         * an explicit exclusion for it above, the same shape as the MapWnd one. */
+        return new Target(NGroupLabels.Scope.KIN, 0, BuddyWnd.nquick - 1, chrid(sel));
     }
 }

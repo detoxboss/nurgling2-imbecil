@@ -44,6 +44,8 @@ public class NGroupLabelPopup extends Window {
         GameUI gui = owner.getparent(GameUI.class);
         Widget host = (gui != null) ? gui : owner.ui.root;
         host.add(popup, owner.ui.mc);
+        popup.raise();
+        host.setfocus(popup);
     }
 
     private NGroupLabelPopup(NGroupSelectorCompanion owner, NGroupLabels.Scope scope, String labelOwner, int group) {
@@ -61,7 +63,7 @@ public class NGroupLabelPopup extends Window {
         entry = add(new TextEntry(UI.scale(200), NGroupLabels.get(scope, labelOwner, group)) {
             {dshow = true;}
             public void activate(String text) {
-                destroy();
+                NGroupLabelPopup.this.destroy();
             }
         }, new Coord(margin, y));
         y += entry.sz.y + UI.scale(8);
@@ -69,7 +71,7 @@ public class NGroupLabelPopup extends Window {
         add(new Button(UI.scale(80), L10n.get("group.popup_save")) {
             public void click() {
                 super.click();
-                destroy();
+                NGroupLabelPopup.this.destroy();
             }
         }, new Coord(margin, y));
 

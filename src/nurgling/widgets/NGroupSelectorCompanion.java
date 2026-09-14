@@ -3,11 +3,13 @@ package nurgling.widgets;
 import haven.BuddyWnd;
 import haven.Coord;
 import haven.Dropbox;
+import haven.GameUI;
 import haven.GOut;
 import haven.Text;
 import haven.UI;
 import haven.Widget;
 import nurgling.conf.NGroupLabels;
+import nurgling.i18n.L10n;
 
 import java.awt.Color;
 
@@ -83,6 +85,22 @@ public class NGroupSelectorCompanion extends Widget {
         super.destroy();
     }
 
+    /**
+     * Village member/permission group colors above {@link BuddyWnd#nquick} are rendered by every
+     * viewing client (member list [N] tags, ground permission-color overlays), including players on an
+     * unmodified client whose own compiled GroupSelector has no such group - assigning one there will
+     * crash them, with no fix reachable from this fork (their binary, not ours). Warn the picker rather
+     * than silently letting it happen. The claim/Field-Cairn/other fallback scope is never at risk of
+     * this: {@link NGroupSelectorAugmenter} caps it to 0..nquick-1 before a companion is even built.
+     */
+    private void warnIfRisky(int group) {
+        if((scope == NGroupLabels.Scope.VILLAGE) && (group >= BuddyWnd.nquick)) {
+            GameUI gui = getparent(GameUI.class);
+            if(gui != null)
+                gui.error(L10n.get("group.village_high_warn"));
+        }
+    }
+
     private String labelText(int group) {
         String label = NGroupLabels.get(scope, owner, group);
         return(label.isEmpty() ? Integer.toString(group) : (group + " - " + label));
@@ -114,10 +132,19 @@ public class NGroupSelectorCompanion extends Widget {
         /** The critical dispatch: drive the REAL, resource-or-first-party-owned GroupSelector through
          *  its own public select() - the exact path a normal colour-square click on it would take -
          *  so whatever protocol message its own changed()/select() override sends fires unchanged. This
-         *  class never sends a wdgmsg and never needs to know what message that is. */
+         *  class never sends a wdgmsg and never needs to know what message that is.
+         *
+         *  <p>{@code item} is null when the base Listbox's mousedown lands inside the open list but not
+         *  on an actual item (see Listbox#mousedown) - e.g. a click that closes the window while the
+         *  dropdown is still open. Forward that to super.change() as normal (it just clears the
+         *  dropdown's own selection), but don't unbox a null Integer into real.select(int); tick()
+         *  already resyncs the dropdown's display back to real.group every frame regardless. */
         public void change(Integer item) {
             super.change(item);
-            real.select(item);
+            if(item != null) {
+                real.select(item);
+                warnIfRisky(item);
+            }
         }
     }
 
