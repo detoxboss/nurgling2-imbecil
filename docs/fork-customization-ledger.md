@@ -436,18 +436,40 @@ if it's ever wrong (Village simply gets no companion, not a misattributed one).
   `GroupSelector`'s ancestor chain and decides whether to attach a companion, by structural/resource
   identity, never a localized caption:
   - `getparent(MapWnd.class) != null` → **leave alone** (map-marker picker; simple by design).
-  - `getparent(BuddyWnd.BuddyInfo.class) != null` → Kin scope, groups 0..`ncolors`-1.
-  - `getparent(NKinSettings.class) != null` → Kin scope, groups 0..`ncolors`-1 (see below).
-  - immediate parent's runtime class is `haven.res.ui.land.Landwindow` → Kin scope, groups
-    0..`nquick`-1 **only** (see "Personal claim" below).
+  - `getparent(BuddyWnd.BuddyInfo.class) != null` → Kin scope, groups 0..`ncolors`-1, no cross-client
+    warning (Kin group assignments are purely local, never sent to other players).
+  - `getparent(NKinSettings.class) != null` → Kin scope, groups 0..`ncolors`-1 (see below), same as above.
   - `getparent(Polity.class)` resolves and that instance's runtime class is `haven.res.ui.vlg.Village`
     → Village scope, groups 0..`ncolors`-1 (covers **both** the top-level and per-member selectors -
-    both are `Polity`-descended `GroupSelector`s constructed the same way).
+    both are `Polity`-descended `GroupSelector`s constructed the same way), **with** the cross-client
+    warning (below) above `nquick`.
   - any other `Polity` subtype (Realm, or anything future) → **leave alone**. Not sharing the Village
     label namespace with Realm was an explicit requirement; without an independently-verified
     `haven.res.ui.realm.Realm` class-name match this fork does not guess one is safe to add.
-  - anything else unmatched → **leave alone** (the safe default for every branch above, and for
-    whatever this list hasn't anticipated).
+  - immediate parent's runtime class is `haven.res.ui.land.Landwindow` → Kin scope, groups
+    0..`nquick`-1 **only**, no warning needed (the range offered never reaches `nquick`). See "Personal
+    claim ('Stake') window" below.
+  - **everything else** (not `MapWnd`, not Kin, not `Polity`-descended, not `Landwindow`) → Kin scope,
+    groups 0..`ncolors`-1, **with** the cross-client warning above `nquick`. This fallback exists because
+    Field Cairn's permission window still showed the plain 8-square picker after the first live-testing
+    round, and **Field Cairn's Java class name has no evidence behind it at all** - no crash report, no
+    reference-client commit, no vendored copy - unlike `Landwindow` (vendored copy read in full) or
+    `Village` (named in a crash-report stack frame) - so it cannot be matched by name the way those two
+    are. A repo-wide search for `new GroupSelector(` confirms the only first-party construction sites
+    (`BuddyInfo`, `$grp`, `MapWnd`'s marker picker) are excluded by the branches above it, so anything
+    reaching this fallback is, by construction, resource code this fork has no source for.
+    **The 0..`ncolors`-1 range here (rather than 0..`nquick`-1) is per the user's report that the game's
+    own developers - who can see server-side storage, unlike this fork - confirmed Field Cairn's
+    permission storage is not capped at 8 the way the personal claim's is.** This is materially
+    different evidence from everything else in this section: it is neither independently vendor-verified
+    nor inferred from a crash report, only asserted by the user citing an unnamed developer source, and
+    is being shipped specifically to be live-tested and confirmed or refuted - see "Verify" below. If
+    live testing shows Field Cairn is in fact capped at `nquick` like the claim window, revert this
+    fallback's `hi` back to `nquick - 1` (or, better, get Field Cairn's actual class name from a live
+    crash/log and give it its own named branch like `Landwindow`'s, once evidence for one exists). If a
+    resource window is ever found that embeds a `GroupSelector` for a non-permission purpose (the way
+    `MapWnd`'s marker-colour picker does), add an explicit exclusion for it above, the same shape as the
+    `MapWnd` one.
 - For a classified selector, `NGroupSelectorAugmenter` builds a `nurgling.widgets.NGroupSelectorCompanion`
   (a dropdown + a small `...` button, sized to `GroupSelector.basesz` so it never exceeds the footprint
   a plain selector already occupies), calls `sel.hide()` (which Hafen's own `Widget.draw`/pointer-event
@@ -485,12 +507,24 @@ if it's ever wrong (Village simply gets no companion, not a misattributed one).
   code that persists only 8 permission rows (`int bflags[] = new int[8]` in the unmodified, currently
   served version) - a client-side array bound inside that resource's own code, not a server data-model
   limit (see "Verification against a reference client" above). This fork's companion offers **only**
-  0..`nquick`-1 there, under the Kin label namespace (a claim's permissions are granted to the owning
-  character's own Kin groups, not a separate namespace) - never the full 0..`ncolors`-1 range, and this
-  fork does **not** vendor `ui/land` to widen that array, even though doing so is now known to be a
-  one-line fix. Vendoring a version-pinned (`@FromResource`) copy of a frequently-served resource is
+  0..`nquick`-1 there, under the Kin label namespace (these windows grant permissions to the owning
+  character's own Kin groups, not a separate namespace) - never the full 0..`ncolors`-1 range - and
+  this fork does **not** vendor `ui/land` to widen that array, even though doing so is now known to be
+  a one-line fix. Vendoring a version-pinned (`@FromResource`) copy of a frequently-served resource is
   exactly the long-lived, version-bumping maintenance burden this fork's low-divergence policy exists
-  to avoid, for a capability (claim permissions above group 7) nobody has asked for yet.
+  to avoid, for a capability (claim permissions above group 7) nobody has asked for.
+- **Field Cairn.** Field Cairn's own permission window (placed via the `gfx/terobjs/fieldcairn` gob,
+  live-tested to show a "Groups:" row of 8 squares plus Trespassing/Rummaging/Theft/Vandalism privilege
+  checkboxes, structurally like the claim window) reaches the companion mechanism through the
+  generalized fallback above, not a name match - its Java class has never been read. Unlike the claim
+  window, it is offered the **full** 0..`ncolors`-1 range, not capped at `nquick`-1: the user reported
+  the game's own developers - who can see server-side storage - confirmed Field Cairn's permission
+  storage supports the full range, unlike the claim's 8-row `bflags[]`. **This is asserted, not
+  independently verified by this fork** (no vendored copy, no crash report - see the fallback's own
+  comment in `NGroupSelectorAugmenter.classify()`), and is shipped specifically to be live-tested; see
+  "Verify" below. The same cross-client crash risk Village carries above `nquick` (below) is assumed to
+  apply here too until live testing says otherwise, since Field Cairn's ground permission-color overlay
+  is shared world state rendered by every nearby client the same way Village's member list/overlay is.
 - **Client-side custom labels.** `nurgling.conf.NGroupLabels` persists labels through two separate
   `NConfig.Key` slots (`kinGroupLabels`, `villageGroupLabels`) so the same numeric group id can carry
   an independent meaning in Kin vs. Village. Each scope is additionally keyed by an `owner` string
@@ -540,23 +574,78 @@ cascading-teardown reasons above. `NGroupSelectorCompanion` must never be added 
 real selector, only as a sibling alongside a hidden one, and must keep driving it via `real.select(int)`
 - never a direct `wdgmsg` call. `Polity.MemberList.makeitem()`'s tag-drawing must stay in the wrapper,
 not moved into `Member.draw()`, unless a vendored `VMember`/`RMember` copy someday proves both call
-`super.draw()`. The `CLASS_LANDWINDOW`/`CLASS_VILLAGE` string constants in `NGroupSelectorAugmenter`
+`super.draw()`. The `CLASS_VILLAGE`/`CLASS_LANDWINDOW` string constants in `NGroupSelectorAugmenter`
 are resource-version-sensitive by nature (a class rename in a future `ui/vlg`/`ui/land` publish would
-silently stop matching, degrading to "leave alone" rather than breaking) - re-verify them the same way
-(a vendored copy for `Landwindow`, a live crash/log check for `Village`) if Village or claim companions
-stop appearing after a game update.
+silently stop matching, degrading to "leave alone"/the generalized fallback rather than breaking) -
+re-verify them with a live crash/log check or a fresh vendored copy if Village or claim companions stop
+appearing (or the claim window's companion suddenly offers 0..39 because it fell into the fallback)
+after a game update. The generalized fallback (everything not `MapWnd`/Kin/`Polity`/`Landwindow`) has
+no class name to go stale, but relies on the invariant that no first-party code other than
+`BuddyInfo`/`$grp`/`MapWnd` ever constructs a `GroupSelector` directly - re-check that invariant (a
+repo-wide search for `new GroupSelector(`) before adding any new first-party construction site, and add
+it as an explicit early branch the same shape as `MapWnd`'s if it isn't meant to fall into the
+0..`ncolors`-1 Kin bucket. That bucket's range (0..`ncolors`-1, not 0..`nquick`-1) rests on the user's
+report of unverified developer testimony about Field Cairn specifically - see the "Field Cairn" bullet
+above and the fallback's own comment in `classify()` before trusting it further or extending it to any
+other window that lands in this same bucket.
+
+**Known live-tested bugs and fixes (second round of live testing, after the merge to `master`):**
+
+- **Crash closing a window with an open dropdown.** `haven.Listbox.mousedown` calls `change(null)`
+  when a click lands inside the open list but not on an actual item - correct base-widget behavior, not
+  a bug there. `NGroupSelectorCompanion.GroupDropbox.change(Integer item)` unconditionally forwarded
+  `item` into `real.select(item)`, unboxing a null `Integer` into `int` and throwing
+  `NullPointerException` (reported stack trace: `GroupDropbox.change` → `Dropbox$Droplist.change` →
+  `Listbox.mousedown`). Fixed by skipping the `real.select(item)` forward (not the `super.change(item)`
+  call) when `item` is null; the companion's own `tick()` already resyncs its displayed selection back
+  to `real.group` every frame regardless.
+- **Label popup opening behind the main window.** `NGroupLabelPopup.open()` added the popup via
+  `host.add(...)` but never raised or focused it, so it could land behind whatever window already had
+  focus in that session. Fixed by calling `popup.raise(); host.setfocus(popup);` immediately after
+  adding it, mirroring the existing raise+focus pattern used elsewhere in this codebase (e.g.
+  `Window.java`'s own child-window handling, `GameUI.java`'s window-reopen logic).
+- **Save button disappearing without closing the window.** Both the Save `Button.click()` override and
+  the `TextEntry.activate()` (Enter-to-save) override in `NGroupLabelPopup` called a bare, unqualified
+  `destroy()` from inside an anonymous inner-class body. Neither `Button` nor `TextEntry` (nor their
+  shared ancestor `SIWidget`) overrides `destroy()`, so Java resolved that unqualified call to
+  `Widget.destroy()` invoked **on the anonymous widget itself** (the button, or the text field) rather
+  than on the outer `NGroupLabelPopup` - which is why Save visibly vanished (its own `remove()`/
+  `rdispose()` ran) while the window and its actual close/save logic never triggered. Only the titlebar-
+  cross/Escape path (`NGroupLabelPopup.wdgmsg`, a direct override on the outer class, where an
+  unqualified `destroy()` correctly resolves to `this`) worked correctly before this fix. Fixed by
+  qualifying both call sites as `NGroupLabelPopup.this.destroy()`.
+- **Cross-client crash from high Village (and, provisionally, Field Cairn) groups (reported as a
+  question, not a bug - answered, not fixed).** Assigning a Village member (or, per the Field Cairn
+  change above, a Field Cairn) a group above 7 is genuinely unfixable from this fork alone: the
+  member-list `[N]` tag and the ground permission-color overlay are shared world state rendered by
+  *every* client viewing them, including bystanders on an unmodified client who never opened any
+  permission window - and an unmodified client's own compiled rendering code has its own array bound at
+  8, the same class of bug this fork's `gc[255]`/`ncolors`/`nquick` split fixed locally. There is no
+  protocol-level or server-side lever reachable from this fork that could patch another player's
+  binary. As a client-side mitigation (not a fix), `NGroupSelectorCompanion` now calls
+  `GameUI.error(...)` with a translated warning (`group.high_group_warn`) whenever a group `>=
+  BuddyWnd.nquick` is picked in a context `NGroupSelectorAugmenter` flagged `warnAboveNquick` -
+  currently Village and the Field-Cairn/unknown fallback. The claim window can never trigger it, since
+  it is capped to 0..7 before a companion is even built; Kin never triggers it either, since Kin group
+  assignments are purely local and never rendered to other players.
 
 **Verify:** `ant test && ant jar`; in-game, confirm the Kin panel shows a compact dropdown + `...`
 button with no visible quick squares and no clipping; that both Village selectors (top-level and
 per-member) show the same control, fitting exactly where the original 8-square selector fit, with
 Banish/Forget undisturbed; that the claim ("Stake") window's selector offers only groups 0..7; that
-groups 0/7/8/20/39 are selectable everywhere they should be and assigning 39 sends `39` (not a
-remapped index); that Kin and Village labels persist independently, are scoped per-character
-(Kin) and per-village-name (Village) as described, and the dropdown reflects a saved label
-immediately; that the Edit popup opens in the correct session with two sessions open; that
-`NKinSettings`/`MapWnd` behave exactly as before this feature existed structurally, just reachable
-through the shared companion mechanism (`NKinSettings`) or left alone (`MapWnd`); and that
-switching Village members repeatedly leaves no duplicated or leaked companions.
+**Field Cairn's selector offers the full 0..39 and that assigning a group above 7 there actually works
+server-side rather than silently failing or corrupting state** (this is the one asserted-not-verified
+claim in this section - if it's wrong, revert the fallback's range per the note in `classify()`); that
+groups 0/7/8/20/39 are selectable everywhere they should be and assigning 39
+sends `39` (not a remapped index); that Kin and Village labels persist independently, are scoped
+per-character (Kin) and per-village-name (Village) as described, and the dropdown reflects a saved
+label immediately; that the Edit popup opens in the correct session, on top of and focused ahead of
+the main window, with two sessions open; that clicking Save (or pressing Enter) closes the popup
+immediately and persists the edit; that opening a dropdown and closing its window without picking an
+item does not crash; that picking a Village group 8..39 shows the new crash-risk warning and picking
+0..7 does not; that `NKinSettings`/`MapWnd` behave exactly as before this feature existed structurally,
+just reachable through the shared companion mechanism (`NKinSettings`) or left alone (`MapWnd`); and
+that switching Village members repeatedly leaves no duplicated or leaked companions.
 
 **Superseded when:** upstream ships an equivalent expanded permission-group system, or the Village/
 Realm/claim resource windows' own implementations change such that a different seam becomes available

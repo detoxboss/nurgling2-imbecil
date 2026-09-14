@@ -3,11 +3,13 @@ package nurgling.widgets;
 import haven.BuddyWnd;
 import haven.Coord;
 import haven.Dropbox;
+import haven.GameUI;
 import haven.GOut;
 import haven.Text;
 import haven.UI;
 import haven.Widget;
 import nurgling.conf.NGroupLabels;
+import nurgling.i18n.L10n;
 
 import java.awt.Color;
 
@@ -39,17 +41,19 @@ public class NGroupSelectorCompanion extends Widget {
      *  stable identity available - see {@link NGroupLabels}'s own doc for the tradeoff). */
     private final String owner;
     private final int lo, hi;
+    private final boolean warnAboveNquick;
     private final GroupDropbox dropdown;
     private final EditButton edit;
     private NGroupLabelPopup labelPopup;
 
-    NGroupSelectorCompanion(BuddyWnd.GroupSelector real, NGroupLabels.Scope scope, String owner, int lo, int hi) {
+    NGroupSelectorCompanion(BuddyWnd.GroupSelector real, NGroupLabels.Scope scope, String owner, int lo, int hi, boolean warnAboveNquick) {
         super(new Coord(dropw + gap + editw, rowh));
         this.real = real;
         this.scope = scope;
         this.owner = owner;
         this.lo = lo;
         this.hi = hi;
+        this.warnAboveNquick = warnAboveNquick;
         dropdown = add(new GroupDropbox(real.group), 0, 0);
         edit = add(new EditButton(), dropdown.sz.x + gap, 0);
     }
@@ -83,6 +87,24 @@ public class NGroupSelectorCompanion extends Widget {
         super.destroy();
     }
 
+    /**
+     * Group colors above {@link BuddyWnd#nquick} in a context {@link NGroupSelectorAugmenter} flagged
+     * as {@code warnAboveNquick} (Village, and the Field-Cairn-and-unknown fallback) are rendered by
+     * every viewing client (member list [N] tags, ground permission-color overlays), including players
+     * on an unmodified client whose own compiled GroupSelector may have no such group - assigning one
+     * there could crash them, with no fix reachable from this fork (their binary, not ours). Warn the
+     * picker rather than silently letting it happen. Contexts the augmenter did not flag either never
+     * reach this range (the personal claim is capped at 0..nquick-1 before a companion is even built)
+     * or never leave this client (Kin group assignments are purely local, never sent to other players).
+     */
+    private void warnIfRisky(int group) {
+        if(warnAboveNquick && (group >= BuddyWnd.nquick)) {
+            GameUI gui = getparent(GameUI.class);
+            if(gui != null)
+                gui.error(L10n.get("group.high_group_warn"));
+        }
+    }
+
     private String labelText(int group) {
         String label = NGroupLabels.get(scope, owner, group);
         return(label.isEmpty() ? Integer.toString(group) : (group + " - " + label));
@@ -114,10 +136,19 @@ public class NGroupSelectorCompanion extends Widget {
         /** The critical dispatch: drive the REAL, resource-or-first-party-owned GroupSelector through
          *  its own public select() - the exact path a normal colour-square click on it would take -
          *  so whatever protocol message its own changed()/select() override sends fires unchanged. This
-         *  class never sends a wdgmsg and never needs to know what message that is. */
+         *  class never sends a wdgmsg and never needs to know what message that is.
+         *
+         *  <p>{@code item} is null when the base Listbox's mousedown lands inside the open list but not
+         *  on an actual item (see Listbox#mousedown) - e.g. a click that closes the window while the
+         *  dropdown is still open. Forward that to super.change() as normal (it just clears the
+         *  dropdown's own selection), but don't unbox a null Integer into real.select(int); tick()
+         *  already resyncs the dropdown's display back to real.group every frame regardless. */
         public void change(Integer item) {
             super.change(item);
-            real.select(item);
+            if(item != null) {
+                real.select(item);
+                warnIfRisky(item);
+            }
         }
     }
 
