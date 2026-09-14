@@ -2068,7 +2068,81 @@ public class VSpec {
         weirdMeat.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-weird\", \"gfx/invobjs/meat-ant\"], \"name\": \"Ant Meat\"}"));
         weirdMeat.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-weird\", \"gfx/invobjs/meat-cavelouse\"], \"name\": \"Cave Louse Meat\"}"));
         weirdMeat.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-weird\", \"gfx/invobjs/meat-chasmconch\"], \"name\": \"Chasm Conch Meat\"}"));
-        categories.put(" Meat", weirdMeat);
+        categories.put("Meat", weirdMeat);
+
+        // Sausage inventory resource paths, confirmed live in-game (dev resource-name
+        // overlay). Do not assume a display name maps mechanically to its resource slug;
+        // several use unexpected names (e.g. Boar Baloney -> wurst-boaloney, King of the
+        // Woods -> wurst-woodking, Walrus & Carpenter -> wurst-carpwal, Wonderful
+        // Wilderness Wurst -> wurst-www).
+        ArrayList<JSONObject> sausages = new ArrayList<>();
+
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-badgerbotillo\", \"name\": \"Badger Botillo\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-bearsalami\", \"name\": \"Bear Salami\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-beaverdog\", \"name\": \"Beaver Dog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-bigbearbanger\", \"name\": \"Big Bear Banger\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-boarbaloney\", \"name\": \"Boar Baloney\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-boarboudin\", \"name\": \"Boar Boudin\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-bulldog\", \"name\": \"Bulldog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-butcherssurprise\", \"name\": \"Butcher's Surprise\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-cavedog\", \"name\": \"Cavedog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-chickenchorizo\", \"name\": \"Chicken Chorizo\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-cowchorizo\", \"name\": \"Cow Chorizo\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-deliciousdeer\", \"name\": \"Delicious Deer Dog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-elkdog\", \"name\": \"Elk Dog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-foxfuet\", \"name\": \"Fox Fuet\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-foxwurst\", \"name\": \"Fox Wurst\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-glazedgrazer\", \"name\": \"Glazed Grazer Dog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-hedgedog\", \"name\": \"Hedgedog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-woodking\", \"name\": \"King of the Woods\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-lamblynx\", \"name\": \"Lamb & Lynx\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-lambsausages\", \"name\": \"Lamb Sausages\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-lynxalami\", \"name\": \"Lynxalami\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-moodog\", \"name\": \"Moodog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-piglet\", \"name\": \"Piglet Wursts\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-runningrabbit\", \"name\": \"Running Rabbit Sausage\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-swanneck\", \"name\": \"Swan Neck\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-tamegame\", \"name\": \"Tame Game Liverwurst\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-carpwal\", \"name\": \"Walrus & Carpenter\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-wolfdog\", \"name\": \"Wolfdog\"}"));
+        sausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-www\", \"name\": \"Wonderful Wilderness Wurst\"}"));
+
+        categories.put("Sausages", sausages);
+
+        // Smoked-sausage counterparts (resource slugs follow "wurst-s-<slug>").
+        ArrayList<JSONObject> smokedSausages = new ArrayList<>();
+
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-badgerbotillo\", \"name\": \"Smoked Badger Botillo\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-bearsalami\", \"name\": \"Smoked Bear Salami\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-beaverdog\", \"name\": \"Smoked Beaver Dog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-bigbearbanger\", \"name\": \"Smoked Big Bear Banger\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-boarbaloney\", \"name\": \"Smoked Boar Baloney\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-boarboudin\", \"name\": \"Smoked Boar Boudin\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-bulldog\", \"name\": \"Smoked Bulldog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-butcherssurprise\", \"name\": \"Smoked Butcher's Surprise\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-cavedog\", \"name\": \"Smoked Cavedog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-chickenchorizo\", \"name\": \"Smoked Chicken Chorizo\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-cowchorizo\", \"name\": \"Smoked Cow Chorizo\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-deliciousdeer\", \"name\": \"Smoked Delicious Deer Dog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-elkdog\", \"name\": \"Smoked Elk Dog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-foxfuet\", \"name\": \"Smoked Fox Fuet\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-foxwurst\", \"name\": \"Smoked Fox Wurst\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-glazedgrazer\", \"name\": \"Smoked Glazed Grazer Dog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-hedgedog\", \"name\": \"Smoked Hedgedog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-woodking\", \"name\": \"Smoked King of the Woods\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-lamblynx\", \"name\": \"Smoked Lamb & Lynx\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-lambsausages\", \"name\": \"Smoked Lamb Sausages\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-lynxalami\", \"name\": \"Smoked Lynxalami\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-moodog\", \"name\": \"Smoked Moodog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-piglet\", \"name\": \"Smoked Piglet Wursts\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-runningrabbit\", \"name\": \"Smoked Running Rabbit Sausage\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-swanneck\", \"name\": \"Smoked Swan Neck\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-tamegame\", \"name\": \"Smoked Tame Game Liverwurst\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-carpwal\", \"name\": \"Smoked Walrus & Carpenter\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-wolfdog\", \"name\": \"Smoked Wolfdog\"}"));
+        smokedSausages.add(new JSONObject("{\"static\": \"gfx/invobjs/wurst-s-www\", \"name\": \"Smoked Wonderful Wilderness Wurst\"}"));
+
+        categories.put("Smoked Sausages", smokedSausages);
 
         ArrayList<JSONObject> bollock = new ArrayList<>();
         bollock.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-testis\", \"gfx/invobjs/meat-horse\"], \"name\": \"Horse Bollock\"}"));
