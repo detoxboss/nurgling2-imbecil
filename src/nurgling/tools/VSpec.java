@@ -2072,7 +2072,7 @@ public class VSpec {
 
         // Sausage inventory resource paths, confirmed live in-game (dev resource-name
         // overlay). Do not assume a display name maps mechanically to its resource slug;
-        // several use unexpected names (e.g. Boar Baloney -> wurst-boaloney, King of the
+        // several use unexpected names (e.g. Boar Baloney -> wurst-boarbaloney, King of the
         // Woods -> wurst-woodking, Walrus & Carpenter -> wurst-carpwal, Wonderful
         // Wilderness Wurst -> wurst-www).
         ArrayList<JSONObject> sausages = new ArrayList<>();
