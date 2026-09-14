@@ -95,7 +95,10 @@ public class IconItem extends Widget
         this.name = name;
         tip = new TexI(RichText.render(name).img);
 
-        tex = new TexI(img);
+        // img is null when the entry's resource (static/layer) failed to load or
+        // wasn't set at all - fall back to a blank tile instead of crashing the UI
+        // thread (TexI's constructor NPEs on a null BufferedImage).
+        tex = new TexI(img != null ? img : TexI.mkbuf(UI.scale(new Coord(32, 32))));
         this.sz = UI.scale(new Coord(32, 42));
     }
 
