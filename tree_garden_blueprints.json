@@ -1,0 +1,9 @@
+{
+  "blueprints": [{
+    "name": "Blueprint 1",
+    "width": 20,
+    "trees": [],
+    "height": 20
+  }],
+  "current": "Blueprint 1"
+}
