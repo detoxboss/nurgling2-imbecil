@@ -73,23 +73,30 @@ files without the metadata `LayerUtil` expects, and so log the same `Invalid num
 for image` / `Error loading file` messages on every build, on any OS, independent of whether the
 release is otherwise sound. The workflow does **not** treat the mere presence of those messages in the
 `ant bin` log as failure: `build-windows` counts them and emits a `::warning::` for future cleanup, but
-release safety is enforced by a separate, targeted check — after the build, it opens
-`bin/nurgling-res.jar` and requires each of the following entries to exist with an uncompressed size
-greater than 18 bytes:
+release safety is enforced by a separate, targeted check — after the build, it requires each of the
+following entries to exist with an uncompressed size greater than 18 bytes:
 
-- `res/nurgling/hud/loginscr2.res`
-- `res/nurgling/hud/buttons/login/u.res`
-- `res/nurgling/hud/buttons/login/d.res`
-- `res/nurgling/hud/buttons/login/o.res`
+- `res/nurgling/hud/loginscr2.res`, in `bin/nurgling-res.jar` — the fork-owned login-screen
+  background art.
+- `res/gfx/hud/buttons/loginu.res`, `logind.res`, `logino.res`, in `bin/builtin-res.jar` — the
+  login screen's exec button. Since the September 2026 login-screen rework, `LoginScreen.java`
+  builds this button from the stock Haven resource path (`"gfx/hud/buttons/login"`), not the old
+  fork-owned `nurgling/hud/buttons/login/{u,d,o}` resources; those were removed from
+  `resources/src` and are no longer packaged into `nurgling-res.jar` at all, so checking for them
+  there is stale and always fails post-rework. The stock resource instead ships in the vendored
+  `builtin-res.jar` (downloaded by `res-jar`, not built from this repo's `resources/src`), under
+  the concatenated names Haven's `IButton` path+suffix convention produces (no `/` separator
+  between the button name and the `u`/`d`/`o` suffix) — confirmed by inspecting a real `ant bin`
+  build's jars with `jar tvf`, not assumed from the source change alone.
 
 These are the resources the login screen actually needs at startup; the workflow fails only if one of
 *these* is missing or empty, not on generic warnings elsewhere in the resource tree. Do not read a
 clean `ant bin` log (no warnings at all) as a release requirement — some warnings from the legacy gaps
 above are expected and are not, by themselves, evidence of a broken build. Any future fix to
 `LayerUtil` or cleanup of those legacy resource-source directories should re-verify this list before
-loosening the check further; adding a new required-at-startup resource means adding it here too. Any
-future all-Linux fix to `LayerUtil` should re-verify this check before reverting the build job back to
-a single Ubuntu job.
+loosening the check further; adding a new required-at-startup resource means adding it here too, and
+naming the jar it's expected to appear in. Any future all-Linux fix to `LayerUtil` should re-verify
+this check before reverting the build job back to a single Ubuntu job.
 
 `ant bin` is the packaging basis, unmodified. It already assembles a genuinely cross-platform payload
 in one build: JOGL, LWJGL, and Steamworks each ship native libraries for Windows/Linux/macOS as part of

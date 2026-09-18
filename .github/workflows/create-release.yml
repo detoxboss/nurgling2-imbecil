@@ -104,35 +104,46 @@ jobs:
             fi
           done
 
-      - name: Verify nurgling-res.jar startup resource integrity
+      - name: Verify startup resource integrity
         shell: bash
         run: |
           set -euo pipefail
-          required_entries=(
-            res/nurgling/hud/loginscr2.res
-            res/nurgling/hud/buttons/login/u.res
-            res/nurgling/hud/buttons/login/d.res
-            res/nurgling/hud/buttons/login/o.res
-          )
-          listing="$(jar tvf bin/nurgling-res.jar)"
-          failed=0
-          for entry in "${required_entries[@]}"; do
+
+          check_entry() {
+            local jar="$1" entry="$2" listing line size
+            listing="$(jar tvf "$jar")"
             line="$(echo "$listing" | awk -v e="$entry" '$NF==e')"
             if [ -z "$line" ]; then
-              echo "::error::$entry missing from bin/nurgling-res.jar"
-              failed=1
-              continue
+              echo "::error::$entry missing from $jar"
+              return 1
             fi
             size="$(echo "$line" | awk '{print $1}')"
             if [ -z "$size" ] || [ "$size" -le 18 ]; then
-              echo "::error::$entry uncompressed size is ${size:-0} bytes (must be > 18) — resource likely failed to convert"
-              failed=1
-              continue
+              echo "::error::$entry in $jar uncompressed size is ${size:-0} bytes (must be > 18) — resource likely failed to convert"
+              return 1
             fi
-            echo "$entry OK: $size bytes"
-          done
+            echo "$entry OK in $jar: $size bytes"
+          }
+
+          failed=0
+
+          # Fork-owned login-screen background art.
+          check_entry bin/nurgling-res.jar res/nurgling/hud/loginscr2.res || failed=1
+
+          # Login-screen exec button. Since the September 2026 login-screen rework,
+          # LoginScreen.java builds this from the stock Haven resource path
+          # ("gfx/hud/buttons/login"), not the old fork-owned
+          # "nurgling/hud/buttons/login/{u,d,o}" resources (removed from
+          # resources/src and no longer packaged into nurgling-res.jar). The stock
+          # resource ships in the vendored builtin-res.jar under the concatenated
+          # names Haven's IButton convention produces (path + suffix, no
+          # separator) — verified by inspecting a real `ant bin` build's jars.
+          check_entry bin/builtin-res.jar res/gfx/hud/buttons/loginu.res || failed=1
+          check_entry bin/builtin-res.jar res/gfx/hud/buttons/logind.res || failed=1
+          check_entry bin/builtin-res.jar res/gfx/hud/buttons/logino.res || failed=1
+
           if [ "$failed" -ne 0 ]; then
-            echo "::error::one or more required startup resources in bin/nurgling-res.jar are missing or empty"
+            echo "::error::one or more required startup resources are missing or empty"
             exit 1
           fi
 
