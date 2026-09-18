@@ -8,6 +8,7 @@ import haven.render.*;
 import nurgling.*;
 import nurgling.actions.bots.*;
 import nurgling.areas.*;
+import nurgling.conf.CropRegistry;
 import nurgling.navigation.ChunkNavManager;
 import nurgling.navigation.ChunkPath;
 import nurgling.overlays.map.*;
@@ -169,7 +170,11 @@ public class NAreasWidget extends Window
         prev = add(al = new AreaList(UI.scale(new Coord(400,170))), searchField.pos("bl").adds(0, 25));
         Widget lab = add(new Label(get("area.label.specialisation"),NStyle.areastitle), prev.pos("bl").add(UI.scale(0,5)));
 
-        add(csl = new CurrentSpecialisationList(UI.scale(164,190)),lab.pos("bl").add(UI.scale(0,5)));
+        /* Same width as the area list above it, which AreaList.resize pins to 164 px whatever
+         * size it is built with. The Take/Put frames start right after that column and run
+         * down past this list, so anything wider slides underneath them. Long names are
+         * shortened instead - see SpecialisationItem.setLabel. */
+        add(csl = new CurrentSpecialisationList(UI.scale(SPEC_COLUMN_W,190)),lab.pos("bl").add(UI.scale(0,5)));
         add(new IButton(NStyle.add[0].back,NStyle.add[1].back,NStyle.add[2].back){
             @Override
             public void click()
@@ -838,6 +843,9 @@ public class NAreasWidget extends Window
         }
     }
 
+    /** Width of the left column holding the area list and the specialisation list. */
+    static final int SPEC_COLUMN_W = 164;
+
     public class CurrentSpecialisationList extends SListBox<SpecialisationItem, Widget> {
         CurrentSpecialisationList(Coord sz) {
             super(sz, UI.scale(24));
@@ -897,8 +905,10 @@ public class NAreasWidget extends Window
         NArea.Specialisation item;
         IButton spec = null;
         IButton rankPresetBtn = null;
+        IButton stageBtn = null;
         NFlowerMenu menu;
         NFlowerMenu rankMenu;
+        NFlowerMenu stageMenu;
         TexI icon;
         
         // Check if specialisation is for animals
@@ -907,6 +917,35 @@ public class NAreasWidget extends Window
                    name.equals("pigs") || name.equals("horses") || name.equals("deer");
         }
         
+        private boolean isCropSpec(String name) {
+            return name.equals(Specialisation.SpecName.crop.toString()) || name.equals(Specialisation.SpecName.cropQ.toString());
+        }
+
+        /* A harvest stage is only worth choosing for a field crop harvested at more than one
+         * stage; a stale choice stays reachable so it can still be cleared. */
+        private boolean hasStageChoice() {
+            NAlias plant = CropRegistry.getFieldCrop(item.subtype);
+            return item.minHarvestStage != null
+                    || (plant != null && CropRegistry.getHarvestStages(plant).size() > 1);
+        }
+
+        private String stageLabel(Integer stage) {
+            if(stage == null)
+                return get("area.stage.any");
+            NAlias plant = CropRegistry.getFieldCrop(item.subtype);
+            List<Integer> stages = plant == null ? Collections.emptyList() : CropRegistry.getHarvestStages(plant);
+            String products = plant == null ? "" : CropRegistry.describeStage(plant, stage);
+            boolean last = stages.isEmpty() || stage >= stages.get(stages.size() - 1);
+            return get(last ? "area.stage.at" : "area.stage.at_least", stage, products);
+        }
+
+        private String specLabel() {
+            Specialisation.SpecialisationItem specItem = findSpecialisation(item.name);
+            String prettyName = specItem == null ? "???" + item.name + "???" : specItem.prettyName;
+            String label = item.subtype == null ? prettyName : prettyName + "(" + item.subtype + ")";
+            return item.minHarvestStage == null ? label : label + " " + item.minHarvestStage + "+";
+        }
+
         // Get list of presets for animal type
         private java.util.HashSet<String> getPresetNames(String specName) {
             switch(specName) {
@@ -932,22 +971,55 @@ public class NAreasWidget extends Window
             NConfig.setAreaRankPreset(area.id, specName, presetName);
         }
         
+        private static final int LABEL_X = 30;
+        private static final int BTN_X = 135;
+        private static final int BTN_STEP = 18;
+        private int labelWidth;
+        /** The untruncated name, shown as a tooltip when the label had to be shortened. */
+        private String fullLabel;
+
+        /**
+         * Shows a name that fits the row, cutting it with an ellipsis if needed. Names such as
+         * "Fuel: Finery Forge(Coal)" or "Seeds of crop quality(Watermelon)" are wider than the
+         * space left of the settings button, and would otherwise run underneath it.
+         */
+        void setLabel(String full)
+        {
+            fullLabel = full;
+            Text.Line fitted = Text.std.ellipsize(full, labelWidth);
+            text.settext(fitted.text);
+            fitted.dispose();
+        }
+
+        @Override
+        public Object tooltip(Coord c, Widget prev)
+        {
+            /* Only over the name itself, so the buttons keep their own tooltips. */
+            if(fullLabel != null && !fullLabel.equals(text.texts) && c.x < UI.scale(LABEL_X) + labelWidth)
+                return fullLabel;
+            return super.tooltip(c, prev);
+        }
+
         public SpecialisationItem(NArea.Specialisation item)
         {
             this.item = item;
             Specialisation.SpecialisationItem specialisationItem = findSpecialisation(item.name);
-            if(item.subtype == null) {
-                this.text = add(new Label(specialisationItem == null ? "???" + item.name + "???":specialisationItem.prettyName), new Coord(UI.scale(30,4)));
-            }
-            else
-            {
-                this.text = add(new Label((specialisationItem == null ? "???" + item.name + "???":specialisationItem.prettyName) + "(" + item.subtype + ")"), new Coord(UI.scale(30,4)));
-            }
+            /* The buttons end at the column edge, so every extra one pushes the first one left.
+             * The name has to stop short of the first button, or run to the column edge when
+             * the row has none. Crop rows always reserve the stage button's slot, so the name
+             * doesn't jump when the button comes and goes with the crop. */
+            int buttons = (SpecialisationData.data.get(item.name) != null ? 1 : 0)
+                    + (isAnimalSpec(item.name) ? 1 : 0)
+                    + (isCropSpec(item.name) ? 1 : 0);
+            int firstBtnX = BTN_X - BTN_STEP * Math.max(0, buttons - 1);
+            labelWidth = buttons > 0 ? UI.scale(firstBtnX - LABEL_X - 3) : UI.scale(SPEC_COLUMN_W - LABEL_X - 12);
+            this.text = add(new Label(""), new Coord(UI.scale(LABEL_X,4)));
+            setLabel(specLabel());
             if(specialisationItem != null) {
                 icon = new TexI(specialisationItem.image);
             }
             
-            int btnX = 135;
+            int btnX = firstBtnX;
             
             if(SpecialisationData.data.get(item.name)!=null)
             {
@@ -976,8 +1048,13 @@ public class NAreasWidget extends Window
                                 {
                                     Specialisation.SpecialisationItem specItem = findSpecialisation(item.name);
                                     String prettyName = specItem != null ? specItem.prettyName : item.name;
-                                    SpecialisationItem.this.text.settext(prettyName + "(" + option.name + ")");
+                                    // A stage number means something else for another crop.
+                                    if(!option.name.equals(item.subtype))
+                                        item.minHarvestStage = null;
                                     item.subtype = option.name;
+                                    SpecialisationItem.this.setLabel(specLabel());
+                                    if(stageBtn != null)
+                                        stageBtn.show(hasStageChoice());
                                     if (al.sel != null && al.sel.area != null) {
                                         al.sel.area.markDirty(nurgling.areas.AreaFieldGroup.ROUTING);
                                     }
@@ -1018,7 +1095,68 @@ public class NAreasWidget extends Window
                         ui.root.add(menu, pos);
                     }
                 },UI.scale(new Coord(btnX,4)));
-                btnX += 18;
+                btnX += BTN_STEP;
+            }
+
+            if(isCropSpec(item.name))
+            {
+                add(stageBtn = new IButton("nurgling/hud/buttons/numbering/","u","d","h"){
+                    @Override
+                    public void click() {
+                        super.click();
+                        NAlias plant = CropRegistry.getFieldCrop(item.subtype);
+                        List<Integer> stages = new ArrayList<>();
+                        stages.add(null);
+                        if(plant != null)
+                            stages.addAll(CropRegistry.getHarvestStages(plant));
+                        String[] options = new String[stages.size()];
+                        for(int i = 0; i < stages.size(); i++)
+                            options[i] = stageLabel(stages.get(i));
+
+                        stageMenu = new NFlowerMenu(options) {
+                            @Override
+                            public boolean mousedown(MouseDownEvent ev) {
+                                if(super.mousedown(ev))
+                                    nchoose(null);
+                                return true;
+                            }
+
+                            public void destroy() {
+                                stageMenu = null;
+                                super.destroy();
+                            }
+
+                            @Override
+                            public void nchoose(NPetal option) {
+                                if(option != null && al.sel != null && al.sel.area != null) {
+                                    int idx = Arrays.asList(options).indexOf(option.name);
+                                    if(idx >= 0) {
+                                        item.minHarvestStage = stages.get(idx);
+                                        al.sel.area.markDirty(nurgling.areas.AreaFieldGroup.ROUTING);
+                                        SpecialisationItem.this.setLabel(specLabel());
+                                        stageBtn.show(hasStageChoice());
+                                        NConfig.needAreasUpdate();
+                                    }
+                                }
+                                uimsg("cancel");
+                            }
+                        };
+                        Widget par = parent;
+                        Coord pos = c.add(UI.scale(32,43));
+                        while(par!=null && !(par instanceof GameUI)) {
+                            pos = pos.add(par.c);
+                            par = par.parent;
+                        }
+                        ui.root.add(stageMenu, pos);
+                    }
+
+                    @Override
+                    public Object tooltip(Coord c, Widget prev) {
+                        return get("area.tooltip.harvest_stage", stageLabel(item.minHarvestStage));
+                    }
+                },UI.scale(new Coord(btnX,4)));
+                stageBtn.show(hasStageChoice());
+                btnX += BTN_STEP;
             }
             
             // Add rank preset selection button for animal specialisations
