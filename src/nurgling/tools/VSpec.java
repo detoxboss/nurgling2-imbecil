@@ -1523,7 +1523,7 @@ public class VSpec {
         berries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-redcurrant\",\"name\":\"Redcurrant\"}"));
         berries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-sandthorn\",\"name\":\"Seaberries\"}"));
         berries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-blackthorn\",\"name\":\"Sloan Berries\"}"));
-        berries.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/strawberry\",\"name\":\"Strawberry\"}"));
+        berries.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/strawberry\",\"name\":\"Strawberries\"}"));
         berries.add(new JSONObject("{\"static\":\"gfx/invobjs/woodstrawberry\",\"name\":\"Wood Strawberry\"}"));
         berries.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-blackcurrant-yester\",\"name\":\"Yesteryear's Blackcurrant\"}"));
         berries.add(new JSONObject("{\"static\":\"gfx/invobjs/cherry-yester\",\"name\":\"Yesteryear's Cherry\"}"));
@@ -1595,7 +1595,7 @@ public class VSpec {
         fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-redcurrant\",\"name\":\"Redcurrant\"}"));
         fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-sandthorn\",\"name\":\"Seaberries\"}"));
         fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/seed-blackthorn\",\"name\":\"Sloan Berries\"}"));
-        fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/strawberry\",\"name\":\"Strawberry\"}"));
+        fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/strawberry\",\"name\":\"Strawberries\"}"));
         fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/woodstrawberry\",\"name\":\"Wood Strawberry\"}"));
         fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/fig\",\"name\":\"Fig\"}"));
         fruitOrBerry.add(new JSONObject("{\"static\":\"gfx/invobjs/grapes\",\"name\":\"Grapes\"}"));
@@ -3241,6 +3241,8 @@ public class VSpec {
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/yulecracker\",\"name\":\"Yule Cracker\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/brain-tiny\",\"name\":\"Tiny Brain\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/petrifiedshell\",\"name\":\"Petrified Seashell\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/flotsam\",\"name\":\"Peculiar Flotsam\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/curiousneedle\",\"name\":\"Curious Needle\"}"));
         categories.put("Stackable Curiosities", StackableCurios);
 
         ArrayList<JSONObject> NoneStackableCurio = new ArrayList<>();
@@ -3289,7 +3291,6 @@ public class VSpec {
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/feathertrinket\",\"name\":\"Feather Trinket\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/barkboat\",\"name\":\"Barkboat\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/reedship\",\"name\":\"Reed Ship\"}"));
-//        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/flotsam\",\"name\":\"Peculiar Flotsam\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/frogspawn\",\"name\":\"Frogspawn\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/foetus\",\"name\":\"Beast Unborn\"}"));
         categories.put("Curiosities", NoneStackableCurio);
@@ -3317,7 +3318,6 @@ public class VSpec {
         nonStackable.add(new JSONObject("{\"static\":\"gfx/invobjs/dream\",\"name\":\"A Beautiful Dream\"}"));
         nonStackable.add(new JSONObject("{\"static\":\"gfx/invobjs/suckmaw\",\"name\":\"Suckling's Maw\"}"));
         nonStackable.add(new JSONObject("{\"static\":\"gfx/invobjs/driftkelp\",\"name\":\"Driftkelp\"}"));
-        nonStackable.add(new JSONObject("{\"static\":\"gfx/invobjs/curiousneedle\",\"name\":\"Curious Needle\"}"));
         nonStackable.add(new JSONObject("{\"static\":\"gfx/invobjs/antwing\",\"name\":\"Ant Wing\"}"));
         categories.put("NonStackable", nonStackable);
 

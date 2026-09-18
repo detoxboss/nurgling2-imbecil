@@ -13,20 +13,58 @@ public class CropRegistry {
         public final NAlias result;
         public final StorageBehavior storageBehavior;
         public final boolean isHybridTrellis;
+        // Whether the product can be put back in the ground. Seeds always can, and so can
+        // most vegetables - but not all: radishes are grown from Radish Seeds only.
+        public final boolean plantable;
 
         public CropStage(int stage, NAlias result, StorageBehavior storageBehavior) {
             this(stage, result, storageBehavior, false);
         }
 
         public CropStage(int stage, NAlias result, StorageBehavior storageBehavior, boolean isHybridTrellis) {
+            this(stage, result, storageBehavior, isHybridTrellis, true);
+        }
+
+        public CropStage(int stage, NAlias result, StorageBehavior storageBehavior, boolean isHybridTrellis, boolean plantable) {
             this.stage = stage;
             this.result = result;
             this.storageBehavior = storageBehavior;
             this.isHybridTrellis = isHybridTrellis;
+            this.plantable = plantable;
         }
     }
 
     public static final Map<NAlias, List<CropStage>> HARVESTABLE = new HashMap<>();
+
+    /**
+     * Crop zone subtype -> plant, for the crops grown on open fields by HarvestCrop (the
+     * regular and quality farmers). Trellis crops are left out: their bots don't read a
+     * per-field harvest stage.
+     */
+    private static final Map<String, NAlias> FIELD_CROPS = new HashMap<>();
+
+    /** The plant grown on a crop field of this subtype, or null if it isn't a field crop. */
+    public static NAlias getFieldCrop(String subtype) {
+        return subtype == null ? null : FIELD_CROPS.get(subtype);
+    }
+
+    /** The distinct stages a crop is harvested at, lowest first. */
+    public static List<Integer> getHarvestStages(NAlias crop) {
+        TreeSet<Integer> stages = new TreeSet<>();
+        for (CropStage stage : getStages(crop))
+            stages.add(stage.stage);
+        return new ArrayList<>(stages);
+    }
+
+    /** The products a harvest at this stage yields, e.g. "Radish Seeds, Radish". */
+    public static String describeStage(NAlias crop, int stage) {
+        LinkedHashSet<String> products = new LinkedHashSet<>();
+        for (CropStage cs : getStages(crop)) {
+            if (cs.stage == stage)
+                products.addAll(cs.result.keys);
+        }
+        return String.join(", ", products);
+    }
 
     /** All harvest stages registered for a crop (empty if unknown). */
     public static List<CropStage> getStages(NAlias crop) {
@@ -34,19 +72,46 @@ public class CropRegistry {
     }
 
     /**
-     * The harvest product for a crop with the given storage behavior, or null if the
-     * crop has no such product. Used to derive planting material per storage location
-     * (BARREL = stacked seeds, STOCKPILE = vegetables).
+     * The plantable harvest product for a crop with the given storage behavior, or null
+     * if the crop has none. Used to derive planting material per storage location
+     * (BARREL = stacked seeds, STOCKPILE = vegetables); a product that can't be planted
+     * is never returned, so it can never become a planting source.
      */
-    public static CropStage getProductByStorage(NAlias crop, StorageBehavior behavior) {
+    public static CropStage getPlantingMaterial(NAlias crop, StorageBehavior behavior) {
         for (CropStage stage : getStages(crop)) {
-            if (stage.storageBehavior == behavior)
+            if (stage.storageBehavior == behavior && stage.plantable)
                 return stage;
         }
         return null;
     }
 
     static {
+        FIELD_CROPS.put("Flax", new NAlias("plants/flax"));
+        FIELD_CROPS.put("Turnip", new NAlias("plants/turnip"));
+        FIELD_CROPS.put("Carrot", new NAlias("plants/carrot"));
+        FIELD_CROPS.put("Hemp", new NAlias("plants/hemp"));
+        FIELD_CROPS.put("Millet", new NAlias("plants/millet"));
+        FIELD_CROPS.put("Wheat", new NAlias("plants/wheat"));
+        FIELD_CROPS.put("Barley", new NAlias("plants/barley"));
+        FIELD_CROPS.put("Poppy", new NAlias("plants/poppy"));
+        FIELD_CROPS.put("Beetroot", new NAlias("plants/beet"));
+        FIELD_CROPS.put("Red Onion", new NAlias("plants/redonion"));
+        FIELD_CROPS.put("Yellow Onion", new NAlias("plants/yellowonion"));
+        FIELD_CROPS.put("White Onion", new NAlias("plants/whiteonion"));
+        FIELD_CROPS.put("Garlic", new NAlias("plants/garlic"));
+        FIELD_CROPS.put("Pipeweed", new NAlias("plants/pipeweed"));
+        FIELD_CROPS.put("Lettuce", new NAlias("plants/lettuce"));
+        FIELD_CROPS.put("Pumpkin", new NAlias("plants/pumpkin"));
+        FIELD_CROPS.put("Watermelon", new NAlias("plants/watermelon"));
+        FIELD_CROPS.put("Green Kale", new NAlias("plants/greenkale"));
+        FIELD_CROPS.put("Leek", new NAlias("plants/leek"));
+        FIELD_CROPS.put("Radish", new NAlias("plants/radish"));
+        FIELD_CROPS.put("String Grass", new NAlias("plants/stringgrass"));
+        FIELD_CROPS.put("Wild Kale", new NAlias("plants/wildbrassica"));
+        FIELD_CROPS.put("Wild Onion", new NAlias("plants/wildonion"));
+        FIELD_CROPS.put("Wild Tuber", new NAlias("plants/tuber"));
+        FIELD_CROPS.put("Wild Flower", new NAlias("plants/wildflower"));
+
         // Turnip
         HARVESTABLE.put(
                 new NAlias("plants/turnip"),
@@ -146,12 +211,17 @@ public class CropRegistry {
                 )
         );
 
-        // Radish
+        // Radish - a radish can't be planted, the field is resown from Radish Seeds only.
+        // Harvested at stages 3 and 4 only (the wiki's "Stage 4"/"Stage 5" - it counts from 1),
+        // the two that yield seeds as well as radishes: 5-8 / 10-15 seeds against the 5 a tile
+        // takes to resow. Stage 2 gives radishes alone and would starve the seed barrel.
         HARVESTABLE.put(
                 new NAlias("plants/radish"),
                 Arrays.asList(
-                        new CropStage(2, new NAlias("Radish Seeds"), StorageBehavior.BARREL),
-                        new CropStage(4, new NAlias("Radish"), StorageBehavior.STOCKPILE)
+                        new CropStage(3, new NAlias("Radish Seeds"), StorageBehavior.BARREL),
+                        new CropStage(3, new NAlias("Radish"), StorageBehavior.STOCKPILE, false, false),
+                        new CropStage(4, new NAlias("Radish Seeds"), StorageBehavior.BARREL),
+                        new CropStage(4, new NAlias("Radish"), StorageBehavior.STOCKPILE, false, false)
                 )
         );
 

@@ -323,6 +323,13 @@ and toggling threshold takes effect without a client restart.
 Auto-drink of its own — at which point this override should be diffed against upstream's approach rather
 than assumed to still be correct.
 
+**i18n note (added 2026-09-17 sync):** upstream may carry its own `qol.auto_drink_tip`-style tooltip
+wording describing *upstream's* older Auto-drink behavior (fixed threshold, paused while any bot
+runs, waterskin/bucket-only water detection). Future syncs must keep this tooltip's text aligned
+with the fork's actual behavior above — configurable threshold, DrinkMeter-based water detection,
+non-blocking during bots/actions — rather than importing upstream's wording verbatim on a clean
+auto-merge or an unreviewed conflict resolution.
+
 ## Kin/Village/Realm/claim permission groups: companion-selector overlay on a lifecycle hook
 
 **Files:** `src/haven/BuddyWnd.java` (`ncolors`, `nquick`, `named`/`gc`, `GroupSelector.basesz` +

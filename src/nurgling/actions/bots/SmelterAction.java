@@ -27,9 +27,6 @@ public class SmelterAction implements Action {
     @Override
     public Results run(NGameUI gui) throws InterruptedException {
 
-        NArea.Specialisation ofuelc = new NArea.Specialisation(Specialisation.SpecName.fuel.toString(), "coal");
-
-        NArea.Specialisation ofuelb = new NArea.Specialisation(Specialisation.SpecName.fuel.toString(), "branch");
         NArea.Specialisation rsmelter = new NArea.Specialisation(Specialisation.SpecName.smelter.toString());
         NArea.Specialisation rore = new NArea.Specialisation(Specialisation.SpecName.ore.toString());
         NArea.Specialisation omercury = new NArea.Specialisation(Specialisation.SpecName.barrel.toString(),"Quicksilver");
@@ -38,8 +35,6 @@ public class SmelterAction implements Action {
         req.add(rsmelter);
         req.add(rore);
         ArrayList<NArea.Specialisation> opt = new ArrayList<>();
-        opt.add(ofuelb);
-        opt.add(ofuelc);
         opt.add(omercury);
 
         if(new Validator(req, opt).run(gui).IsSuccess()) {
@@ -70,6 +65,7 @@ public class SmelterAction implements Action {
                     cand.getattr(Container.FuelLvl.class).setMaxlvl(12);
                     cand.getattr(Container.FuelLvl.class).setCredolvl(9);
                     cand.getattr(Container.FuelLvl.class).setFueltype("coal");
+                    cand.getattr(Container.FuelLvl.class).setFuelZone(Specialisation.SpecName.fuelSmelter);
 
                     cand.initattr(Container.TargetItems.class);
                     cand.getattr(Container.TargetItems.class).addTarget("Slag");
@@ -95,6 +91,7 @@ public class SmelterAction implements Action {
                     cand.getattr(Container.FuelLvl.class).setMaxlvl(12);
                     cand.getattr(Container.FuelLvl.class).setCredolvl(9);
                     cand.getattr(Container.FuelLvl.class).setFueltype("branch");
+                    cand.getattr(Container.FuelLvl.class).setFuelZone(Specialisation.SpecName.fuelSmelter);
 
                     cand.initattr(Container.TargetItems.class);
                     cand.getattr(Container.TargetItems.class).addTarget("Slag");
@@ -110,6 +107,18 @@ public class SmelterAction implements Action {
                 }
                 if(containers.isEmpty())
                     return Results.ERROR("NO SMELTERS");
+
+                /* Fuel is only required for the kinds of furnace actually standing in the area:
+                 * Ore/Smith's Smelters burn coal, Stack Furnaces burn branches. Demanding both up
+                 * front stopped a smelter-only setup for want of a branch zone it never uses. */
+                Validator fuel = new Validator(new ArrayList<>(), new ArrayList<>());
+                if (containers.size() > furnaces.size())
+                    fuel.fuel(Specialisation.SpecName.fuelSmelter, "coal");
+                if (!furnaces.isEmpty())
+                    fuel.fuel(Specialisation.SpecName.fuelSmelter, "branch");
+                Results fuelCheck = fuel.run(gui);
+                if (!fuelCheck.IsSuccess())
+                    return fuelCheck;
 
                 Results res = null;
                 while (res == null || res.IsSuccess()) {
