@@ -29,6 +29,7 @@ public class DatabaseSettings extends Panel {
     private TextEntry connEntry;
     private Button connApply;
     private Button villagersButton;
+    private Button stackSizeButton;
     private DbSizeView sizeView;
     private Scrollport scrollport;
     private Widget content;
@@ -246,6 +247,19 @@ public class DatabaseSettings extends Panel {
         seedFishButton.tooltip = Text.render(L10n.get("database.seed_fish_tip")).tex();
         y += seedFishButton.sz.y + UI.scale(12);
 
+        /* Works the same on SQLite and PostgreSQL (unlike villagersButton below, a per-database-
+         * account concept SQLite doesn't have), so it's placed and sized before the isPostgres-only
+         * fields rather than after them. */
+        stackSizeButton = content.add(new Button(UI.scale(200), L10n.get("database.stack_sizes")) {
+            @Override
+            public void click() {
+                super.click();
+                openStackSizeCalibration();
+            }
+        }, new Coord(margin, y));
+        stackSizeButton.tooltip = Text.render(L10n.get("database.stack_sizes_tip")).tex();
+        y += stackSizeButton.sz.y + UI.scale(12);
+
         /* One field instead of three. The host field above is spliced straight into the JDBC URL,
          * so it silently needs "host:port" - a connection string carries the port with it, which is
          * the part that otherwise gets lost between the admin's chat message and this panel. */
@@ -271,7 +285,7 @@ public class DatabaseSettings extends Panel {
         villagersButton.tooltip = Text.render(L10n.get("database.villagers_tip")).tex();
 
         sizeYPostgres = y + villagersButton.sz.y + UI.scale(12);
-        sizeYSqlite = seedFishButton.c.y + seedFishButton.sz.y + UI.scale(12);
+        sizeYSqlite = stackSizeButton.c.y + stackSizeButton.sz.y + UI.scale(12);
         sizeView = content.add(new DbSizeView(UI.scale(470)), new Coord(margin, sizeYPostgres));
 
         load();
@@ -544,6 +558,23 @@ public class DatabaseSettings extends Panel {
             }
         }
         nurgling.widgets.db.VillagersWindow win = new nurgling.widgets.db.VillagersWindow();
+        gui.add(win, new Coord(UI.scale(120), UI.scale(80)));
+        win.show();
+    }
+
+    private void openStackSizeCalibration() {
+        nurgling.NGameUI gui = NUtils.getGameUI();
+        if (gui == null) {
+            return;
+        }
+        for (Widget w = gui.child; w != null; w = w.next) {
+            if (w instanceof nurgling.widgets.db.StackSizeCalibrationWindow) {
+                w.show();
+                w.raise();
+                return;
+            }
+        }
+        nurgling.widgets.db.StackSizeCalibrationWindow win = new nurgling.widgets.db.StackSizeCalibrationWindow();
         gui.add(win, new Coord(UI.scale(120), UI.scale(80)));
         win.show();
     }
