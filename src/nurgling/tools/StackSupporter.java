@@ -138,41 +138,62 @@ public class StackSupporter {
 
     public static boolean isStackable(NInventory inv, String name) {
         Window win = inv.getparent(Window.class);
-        if (win != null) {
-            if (NParser.checkName(win.cap, unstackableContainers)
-                || NParser.checkName(name, new NAlias("Lynx Claws"))
-                || name.equals("Silkworm")
-                || name.equals("Tick")
-                || name.contains("Dried Filet")
-                || catExceptions.contains(name)) {
-                return false;
-            } else {
-                // An explicit custom stack size is itself a declaration that the item stacks.
-                // Some such items (e.g. Standing Grass, whose only category "Weavable Grass" is
-                // not in categorySize) would otherwise be reported unstackable and never stacked,
-                // making their customStackSizes entry dead. Honor the custom size directly here.
-                if (customStackSizes.containsKey(name)) {
-                    return true;
-                }
-                ArrayList<String> categories = VSpec.getCategory(name);
-                for (String cat : categories) {
-                    if (categorySize.containsKey(cat)) {
-                        return true;
-                    }
-                }
+        if (win == null) {
+            return false;
+        }
+        // Context/substring vetoes: about *where* the item sits or a name *fragment*, not a fact
+        // about the exact item name, so these can never be represented as a per-name DB row (see
+        // isStackableByName below). Always run first, unconditionally.
+        if (NParser.checkName(win.cap, unstackableContainers)
+            || NParser.checkName(name, new NAlias("Lynx Claws"))
+            || name.equals("Silkworm")
+            || name.equals("Tick")
+            || name.contains("Dried Filet")) {
+            return false;
+        }
+        return isStackableByName(name);
+    }
+
+    /**
+     * Exact-name stackability — no window/context dependency, so it also serves as the seed data
+     * generator for the shared DB-backed override table (migration 13,
+     * nurgling/db/migration/MigrationManager.java) and as {@link #getFullStackSize}'s fallback.
+     *
+     * <p>Checks the exception set before the custom-size table. {@code isStackable} and {@code
+     * getFullStackSize} used to check these in opposite orders (custom size first in the latter) —
+     * a latent inconsistency that only ever mattered for "Wolf's Claw" (present in both tables) and
+     * never surfaced because every caller gates on {@code isStackable} first. This is now the one
+     * place that order is decided, which changes {@code getFullStackSize("Wolf's Claw")}'s static
+     * fallback answer from 4 to 1.
+     */
+    public static boolean isStackableByName(String name) {
+        if (catExceptions.contains(name)) {
+            return false;
+        }
+        // An explicit custom stack size is itself a declaration that the item stacks.
+        // Some such items (e.g. Standing Grass, whose only category "Weavable Grass" is
+        // not in categorySize) would otherwise be reported unstackable and never stacked,
+        // making their customStackSizes entry dead. Honor the custom size directly here.
+        if (customStackSizes.containsKey(name)) {
+            return true;
+        }
+        ArrayList<String> categories = VSpec.getCategory(name);
+        for (String cat : categories) {
+            if (categorySize.containsKey(cat)) {
+                return true;
             }
         }
         return false;
     }
 
     public static int getFullStackSize(String name) {
+        if (catExceptions.contains(name)) {
+            return 1;
+        }
+
         Integer custom = customStackSizes.get(name);
         if (custom != null) {
             return custom;
-        }
-
-        if (catExceptions.contains(name)) {
-            return 1;
         }
 
         ArrayList<String> categories = VSpec.getCategory(name);
@@ -184,6 +205,31 @@ public class StackSupporter {
         }
 
         return 1;
+    }
+
+    /**
+     * Every exact item name this table has an opinion about, stackable or not. Used only to seed
+     * the shared DB-backed override table (migration 13,
+     * nurgling/db/migration/MigrationManager.java) with a starting point equivalent to this static
+     * table's current answers — nothing else should need this.
+     */
+    public static java.util.Set<String> seedCandidateNames() {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        names.addAll(customStackSizes.keySet());
+        names.addAll(catExceptions);
+        for (String cat : categorySize.keySet()) {
+            try {
+                ArrayList<String> content = VSpec.getCategoryContent(cat);
+                if (content != null) {
+                    names.addAll(content);
+                }
+            } catch (RuntimeException e) {
+                // VSpec may not have this category loaded yet (e.g. seeding runs before the
+                // server's item catalog is fully populated) - skip it. Passive learning and manual
+                // calibration fill in anything missed here; this is a best-effort starting point.
+            }
+        }
+        return names;
     }
 
     public static boolean isSameExist(NAlias items, NInventory inv) throws InterruptedException {
