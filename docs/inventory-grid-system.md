@@ -89,11 +89,22 @@ matching item with no `Amount` info, so only safe when every match is guaranteed
   (`NGItem.java:35,170-172`).
 - **Current unit count**: `((ItemStack) witem.item.contents).wmap.size()`.
 - **Is this item type stackable, and what's its max stack size**: `nurgling/tools/StackSupporter.java`
-  — `isStackable(inv, name)` / `getFullStackSize(name)`. This is a **hand-maintained client-side
-  heuristic table** (per-name overrides, a `catExceptions` never-stacks set, then category lookup
-  in `categorySize`, e.g. `"Berry"`/`"Fruit or Berry"`/`"Seed of Tree or Bush"`/`"Mushroom"` → 4),
-  **not** anything read from the server/protocol. Treat it as "best known, may need updating if
-  game balance changes," not ground truth.
+  — `isStackable(inv, name)` / `getFullStackSize(name)`. The base layer is still a **hand-maintained
+  client-side heuristic table** (per-name overrides, a `catExceptions` never-stacks set, then
+  category lookup in `categorySize`, e.g. `"Berry"`/`"Fruit or Berry"`/`"Seed of Tree or Bush"`/
+  `"Mushroom"` → 4), not anything read from the server/protocol — but as of the shared `stack_sizes`
+  DB table (migration 13, `nurgling/db/migration/MigrationManager.java`;
+  `nurgling/db/service/StackSizeService.java`), both methods consult that table *first* whenever a
+  database is configured, and only fall back to the static table when the DB has no opinion on a
+  given name. The DB-backed table starts seeded from the static one, then self-corrects: it's
+  passively updated whenever a client observes a real stack bigger than what's on record
+  (`NInventory.observeStackSizesForLearning()`, gated by `NConfig.Key.stackSizeLearning`), and can be
+  edited directly by a player via the "Stack Size Calibration" window
+  (`nurgling/widgets/db/StackSizeCalibrationWindow.java`, reachable from the Database settings
+  panel). Corrections sync to every client sharing the same database the way `NArea`s do. Treat the
+  *static table alone* as "best known, may need updating if game balance changes, not ground truth"
+  — but with the DB layer configured, staleness for any item someone has actually played with (or
+  manually calibrated) self-heals without a client update.
 - `nurgling/tasks/GetNotFullStack.java` / `GetNotStack.java` find an existing mergeable stack/lone
   item of a given name by comparing `wmap.size()` against `getFullStackSize(name)`.
 - **Quality does not gate stacking** — `haven/res/ui/tt/stackn/Stack.java:56-72` *averages*
