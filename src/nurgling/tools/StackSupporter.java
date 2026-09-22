@@ -151,6 +151,10 @@ public class StackSupporter {
             || name.contains("Dried Filet")) {
             return false;
         }
+        nurgling.db.service.StackSizeService.StackInfo info = stackSizeInfo(name);
+        if (info != null) {
+            return info.stackable;
+        }
         return isStackableByName(name);
     }
 
@@ -187,6 +191,11 @@ public class StackSupporter {
     }
 
     public static int getFullStackSize(String name) {
+        nurgling.db.service.StackSizeService.StackInfo info = stackSizeInfo(name);
+        if (info != null) {
+            return info.maxStack;
+        }
+
         if (catExceptions.contains(name)) {
             return 1;
         }
@@ -205,6 +214,21 @@ public class StackSupporter {
         }
 
         return 1;
+    }
+
+    /**
+     * The shared DB-backed table's answer for this name, or null if no service is available (DB
+     * disabled/unavailable, or the optional migration that creates {@code stack_sizes} was refused)
+     * or it simply has no opinion on this name yet — either way, callers fall back to the static
+     * table unchanged.
+     */
+    private static nurgling.db.service.StackSizeService.StackInfo stackSizeInfo(String name) {
+        nurgling.db.DatabaseManager dbm = nurgling.NCore.databaseManager;
+        if (dbm == null) {
+            return null;
+        }
+        nurgling.db.service.StackSizeService svc = dbm.getStackSizeService();
+        return (svc != null) ? svc.lookup(name) : null;
     }
 
     /**
