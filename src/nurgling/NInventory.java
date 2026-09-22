@@ -680,8 +680,49 @@ public class NInventory extends Inventory
                 }
             }
         }
+        // Passive stack-size learning: independent of the panel above (runs for a plain grid-view
+        // container too, not only when the list panel happens to be open), same "every 10 ticks"
+        // cadence already paid for by that panel refresh.
+        if (NUtils.getTickId() % 10 == 0) {
+            observeStackSizesForLearning();
+        }
         // Reposition title bar buttons on tick (window may have resized)
         positionTitleBarButtons();
+    }
+
+    /**
+     * Passively teaches the shared stack-size table (nurgling/db/service/StackSizeService.java)
+     * from whatever real stacks are currently visible in this inventory - no probing, no dedicated
+     * poll of its own. Cost is bounded to "some inventory window is open" (this only runs from
+     * tick(), which stops entirely when the window closes) and "once every 10 ticks" (the cadence
+     * above); the loop body itself is a cheap bounded walk, and the service call is a single
+     * map-get-and-compare unless a genuinely bigger stack is observed (see
+     * StackSizeService.observeAndMaybeLearnAsync()'s own doc for why that's a no-op DB call after
+     * the first correction). See docs/inventory-grid-system.md §8 for the feature this backs.
+     */
+    private void observeStackSizesForLearning() {
+        if (!(Boolean) NConfig.get(NConfig.Key.stackSizeLearning)) {
+            return;
+        }
+        nurgling.db.DatabaseManager dbm = NCore.databaseManager;
+        if (dbm == null) {
+            return;
+        }
+        nurgling.db.service.StackSizeService svc = dbm.getStackSizeService();
+        if (svc == null) {
+            return;
+        }
+        for (Widget widget = this.child; widget != null; widget = widget.next) {
+            if (!(widget instanceof WItem)) continue;
+            WItem wItem = (WItem) widget;
+            if (!(wItem.item instanceof NGItem)) continue;
+            NGItem nitem = (NGItem) wItem.item;
+            if (!(nitem.contents instanceof ItemStack)) continue;
+            String name = nitem.name();
+            if (name == null) continue;
+            int observed = ((ItemStack) nitem.contents).wmap.size();
+            svc.observeAndMaybeLearnAsync(name, observed);
+        }
     }
 
     private static final TexI[] bundlei = new TexI[]{
