@@ -30,6 +30,7 @@ public class DatabaseManager {
     private KinSecretService kinSecretService;
     private nurgling.db.service.FishLocationDbService fishLocationService;
     private nurgling.db.service.PeerPositionDbService peerPositionService;
+    private nurgling.db.service.StackSizeService stackSizeService;
     private nurgling.db.service.FishLocationSeeder fishLocationSeeder;
     private nurgling.db.service.MapDbService mapDbService;
     private nurgling.db.service.VillagerService villagerService;
@@ -425,6 +426,16 @@ public class DatabaseManager {
             System.err.println("[DatabaseManager] shared map tables unavailable; "
                 + "map sharing stays on Export.../Import... files");
         }
+
+        /* Checked like the others: an earlier optional migration failing defers this one without
+         * listing it as skipped, and on PostgreSQL a table this role cannot touch is hidden rather
+         * than reported. Either way StackSupporter falls back to its static table for every item. */
+        boolean stackSizesOk = tableUsable("stack_sizes");
+        this.stackSizeService = stackSizesOk ? new nurgling.db.service.StackSizeService(this) : null;
+        if (!stackSizesOk) {
+            System.err.println("[DatabaseManager] stack_sizes unavailable; "
+                + "item stack sizes stay on the built-in static table");
+        }
     }
 
     /**
@@ -531,6 +542,8 @@ public class DatabaseManager {
                 feature = "Map sharing";
             } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_PEER_POSITIONS) {
                 feature = "Player position sharing";
+            } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_STACK_SIZES) {
+                feature = "Stack size calibration sync";
             } else {
                 feature = "Schema update " + e.getKey();
             }
@@ -815,6 +828,15 @@ public class DatabaseManager {
      */
     public nurgling.db.service.MapDbService getMapDbService() {
         return mapDbService;
+    }
+
+    /**
+     * Get the shared stack-size service. Null when the optional migration that creates the table
+     * was refused, or this role cannot see it; callers (nurgling.tools.StackSupporter) treat that
+     * as "fall back to the static table," not "nothing stacks."
+     */
+    public nurgling.db.service.StackSizeService getStackSizeService() {
+        return stackSizeService;
     }
 
     /**
