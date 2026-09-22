@@ -12,6 +12,7 @@ paths:
   - "src/nurgling/tasks/WaitNoItems.java"
   - "src/nurgling/tools/StackSupporter.java"
   - "src/nurgling/tools/InventorySnapshot.java"
+  - "src/nurgling/actions/SortInventory.java"
   - "src/nurgling/actions/StudyEatOrDrop.java"
   - "src/nurgling/actions/TransferToContainer.java"
   - "src/nurgling/actions/Equip.java"

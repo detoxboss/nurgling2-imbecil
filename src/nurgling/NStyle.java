@@ -194,6 +194,12 @@ public class NStyle {
             new TexI(Resource.loadsimg("nurgling/hud/buttons/sort/stacksbtnd")),
             new TexI(Resource.loadsimg("nurgling/hud/buttons/sort/stacksbtnh"))};
 
+    // Placeholder icon (reuses the stack-sort artwork) for "Stack to Max & Sort" until dedicated art exists
+    public static final TexI[] stackmaxi = new TexI[]{
+            new TexI(Resource.loadsimg("nurgling/hud/buttons/sort/stackmaxbtnu")),
+            new TexI(Resource.loadsimg("nurgling/hud/buttons/sort/stackmaxbtnd")),
+            new TexI(Resource.loadsimg("nurgling/hud/buttons/sort/stackmaxbtnh"))};
+
     public static final TexI[] addarea = new TexI[]{
             new TexI(Resource.loadsimg("nurgling/hud/buttons/addarea/u")),
             new TexI(Resource.loadsimg("nurgling/hud/buttons/addarea/d")),
