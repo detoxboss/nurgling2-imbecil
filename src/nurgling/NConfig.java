@@ -138,6 +138,7 @@ public class NConfig
         uniformBiomeColors,
         inventoryRightPanelShow,
         inventoryRightPanelMode,
+        stackSizeLearning,
         showTerrainName,
         validateAllCropsBeforeHarvest,
         skipButcherInKFC,
@@ -431,6 +432,7 @@ public class NConfig
         conf.put(Key.uniformBiomeColors, false);
         conf.put(Key.inventoryRightPanelShow, false);
         conf.put(Key.inventoryRightPanelMode, "EXPANDED");
+        conf.put(Key.stackSizeLearning, true);
         conf.put(Key.showTerrainName, false);
         conf.put(Key.validateAllCropsBeforeHarvest, false);
         conf.put(Key.studyDeskLayout, "");

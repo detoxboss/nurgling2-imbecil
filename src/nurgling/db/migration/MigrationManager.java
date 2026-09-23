@@ -21,7 +21,7 @@ public class MigrationManager {
      * and this older client may not understand the new columns/tables; we
      * refuse to sync in that case rather than write incompatible rows.
      */
-    public static final int CLIENT_MAX_SCHEMA_VERSION = 12;
+    public static final int CLIENT_MAX_SCHEMA_VERSION = 13;
 
     /** Version of the migration that creates kin_secrets; optional, see {@link Migration#optional}. */
     public static final int MIGRATION_KIN_SECRETS = 9;
@@ -34,6 +34,9 @@ public class MigrationManager {
 
     /** Version of the migration that creates peer_positions; optional, see {@link Migration#optional}. */
     public static final int MIGRATION_PEER_POSITIONS = 12;
+
+    /** Version of the migration that creates stack_sizes; optional, see {@link Migration#optional}. */
+    public static final int MIGRATION_STACK_SIZES = 13;
 
     public static class SchemaTooNewException extends SQLException {
         public final int clientVersion;
@@ -635,6 +638,64 @@ public class MigrationManager {
                  * a profile holds a few dozen rows, so the read filters by age in the query's output
                  * rather than seeking on it. The primary key never changes, so it stays HOT-friendly. */
                 System.out.println("Created peer_positions table");
+            }
+        });
+
+        /* Optional: stack_sizes backs the shared, self-correcting item stack-size table that
+         * supersedes nurgling.tools.StackSupporter's static table wherever a DB-backed answer is
+         * available. A role without CREATE on the schema must not lose area, planning and recipe
+         * sync over it - every caller already falls back to StackSupporter's static table when
+         * this is unavailable, exactly like fish_locations falls back to its JSON file. */
+        migrations.add(new Migration(13, "Create stack_sizes table for shared item stack-size calibration", true) {
+            @Override
+            public void run(DatabaseAdapter adapter) throws SQLException {
+                if (adapter.tableExists("stack_sizes")) {
+                    return;
+                }
+                boolean pg = (adapter instanceof nurgling.db.PostgresAdapter);
+                String boolType = pg ? "BOOLEAN" : "INTEGER";
+                String boolDefault = pg ? "TRUE" : "1";
+
+                createTable(adapter, "stack_sizes",
+                    "CREATE TABLE stack_sizes (" +
+                    "profile VARCHAR(255) NOT NULL DEFAULT 'global', " +
+                    "name VARCHAR(255) NOT NULL, " +
+                    "max_stack INTEGER NOT NULL, " +
+                    "stackable " + boolType + " NOT NULL DEFAULT " + boolDefault + ", " +
+                    /* 'seed' | 'learned' | 'manual' - see StackSizeDao. Not a foreign-keyed enum
+                     * table: three fixed values, checked only in Java. */
+                    "provenance VARCHAR(32) NOT NULL DEFAULT 'seed', " +
+                    "version INTEGER NOT NULL DEFAULT 1, " +
+                    "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+                    "last_touched_by VARCHAR(255), " +
+                    "last_touched_at TIMESTAMP, " +
+                    "deleted_at TIMESTAMP, " +
+                    "PRIMARY KEY (profile, name)" +
+                    ")");
+                safeCreateIndex(adapter, "CREATE INDEX idx_ss_profile ON stack_sizes (profile)");
+                safeCreateIndex(adapter, "CREATE INDEX idx_ss_deleted ON stack_sizes (deleted_at)");
+                System.out.println("Created stack_sizes table");
+
+                /* Seed from StackSupporter's current static table, so the DB starts at least as
+                 * good as today. Goes through the real static-lookup methods rather than
+                 * re-implementing their priority logic here, so seed data can never drift from what
+                 * the static fallback itself would answer - see StackSupporter.seedCandidateNames()
+                 * / isStackableByName(). Seeded under profile 'global' since the static table isn't
+                 * genus-specific; per-genus rows only start appearing once passive learning or a
+                 * manual edit happens on a specific genus. */
+                java.util.Set<String> names = nurgling.tools.StackSupporter.seedCandidateNames();
+                int seeded = 0;
+                for (String name : names) {
+                    boolean stackable = nurgling.tools.StackSupporter.isStackableByName(name);
+                    int maxStack = stackable ? nurgling.tools.StackSupporter.getFullStackSize(name) : 1;
+                    Object stackableValue = pg ? stackable : (stackable ? 1 : 0);
+                    adapter.executeUpdate(
+                        "INSERT INTO stack_sizes (profile, name, max_stack, stackable, provenance, version) " +
+                        "VALUES ('global', ?, ?, ?, 'seed', 1)",
+                        name, maxStack, stackableValue);
+                    seeded++;
+                }
+                System.out.println("Seeded " + seeded + " rows into stack_sizes from the static table");
             }
         });
 

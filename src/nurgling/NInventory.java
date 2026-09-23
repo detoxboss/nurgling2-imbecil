@@ -25,6 +25,7 @@ import java.util.List;
 public class NInventory extends Inventory
 {
     public boolean mainInvInstalled = false;
+    private boolean listPanelInstalled = false;
     public Scrollport itemListContainer;
     public Widget itemListContent;
     public ICheckBox bundle;
@@ -49,6 +50,7 @@ public class NInventory extends Inventory
     private Widget dropperBtn;
     private Widget sortBtnRef;
     private Widget stackSortBtnRef;
+    private Widget stackMaxBtnRef;
     short[][] oldinv = null;
     public Gob parentGob = null;
     long lastUpdate = 0;
@@ -145,8 +147,11 @@ public class NInventory extends Inventory
         nurgling.widgets.TableEatOptimizerUI.installIfTable(this);
         // Add Sort button for container inventories (not main inventory)
         addSortButtonIfContainer();
+        // Add the item-list side panel (eye-cycle button) for container inventories
+        // (not main inventory, which installs its own richer version via installMainInv())
+        installListPanelIfContainer();
     }
-    
+
     /**
      * Add sort button to window title bar (left of close button)
      * Used for both main inventory and container inventories
@@ -217,8 +222,26 @@ public class NInventory extends Inventory
         deco.add(stackSortBtn);
         int centerY = sortBtn.c.y + sortBtn.sz.y / 2 - stackSortBtn.sz.y / 2;
         stackSortBtn.c = new Coord(sortBtn.c.x - stackSortBtn.sz.x - UI.scale(2), centerY);
+
+        // Stack-to-max button — left of the stack sort button, with box-clickable area
+        // Vertically center relative to the sort button
+        NHeaderButton stackMaxBtn = new NHeaderButton(
+                NStyle.stackmaxi[0], NStyle.stackmaxi[1], NStyle.stackmaxi[2],
+                () -> SortInventory.sortAndStack(thisInv)) {
+            @Override
+            public void tick(double dt) {
+                super.tick(dt);
+                if (stackSortBtn.c != null) {
+                    int centerY = stackSortBtn.c.y + stackSortBtn.sz.y / 2 - sz.y / 2;
+                    c = new Coord(stackSortBtn.c.x - sz.x - UI.scale(2), centerY);
+                }
+            }
+        }.tip("Stack to Max & Sort by Quality");
+        deco.add(stackMaxBtn);
+        int centerY2 = stackSortBtn.c.y + stackSortBtn.sz.y / 2 - stackMaxBtn.sz.y / 2;
+        stackMaxBtn.c = new Coord(stackSortBtn.c.x - stackMaxBtn.sz.x - UI.scale(2), centerY2);
     }
-    
+
     /**
      * Add sort button to container inventory windows (not main inventory)
      * Button is placed in window title bar, left of the close button
@@ -231,6 +254,71 @@ public class NInventory extends Inventory
         }
         
         addSortButtonToTitleBar();
+    }
+
+    /**
+     * Install the item-list side panel (the same eye-button-cycled simplified/full/hidden
+     * list used by the main inventory) on a container inventory window. Skips the main
+     * inventory (installed separately, with search/dropper, via installMainInv()) and any
+     * window excluded from sorting (crafting stations, character sheet, belt/pouch/purse, etc.
+     * — non-grid or special-purpose "inventories" the list view doesn't make sense for).
+     */
+    private void installListPanelIfContainer() {
+        if (listPanelInstalled) return;
+
+        NGameUI gui = NUtils.getGameUI();
+        if (gui == null || this == gui.maininv) {
+            return;
+        }
+
+        Window wnd = getparent(Window.class);
+        if (wnd == null) return;
+        String caption = wnd.cap;
+        if (caption != null) {
+            for (String excluded : SortInventory.EXCLUDE_WINDOWS) {
+                if (caption.contains(excluded)) {
+                    return;
+                }
+            }
+        }
+
+        if (!(wnd.deco instanceof NWindowDeco)) return;
+        NWindowDeco deco = (NWindowDeco) wnd.deco;
+
+        // Panel state cycler: closed -> simplified -> expanded -> closed.
+        // Left-anchored (after the window's caption text) since the sort buttons this
+        // window already has occupy the right-anchored slots next to the close button.
+        eyeBtn = new NHeaderCycler("nurgling/hud/buttons/inv/eye", 3, this::setPanelState);
+        deco.add(eyeBtn);
+
+        int panelW = UI.scale(250);
+        int gap = UI.scale(8);
+        rightPanel = new Widget(new Coord(panelW, sz.y)) {
+            @Override
+            public void draw(GOut g) {
+                int bw = Math.max(1, UI.scale(1));
+                g.chcolor(NStyle.separator);
+                g.frect(Coord.z, new Coord(bw, sz.y));
+                g.chcolor();
+                super.draw(g);
+            }
+        };
+        rightPanel.visible = false;
+        parent.add(rightPanel, new Coord(sz.x + gap, 0));
+
+        setupRightPanel();
+
+        Object stateConfig = NConfig.get(NConfig.Key.inventoryRightPanelShow);
+        if (stateConfig instanceof Number) {
+            panelState = ((Number) stateConfig).intValue();
+        } else if (stateConfig instanceof Boolean) {
+            panelState = ((Boolean) stateConfig) ? PANEL_EXPANDED : PANEL_CLOSED;
+        }
+        if (eyeBtn instanceof NHeaderCycler) ((NHeaderCycler) eyeBtn).state = panelState;
+        applyPanelState();
+
+        parent.pack();
+        listPanelInstalled = true;
     }
 
     public enum QualityType {
@@ -592,8 +680,49 @@ public class NInventory extends Inventory
                 }
             }
         }
+        // Passive stack-size learning: independent of the panel above (runs for a plain grid-view
+        // container too, not only when the list panel happens to be open), same "every 10 ticks"
+        // cadence already paid for by that panel refresh.
+        if (NUtils.getTickId() % 10 == 0) {
+            observeStackSizesForLearning();
+        }
         // Reposition title bar buttons on tick (window may have resized)
         positionTitleBarButtons();
+    }
+
+    /**
+     * Passively teaches the shared stack-size table (nurgling/db/service/StackSizeService.java)
+     * from whatever real stacks are currently visible in this inventory - no probing, no dedicated
+     * poll of its own. Cost is bounded to "some inventory window is open" (this only runs from
+     * tick(), which stops entirely when the window closes) and "once every 10 ticks" (the cadence
+     * above); the loop body itself is a cheap bounded walk, and the service call is a single
+     * map-get-and-compare unless a genuinely bigger stack is observed (see
+     * StackSizeService.observeAndMaybeLearnAsync()'s own doc for why that's a no-op DB call after
+     * the first correction). See docs/inventory-grid-system.md §8 for the feature this backs.
+     */
+    private void observeStackSizesForLearning() {
+        if (!(Boolean) NConfig.get(NConfig.Key.stackSizeLearning)) {
+            return;
+        }
+        nurgling.db.DatabaseManager dbm = NCore.databaseManager;
+        if (dbm == null) {
+            return;
+        }
+        nurgling.db.service.StackSizeService svc = dbm.getStackSizeService();
+        if (svc == null) {
+            return;
+        }
+        for (Widget widget = this.child; widget != null; widget = widget.next) {
+            if (!(widget instanceof WItem)) continue;
+            WItem wItem = (WItem) widget;
+            if (!(wItem.item instanceof NGItem)) continue;
+            NGItem nitem = (NGItem) wItem.item;
+            if (!(nitem.contents instanceof ItemStack)) continue;
+            String name = nitem.name();
+            if (name == null) continue;
+            int observed = ((ItemStack) nitem.contents).wmap.size();
+            svc.observeAndMaybeLearnAsync(name, observed);
+        }
     }
 
     private static final TexI[] bundlei = new TexI[]{
@@ -813,6 +942,12 @@ public class NInventory extends Inventory
             }).tip(nurgling.i18n.L10n.get("inventory.tip.search"));
             deco.add(searchBtn);
 
+            // Stack-to-max button in title bar (merge partial stacks to max size + sort by quality)
+            stackMaxBtnRef = new NHeaderButton("nurgling/hud/buttons/inv/stackmax", () -> {
+                SortInventory.sortAndStack(NInventory.this);
+            }).tip("Stack to Max & Sort by Quality");
+            deco.add(stackMaxBtnRef);
+
             // Stack sort button in title bar (deep sort within stacks)
             stackSortBtnRef = new NHeaderButton("nurgling/hud/buttons/inv/stacksort", () -> {
                 SortInventory.sortDeep(NInventory.this);
@@ -985,9 +1120,9 @@ public class NInventory extends Inventory
         int safetyGap = UI.scale(4);
 
         // Display order, left-to-right
-        Widget[] displayOrder = { eyeBtn, searchBtn, stackSortBtnRef, sortBtnRef, dropperBtn };
+        Widget[] displayOrder = { eyeBtn, searchBtn, stackMaxBtnRef, stackSortBtnRef, sortBtnRef, dropperBtn };
         // Drop priority when crowded: lowest priority (most-droppable) first
-        Widget[] dropOrder = { dropperBtn, sortBtnRef, stackSortBtnRef, searchBtn, eyeBtn };
+        Widget[] dropOrder = { dropperBtn, sortBtnRef, stackMaxBtnRef, stackSortBtnRef, searchBtn, eyeBtn };
 
         // Reset visibility before recomputing layout
         for (Widget b : displayOrder) if (b != null) b.visible = true;
@@ -1321,11 +1456,17 @@ public class NInventory extends Inventory
         }
         
         void recalculate() {
-            // Recalculate total quantity and quality
+            // Recalculate total quantity and quality. By the time an NGItem reaches this
+            // list it is always a single physical unit — a stack's individual child, or a
+            // genuine loose item — never a stack *container* (rebuildItemList() flattens
+            // stack contents into their children before calling addItem()). The only
+            // remaining multi-unit case is a numeric-badge "amount" item (coins, kg/L bulk
+            // goods - see docs/inventory-grid-system.md §3(a)), which carries one quality
+            // for its whole counted blob rather than per-unit qualities.
             totalQuantity = 0;
             double totalQuality = 0;
             int qualityCount = 0;
-            
+
             for (NGItem item : items) {
                 // Get proper stack count using Amount info like GetTotalAmountItems does
                 int stackSize = 1;
@@ -1340,37 +1481,22 @@ public class NInventory extends Inventory
 
                 totalQuantity += stackSize;
 
-                // Calculate quality - try to get stack quality first, then fallback to item quality
                 double itemQuality = 0;
-                if(stackSize > 1) {
-                    // Try to get stack quality info for stacked items
-                    Stack stackInfo = item.getInfo(Stack.class);
-                    if (stackInfo != null && stackInfo.quality > 0) {
-                        itemQuality = stackInfo.quality;
-                    } else if (item.quality != null && item.quality > 0) {
-                        // Fallback to individual item quality if no stack quality
+                try {
+                    if (item.quality != null && item.quality > 0) {
                         itemQuality = item.quality;
                     }
-                } else {
-                    // Fallback to individual item quality on any error
-                    try {
-                        if (item.quality != null && item.quality > 0) {
-                            itemQuality = item.quality;
-                        }
-                    } catch (Exception e2) {
-                        // Ignore and continue with 0 quality
-                        itemQuality = 0;
-                    }
+                } catch (Exception e2) {
+                    itemQuality = 0;
                 }
 
-                
                 if (itemQuality > 0) {
                     // Weight quality by stack size for accurate average
                     totalQuality += itemQuality * stackSize;
                     qualityCount += stackSize;
                 }
             }
-            
+
             if (qualityCount > 0) {
                 averageQuality = totalQuality / qualityCount;
             } else {
@@ -1384,14 +1510,13 @@ public class NInventory extends Inventory
     }
     
     /**
-     * Get quality of an item, considering stack quality
+     * Get the quality of a single physical unit (a stack's child, or a loose item).
+     * Never called on a stack container itself — its own "quality" is only ever an
+     * average of its children (see haven.res.ui.tt.stackn.Stack), which would silently
+     * collapse every child's real quality into one badge value if used here.
      */
     private static Double getItemQuality(NGItem item) {
         try {
-            Stack stackInfo = item.getInfo(Stack.class);
-            if (stackInfo != null && stackInfo.quality > 0) {
-                return (double) stackInfo.quality;
-            }
             if (item.quality != null && item.quality > 0) {
                 return item.quality.doubleValue();
             }
@@ -1400,7 +1525,43 @@ public class NInventory extends Inventory
         }
         return null;
     }
-    
+
+    /**
+     * Adds one physical unit (a stack's child, or a loose/bulk item) to the grouping map,
+     * applying the quality filter and building the same name(+quantized-quality) group key
+     * rebuildItemList() has always used. Shared by both call sites in rebuildItemList() so
+     * a stack's children are grouped by their own individual qualities, exactly like loose
+     * items always were.
+     */
+    private void addUnitToItemGroups(Map<String, ItemGroup> itemGroupMap, NGItem nitem, WItem wItem) {
+        String itemName = nitem.name();
+        if (itemName == null) return;
+
+        Double quality = getItemQuality(nitem);
+
+        if (minQualityFilter != null) {
+            double itemQ = quality != null ? quality : 0;
+            if (itemQ < minQualityFilter) {
+                return; // Skip items below min quality
+            }
+        }
+
+        String groupKey;
+        if (currentGrouping == Grouping.NONE) {
+            groupKey = itemName;
+        } else {
+            double quantifiedQ = quality != null ? ItemGroup.quantifyQuality(quality, currentGrouping) : 0;
+            groupKey = itemName + "@Q" + (int) quantifiedQ;
+        }
+
+        ItemGroup group = itemGroupMap.get(groupKey);
+        if (group == null) {
+            group = new ItemGroup(itemName, quality, currentGrouping);
+            itemGroupMap.put(groupKey, group);
+        }
+        group.addItem(nitem, wItem);
+    }
+
     private void rebuildItemList() {
         if (itemListContent == null) return;
         
@@ -1411,47 +1572,27 @@ public class NInventory extends Inventory
         
         // Get current inventory items and group by name + quality (depending on grouping mode)
         Map<String, ItemGroup> itemGroupMap = new HashMap<>();
-        
-        // Access parent inventory's children
+
+        // Access parent inventory's children. A stack container is expanded into its
+        // individual children here — each with its own real quality — instead of being
+        // treated as one item at its averaged badge quality (see getItemQuality()'s note).
         for (Widget widget = this.child; widget != null; widget = widget.next) {
-            if (widget instanceof WItem) {
-                WItem wItem = (WItem) widget;
-                if (wItem.item instanceof NGItem) {
-                    NGItem nitem = (NGItem) wItem.item;
-                    String itemName = nitem.name();
-                    
-                    if (itemName != null) {
-                        Double quality = getItemQuality(nitem);
-                        
-                        // Apply quality filter
-                        if (minQualityFilter != null) {
-                            double itemQ = quality != null ? quality : 0;
-                            if (itemQ < minQualityFilter) {
-                                continue; // Skip items below min quality
-                            }
-                        }
-                        
-                        String groupKey;
-                        
-                        // Create group key based on grouping mode
-                        if (currentGrouping == Grouping.NONE) {
-                            groupKey = itemName;
-                        } else {
-                            double quantifiedQ = quality != null ? ItemGroup.quantifyQuality(quality, currentGrouping) : 0;
-                            groupKey = itemName + "@Q" + (int) quantifiedQ;
-                        }
-                        
-                        ItemGroup group = itemGroupMap.get(groupKey);
-                        if (group == null) {
-                            group = new ItemGroup(itemName, quality, currentGrouping);
-                            itemGroupMap.put(groupKey, group);
-                        }
-                        group.addItem(nitem, wItem);
-                    }
+            if (!(widget instanceof WItem)) continue;
+            WItem wItem = (WItem) widget;
+            if (!(wItem.item instanceof NGItem)) continue;
+            NGItem nitem = (NGItem) wItem.item;
+
+            if (nitem.contents instanceof ItemStack) {
+                ItemStack stack = (ItemStack) nitem.contents;
+                for (GItem childG : stack.order) {
+                    if (!(childG instanceof NGItem)) continue;
+                    addUnitToItemGroups(itemGroupMap, (NGItem) childG, stack.wmap.get(childG));
                 }
+            } else {
+                addUnitToItemGroups(itemGroupMap, nitem, wItem);
             }
         }
-        
+
         // Sort the items: by name first, then by quality (descending) within same name
         List<ItemGroup> itemGroups = new ArrayList<>(itemGroupMap.values());
         itemGroups.sort((a, b) -> {
@@ -1482,6 +1623,19 @@ public class NInventory extends Inventory
         itemListContainer.cont.update();
     }
     
+    /** Compact-list counterpart of addUnitToItemGroups() — groups by name only, no quality binning. */
+    private void addUnitToCompactGroup(Map<String, ItemGroup> itemGroupMap, NGItem nitem, WItem wItem) {
+        String itemName = nitem.name();
+        if (itemName == null) return;
+
+        ItemGroup group = itemGroupMap.get(itemName);
+        if (group == null) {
+            group = new ItemGroup(itemName);
+            itemGroupMap.put(itemName, group);
+        }
+        group.addItem(nitem, wItem);
+    }
+
     private void rebuildCompactList() {
         if (itemListContent == null) return;
 
@@ -1489,22 +1643,24 @@ public class NInventory extends Inventory
             child.destroy();
         }
 
+        // Flatten stacks into their individual children so totalQuantity counts every
+        // physical unit directly, the same way rebuildItemList() does — see its comment
+        // on addUnitToItemGroups() for why the container's own count can't be trusted.
         Map<String, ItemGroup> itemGroupMap = new HashMap<>();
         for (Widget widget = this.child; widget != null; widget = widget.next) {
-            if (widget instanceof WItem) {
-                WItem wItem = (WItem) widget;
-                if (wItem.item instanceof NGItem) {
-                    NGItem nitem = (NGItem) wItem.item;
-                    String itemName = nitem.name();
-                    if (itemName != null) {
-                        ItemGroup group = itemGroupMap.get(itemName);
-                        if (group == null) {
-                            group = new ItemGroup(itemName);
-                            itemGroupMap.put(itemName, group);
-                        }
-                        group.addItem(nitem, wItem);
-                    }
+            if (!(widget instanceof WItem)) continue;
+            WItem wItem = (WItem) widget;
+            if (!(wItem.item instanceof NGItem)) continue;
+            NGItem nitem = (NGItem) wItem.item;
+
+            if (nitem.contents instanceof ItemStack) {
+                ItemStack stack = (ItemStack) nitem.contents;
+                for (GItem childG : stack.order) {
+                    if (!(childG instanceof NGItem)) continue;
+                    addUnitToCompactGroup(itemGroupMap, (NGItem) childG, stack.wmap.get(childG));
                 }
+            } else {
+                addUnitToCompactGroup(itemGroupMap, nitem, wItem);
             }
         }
 

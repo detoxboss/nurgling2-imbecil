@@ -6,6 +6,7 @@ import haven.res.ui.tt.stackn.Stack;
 import nurgling.*;
 import nurgling.sessions.BotExecutor;
 import nurgling.tasks.*;
+import nurgling.tools.StackSupporter;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -113,6 +114,7 @@ public class SortInventory implements Action {
     
     private final NInventory inventory;
     private final boolean deepSort;
+    private final boolean consolidate;
     private volatile boolean cancelled = false;
     private static volatile SortInventory current;
     private static final Object lock = new Object();
@@ -122,8 +124,13 @@ public class SortInventory implements Action {
     }
 
     public SortInventory(NInventory inventory, boolean deepSort) {
+        this(inventory, deepSort, false);
+    }
+
+    public SortInventory(NInventory inventory, boolean deepSort, boolean consolidate) {
         this.inventory = inventory;
         this.deepSort = deepSort;
+        this.consolidate = consolidate;
     }
     
     /**
@@ -166,6 +173,14 @@ public class SortInventory implements Action {
         
         try {
             doSort(gui);
+        } catch (InterruptedException ie) {
+            throw ie;
+        } catch (RuntimeException re) {
+            // Surface it in-game instead of dying silently to the file log (BotExecutor's
+            // thread wrapper only catches InterruptedException) — otherwise "pressed the
+            // button, nothing happened, no message at all" is indistinguishable from a crash.
+            gui.error("Sort failed: " + re);
+            throw re;
         } finally {
             synchronized (lock) {
                 if (current == this) {
@@ -175,13 +190,20 @@ public class SortInventory implements Action {
         }
         
         if (!cancelled) {
-            gui.msg(deepSort ? "Stacks sorted!" : "Inventory sorted!");
+            gui.msg(consolidate ? "Stacks maxed and sorted!" : (deepSort ? "Stacks sorted!" : "Inventory sorted!"));
         }
         
         return cancelled ? Results.FAIL() : Results.SUCCESS();
     }
     
     private void doSort(NGameUI gui) throws InterruptedException {
+        // Zeroth pass: merge partial stacks/loose items of the same name together up to
+        // their max stack size, before the position sort compacts the freed-up slots.
+        if (consolidate) {
+            consolidateStacks(gui);
+            if (cancelled) return;
+        }
+
         // Build grid of blocked cells (including sqmask and multi-cell items)
         boolean[][] grid = new boolean[inventory.isz.x][inventory.isz.y];
         
@@ -320,7 +342,7 @@ public class SortInventory implements Action {
         }
 
         // Second pass: sort individual items across same-type stacks by quality
-        if (!cancelled && deepSort) {
+        if (!cancelled && (deepSort || consolidate)) {
             sortWithinStacks(gui);
         }
     }
@@ -384,7 +406,28 @@ public class SortInventory implements Action {
 
         BotExecutor.runAsync("StackSorter", new SortInventory(inv, true));
     }
-    
+
+    /**
+     * Stack to max: merge partial stacks/loose items of the same name up to their max
+     * stack size (fewest possible slots), then positionally sort, then redistribute
+     * quality within same-type stacks so the highest quality is concentrated first.
+     */
+    public static void sortAndStack(NInventory inv) {
+        if (!isValidInventory(inv)) {
+            return;
+        }
+
+        NGameUI gui = NUtils.getGameUI();
+        if (gui == null) return;
+
+        if (gui.vhand != null) {
+            gui.error("Need default cursor to sort inventory!");
+            return;
+        }
+
+        BotExecutor.runAsync("StackConsolidator", new SortInventory(inv, true, true));
+    }
+
     /**
      * Check if inventory is valid for sorting (not in excluded windows)
      */
@@ -403,6 +446,133 @@ public class SortInventory implements Action {
             }
         }
         return true;
+    }
+
+    // =========================================================================
+    // Stack Consolidation (Zeroth Pass) — merge partial stacks up to max size
+    // =========================================================================
+
+    /**
+     * Returns how many physical units occupy this top-level slot: a stack's child
+     * count, or 1 for a single loose item.
+     */
+    private static int slotUnitCount(WItem w) {
+        if (w.item.contents instanceof ItemStack) {
+            return ((ItemStack) w.item.contents).wmap.size();
+        }
+        return 1;
+    }
+
+    /**
+     * For every item name present in more slots than its max stack size requires,
+     * greedily drains the smallest slot into the fullest non-full slot, one unit at
+     * a time, until the item occupies the minimum possible number of slots. Which
+     * physical units end up where is irrelevant here — {@link #sortWithinStacks}
+     * concentrates quality afterward.
+     *
+     * The max stack size used is {@code max(StackSupporter.getFullStackSize(name),
+     * largest slot of that name already observed in this inventory)}, not the
+     * table alone: that table is a hand-maintained, known-incomplete heuristic
+     * (docs/inventory-grid-system.md §3) — if the inventory already visibly holds a
+     * 4-stack of something the table has never heard of (returns its 1-unit
+     * default), trusting the table alone would silently skip an item this exact
+     * feature exists to consolidate.
+     */
+    private void consolidateStacks(NGameUI gui) throws InterruptedException {
+        Map<String, Integer> maxByName = new HashMap<>();
+        for (Widget wdg = inventory.lchild; wdg != null; wdg = wdg.prev) {
+            if (cancelled) return;
+            if (!(wdg instanceof WItem)) continue;
+            WItem w = (WItem) wdg;
+            if (!(w.item instanceof NGItem)) continue;
+            String name = ((NGItem) w.item).name();
+            if (name == null) continue;
+
+            int candidate = Math.max(StackSupporter.getFullStackSize(name), slotUnitCount(w));
+            if (candidate > 1) {
+                maxByName.merge(name, candidate, Math::max);
+            }
+        }
+
+        if (maxByName.isEmpty()) {
+            gui.msg("Stack to Max: nothing stackable found to consolidate.");
+            return;
+        }
+
+        for (Map.Entry<String, Integer> e : maxByName.entrySet()) {
+            if (cancelled) return;
+            consolidateOne(gui, e.getKey(), e.getValue());
+        }
+    }
+
+    private void consolidateOne(NGameUI gui, String name, int max) throws InterruptedException {
+        if (max <= 1) return;
+
+        boolean announced = false;
+        int guard = 0;
+        while (!cancelled) {
+            List<Coord> slots = new ArrayList<>();
+            List<Integer> counts = new ArrayList<>();
+            for (Widget wdg = inventory.lchild; wdg != null; wdg = wdg.prev) {
+                if (!(wdg instanceof WItem)) continue;
+                WItem w = (WItem) wdg;
+                if (!(w.item instanceof NGItem)) continue;
+                if (!name.equals(((NGItem) w.item).name())) continue;
+                slots.add(getItemPos(w));
+                counts.add(slotUnitCount(w));
+            }
+            if (slots.size() < 2) return;
+
+            int total = 0;
+            for (int c : counts) total += c;
+            int targetSlots = (total + max - 1) / max;
+            if (!announced) {
+                announced = true;
+                if (slots.size() > targetSlots) {
+                    gui.msg("Stacking " + name + ": " + total + " units in " + slots.size()
+                            + " slots (max " + max + "/stack) -> target " + targetSlots);
+                }
+            }
+            if (slots.size() <= targetSlots) return; // already the minimum possible slot count
+
+            // Donor = slot with the fewest units; receiver = the fullest slot that still has room.
+            int donorIdx = 0;
+            for (int i = 1; i < slots.size(); i++) {
+                if (counts.get(i) < counts.get(donorIdx)) donorIdx = i;
+            }
+            int receiverIdx = -1;
+            for (int i = 0; i < slots.size(); i++) {
+                if (i == donorIdx) continue;
+                if (counts.get(i) < max && (receiverIdx < 0 || counts.get(i) > counts.get(receiverIdx))) {
+                    receiverIdx = i;
+                }
+            }
+            if (receiverIdx < 0) return; // shouldn't happen given slots.size() > targetSlots, but be safe
+
+            if (gui.vhand != null) {
+                gui.error("Stack consolidation failed: hand not empty. Drop held item and retry.");
+                return;
+            }
+
+            Coord donorPos = slots.get(donorIdx);
+            Coord receiverPos = slots.get(receiverIdx);
+
+            takeItemFromSlot(donorPos, (Float) null);
+            if (gui.vhand == null) {
+                // Nothing was actually picked up (slot changed under us) — rescan and retry.
+                if (++guard > 5000) {
+                    gui.msg("Stack consolidation: too many steps for " + name + ", aborting");
+                    return;
+                }
+                continue;
+            }
+            addItemToSlot(receiverPos);
+
+            if (++guard > 5000) {
+                gui.msg("Stack consolidation: too many steps for " + name + ", aborting");
+                return;
+            }
+        }
     }
 
     // =========================================================================
@@ -708,6 +878,17 @@ public class SortInventory implements Action {
      * Handles stacks (2+), stacks dissolving (2→1), and single items.
      */
     private void takeItemFromSlot(Coord pos, float quality) throws InterruptedException {
+        takeItemFromSlot(pos, (Float) quality);
+    }
+
+    /**
+     * Takes a unit from a slot to hand. A {@code null} quality takes whichever unit
+     * is first/only in the slot (used by stack consolidation, which doesn't care which
+     * physical unit moves); a non-null quality takes that specific unit (used by the
+     * within-stack quality sort, which does).
+     * Handles stacks (2+), stacks dissolving (2→1), and single items.
+     */
+    private void takeItemFromSlot(Coord pos, Float quality) throws InterruptedException {
         WItem slotItem = findSlotItemAtPos(pos);
         if (slotItem == null) return;
 
@@ -716,12 +897,18 @@ public class SortInventory implements Action {
             int originalSize = stack.wmap.size();
 
             WItem target = null;
-            for (GItem gi : stack.order) {
-                if (gi instanceof NGItem) {
-                    NGItem ng = (NGItem) gi;
-                    if (ng.quality != null && Math.abs(ng.quality - quality) < 0.001f) {
-                        target = stack.wmap.get(gi);
-                        break;
+            if (quality == null) {
+                if (!stack.order.isEmpty()) {
+                    target = stack.wmap.get(stack.order.get(0));
+                }
+            } else {
+                for (GItem gi : stack.order) {
+                    if (gi instanceof NGItem) {
+                        NGItem ng = (NGItem) gi;
+                        if (ng.quality != null && Math.abs(ng.quality - quality) < 0.001f) {
+                            target = stack.wmap.get(gi);
+                            break;
+                        }
                     }
                 }
             }
@@ -744,8 +931,8 @@ public class SortInventory implements Action {
             if (slotItem.item.contents != null) {
                 return;
             }
-            // Verify quality matches before taking a single item
-            if (slotItem.item instanceof NGItem) {
+            // Verify quality matches before taking a single item (skipped when quality is null)
+            if (quality != null && slotItem.item instanceof NGItem) {
                 Float itemQ = ((NGItem) slotItem.item).quality;
                 if (itemQ == null || Math.abs(itemQ - quality) >= 0.001f) {
                     return;

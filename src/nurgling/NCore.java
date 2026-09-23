@@ -276,6 +276,7 @@ public class NCore extends Widget
                     startPlanningSync();
                     startFishSync();
                     startPeerPositionSync();
+                    startStackSizeSync();
                 }
             }
         }
@@ -291,6 +292,10 @@ public class NCore extends Widget
         {
             startPeerPositionSync();
         }
+        if((Boolean) NConfig.get(NConfig.Key.ndbenable) && databaseManager != null && !stackSizeSyncStarted)
+        {
+            startStackSizeSync();
+        }
 
         if(!(Boolean) NConfig.get(NConfig.Key.ndbenable) && databaseManager != null)
         {
@@ -300,6 +305,7 @@ public class NCore extends Widget
                     stopPlanningSync();
                     stopFishSync();
                     stopPeerPositionSync();
+                    stopStackSizeSync();
                     databaseManager.shutdown();
                     databaseManager = null;
                 }
@@ -882,6 +888,7 @@ public class NCore extends Widget
     private static volatile boolean fishSyncStarted = false;
     private static volatile boolean routeSyncStarted = false;
     private static volatile boolean peerPositionSyncStarted = false;
+    private static volatile boolean stackSizeSyncStarted = false;
 
     /**
      * Start periodic area sync from database
@@ -1091,6 +1098,24 @@ public class NCore extends Widget
             databaseManager.getFishLocationService().stopSync();
         }
         fishSyncStarted = false;
+    }
+
+    private void startStackSizeSync() {
+        if (stackSizeSyncStarted || databaseManager == null || !databaseManager.isReady()) {
+            return;
+        }
+        nurgling.db.service.StackSizeService svc = databaseManager.getStackSizeService();
+        if (svc == null) return;   // optional migration was refused; stays on the static table
+
+        svc.startSync(5);
+        stackSizeSyncStarted = true;
+    }
+
+    private void stopStackSizeSync() {
+        if (databaseManager != null && databaseManager.getStackSizeService() != null) {
+            databaseManager.getStackSizeService().stopSync();
+        }
+        stackSizeSyncStarted = false;
     }
 
     /**

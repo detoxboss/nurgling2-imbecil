@@ -89,11 +89,22 @@ matching item with no `Amount` info, so only safe when every match is guaranteed
   (`NGItem.java:35,170-172`).
 - **Current unit count**: `((ItemStack) witem.item.contents).wmap.size()`.
 - **Is this item type stackable, and what's its max stack size**: `nurgling/tools/StackSupporter.java`
-  — `isStackable(inv, name)` / `getFullStackSize(name)`. This is a **hand-maintained client-side
-  heuristic table** (per-name overrides, a `catExceptions` never-stacks set, then category lookup
-  in `categorySize`, e.g. `"Berry"`/`"Fruit or Berry"`/`"Seed of Tree or Bush"`/`"Mushroom"` → 4),
-  **not** anything read from the server/protocol. Treat it as "best known, may need updating if
-  game balance changes," not ground truth.
+  — `isStackable(inv, name)` / `getFullStackSize(name)`. The base layer is still a **hand-maintained
+  client-side heuristic table** (per-name overrides, a `catExceptions` never-stacks set, then
+  category lookup in `categorySize`, e.g. `"Berry"`/`"Fruit or Berry"`/`"Seed of Tree or Bush"`/
+  `"Mushroom"` → 4), not anything read from the server/protocol — but as of the shared `stack_sizes`
+  DB table (migration 13, `nurgling/db/migration/MigrationManager.java`;
+  `nurgling/db/service/StackSizeService.java`), both methods consult that table *first* whenever a
+  database is configured, and only fall back to the static table when the DB has no opinion on a
+  given name. The DB-backed table starts seeded from the static one, then self-corrects: it's
+  passively updated whenever a client observes a real stack bigger than what's on record
+  (`NInventory.observeStackSizesForLearning()`, gated by `NConfig.Key.stackSizeLearning`), and can be
+  edited directly by a player via the "Stack Size Calibration" window
+  (`nurgling/widgets/db/StackSizeCalibrationWindow.java`, reachable from the Database settings
+  panel). Corrections sync to every client sharing the same database the way `NArea`s do. Treat the
+  *static table alone* as "best known, may need updating if game balance changes, not ground truth"
+  — but with the DB layer configured, staleness for any item someone has actually played with (or
+  manually calibrated) self-heals without a client update.
 - `nurgling/tasks/GetNotFullStack.java` / `GetNotStack.java` find an existing mergeable stack/lone
   item of a given name by comparing `wmap.size()` against `getFullStackSize(name)`.
 - **Quality does not gate stacking** — `haven/res/ui/tt/stackn/Stack.java:56-72` *averages*
@@ -297,6 +308,128 @@ implementing its own notion of "new." `InventorySnapshot` is the one shared mode
 See `nurgling/actions/bots/LpAssistantBot.java` (baseline/settlement/triage/cleanup) and
 `nurgling/tasks/WaitLpFirstProduct.java`/`WaitLpSettlement.java` for the actual call sites, and
 `docs/lp-assistant-bot.md` for the bot-level behavior this enables.
+
+## 8. Inventory-window UI: sort buttons and the item-list side panel
+
+Two client-only UI features live on `nurgling/NInventory.java`'s window chrome, on top of the grid
+mechanics above. Both are per-`NInventory`-instance (main player inventory and every container window
+each get their own), not global singletons.
+
+### 8a. Title-bar sort buttons — Sort, Sort Within Stacks, Stack to Max & Sort
+
+Three buttons sit in the title bar, right-anchored before the window's close button (main inventory:
+`NInventory.installMainInv()`, `NInventory.java:834-848` builds `stackMaxBtnRef`/`stackSortBtnRef`/
+`sortBtnRef` in that left-to-right visual order and `positionTitleBarButtons()`,
+`NInventory.java:1069-1080`, lays them out with priority-based dropping when the window is too narrow
+to fit them all; container windows: `NInventory.addSortButtonToTitleBar()`, `NInventory.java:154-243`,
+positions the same three via each button's own `tick()` override chained off `deco.cbtn`, independent
+of `positionTitleBarButtons()`). All three delegate to static entry points on
+`nurgling/actions/SortInventory.java`:
+
+- **Sort** (`SortInventory.sort()`) — positional-only: alphabetizes 1x1 items into the grid, highest
+  quality first within a name (`ITEM_COMPARATOR`, `SortInventory.java:43-95`). Pre-existing, undocumented
+  here previously.
+- **Sort Within Stacks** (`SortInventory.sortDeep()`) — positional sort, then `sortWithinStacks()`
+  (`SortInventory.java:495-` on, cycle-chase permutation sort) redistributes individual units *across*
+  same-name stacks so the highest-quality units end up concentrated in the first (top-left-most) stack,
+  without changing how many stacks exist or their sizes. Pre-existing, undocumented here previously.
+  This algorithm is real-time-costly by construction — every unit move is a live take→drop/itemact
+  round trip through the server (`NUtils.takeItemToHand`, `NUtils.itemact`), each followed by a real
+  wait task (`WaitFreeHand`, `StackSizeChanged`, `ISRemovedLoftar`/`ISRemoved`) for the server's delta to
+  land, and a full fresh grid rescan (`freshScan()`) starts every cycle. There is no way to batch these
+  into fewer server round trips without a different, unverified client-side protocol shortcut (see the
+  note at the end of 8a on the native drag-merge gesture) — treat its slowness as inherent to "many
+  individually-confirmed unit moves," not as an unexamined inefficiency.
+- **Stack to Max & Sort by Quality** (`SortInventory.sortAndStack()`, `SortInventory.java:389-407`,
+  new) — runs a consolidation pass (`consolidateStacks()`/`consolidateOne()`,
+  `SortInventory.java:444-529`) *before* the positional sort, then always runs `sortWithinStacks()`
+  afterward regardless of the `deepSort` flag. Consolidation greedily drains the globally
+  smallest same-name slot into the fullest same-name slot with room (one unit per take/itemact round
+  trip, via the same primitives `sortWithinStacks()` already uses — `takeItemFromSlot()` was widened to
+  accept a nullable quality, `SortInventory.java:849-870`, `null` meaning "take whichever unit is
+  first/only," since consolidation doesn't care which physical unit moves) until the item occupies
+  `ceil(totalUnits / StackSupporter.getFullStackSize(name))` slots — the minimum possible — for every
+  stackable name present (`StackSupporter.isStackable()` gates which names are attempted). *Which*
+  physical units end up in which resulting stack is left up to the following positional + within-stack
+  sort passes to fix, exactly like the plain "Sort Within Stacks" flow's `deepSort` case does; this
+  avoids duplicating the quality-concentration logic.
+  - **Known unexplored optimization**: the native client exposes a drag-and-drop gesture (Shift/Ctrl+Shift
+    held while right-click-dragging one item onto another — see the in-game tooltip on any stack: "Hold
+    Ctrl+Shift to make stacks of all such available items") that reportedly merges *all* available units
+    of a kind in one gesture, server-side, without per-unit round trips. This repo's code never invokes
+    it — `WItem`'s drag/drop handling for that gesture was not traced as part of this work, and no
+    `wdgmsg` call reproducing it exists anywhere in `src/`. If a future pass confirms the exact
+    message shape, `consolidateOne()` could send one message per (source, destination) pair instead of
+    one per unit, which would be the actual fix for "Sort Within Stacks is slow" rather than a
+    micro-optimization of the current per-unit loop.
+  - New button icons (`NStyle.stackmaxi`, `NStyle.java`, and `nurgling/hud/buttons/inv/stackmax/{u,d,h}`
+    for the main-inventory `NHeaderButton` string-base constructor) are placeholder duplicates of the
+    existing "Sort Within Stacks" artwork (`resources/src/nurgling/hud/buttons/sort/stackmaxbtn{u,d,h}.res`
+    and `resources/src/nurgling/hud/buttons/inv/stackmax/{u,d,h}.res`, copied from `stacksbtn*`/
+    `stacksort/*` respectively) — visually identical to the stack-sort button until real art exists.
+
+### 8b. Item-list side panel — per-unit quality, and container support
+
+The panel toggled by the eye-icon title-bar button (`NHeaderCycler`, cycles closed → simplified →
+expanded → closed, state persisted in `NConfig.Key.inventoryRightPanelShow` and shared across every
+inventory window) lists every item name in the inventory, optionally grouped/binned by quality
+(`NInventory.Grouping`), with quantity and (in expanded mode) average quality shown per row.
+
+**Per-unit quality (fixed; previously wrong).** Both list-building passes —
+`rebuildItemList()` (expanded panel, `NInventory.java:1498-` on) and `rebuildCompactList()` (simplified
+panel, `NInventory.java:1589-` on) — used to iterate only *top-level* `WItem`s and, for a stack
+container, read its quality via `item.getInfo(Stack.class)` (`haven/res/ui/tt/stackn/Stack.java`),
+which is the on-screen badge's **average across the stack's children** (`Stack.overlay()`/`tick()`,
+lines 56-72/200-224), computed live from `item.contents.children()`. That collapsed an entire stack
+into one (name, averaged-quality) bucket with the stack's full unit count, discarding every child's
+real individual quality — a 4-unit stack with qualities 10/50/100/300 showed as one `x4 q115.0` row
+instead of four separate rows. Each unit inside a stack has its own independent quality (§3 above); the
+averaging was only ever meant for the small on-screen number overlay, not for accounting.
+
+Fixed by flattening: both loops now check `nitem.contents instanceof ItemStack` and, when true, iterate
+`stack.order`/`stack.wmap` (the same fields §3's stacking section documents) to feed each **child**
+`NGItem`/`WItem` pair in individually — never the container — via new small helpers
+`addUnitToItemGroups()` (`NInventory.java:1495-1521`, quality-aware, expanded panel) and
+`addUnitToCompactGroup()` (`NInventory.java:1586-1596`, name-only, simplified panel). A non-stack slot
+(loose item, or a numeric-badge "amount" item per §3(a)) is fed in unchanged, since it was already a
+single accounting unit. `getItemQuality()` (`NInventory.java:1470-1486`) and `ItemGroup.recalculate()`
+(`NInventory.java:1417-1453`) were simplified to drop their `Stack`-info branch entirely, since a
+container's own averaged quality can no longer reach them — every `NGItem` that reaches an `ItemGroup`
+now is always a real single physical unit (or a genuine Amount-based bulk blob, which still carries one
+quality for its whole counted amount, per §3(a)).
+
+One consequence worth relying on deliberately: because each row's `wItems` list now holds the actual
+per-child `WItem` (from `stack.wmap`) instead of the stack container's own `WItem`, a plain click on a
+row (`createItemWidget()`'s `mousedown()`, and the simplified-panel row's own `mousedown()`) sends
+`"take"` to that **specific child's** own `GItem` wdgid — which, per the native per-unit `"take"`
+protocol (§4 above, `haven/WItem.java:180-200`), lifts just that one unit out of its stack into the
+cursor, leaving the rest of the stack alone. Same for Shift/Ctrl-click group actions
+(`processGroupItems()`, `NInventory.java`) — they now send `"transfer"`/`"drop"` to the matching
+individual child(ren) instead of the whole container. This was a direct requirement, not a side effect
+kept out of caution: pulling one exact-quality unit out of a mixed stack via the list panel now works
+because the row *is* that unit, not an average of several.
+
+**Container support (new).** The panel was previously installed only for the main player inventory,
+via `NInventory.installMainInv()` (called once from `NGameUI.addchild()`,
+`NGameUI.java:577-580`, guarded by the per-instance `mainInvInstalled` flag). Container windows now get
+the same panel through a new `installListPanelIfContainer()` (`NInventory.java:261-320`, called from
+`added()` alongside the existing `addSortButtonIfContainer()`), guarded by its own `listPanelInstalled`
+flag and skipped for the main inventory itself and for any window in
+`SortInventory.EXCLUDE_WINDOWS` (crafting stations, Character Sheet, Study, Belt/Pouch/Purse, etc. —
+the same exclusion list the sort buttons already used, since a non-grid or special-purpose "inventory"
+doesn't have a meaningful item list either). It reuses `setupRightPanel()`/`applyPanelState()`/
+`updateItemListSize()` unchanged — those were already written generically against `NInventory.this`
+with no main-inventory-specific assumptions, which is what made this an additive change rather than a
+refactor: `rightPanel` visibility/refresh in `tick()` (`NInventory.java:604-613`) and repositioning in
+`resize()` (`NInventory.java:509-525`) already ran unconditionally for every `NInventory` instance, they
+simply had nothing to act on for containers until `rightPanel`/`eyeBtn` existed. The container install
+path deliberately does **not** set `sortBtnRef`/`stackSortBtnRef`/`stackMaxBtnRef`/`searchBtn`/
+`dropperBtn` — those stay null for containers, so `positionTitleBarButtons()`'s left-anchored,
+priority-drop layout (built for the main inventory) only ever manages the eye button there, leaving the
+three sort buttons under their separate self-positioning `tick()` overrides from `addSortButtonToTitleBar()`
+undisturbed. Search and the auto-dropper toggle were intentionally not added to containers — out of this
+feature's scope (auto-drop-on-pickup and the main-inventory search widget don't have an obvious
+container analog) — only the list panel itself.
 
 ## Related code (for future changes, not yet covered above)
 
