@@ -1,34 +1,40 @@
 package nurgling.db.service;
 
-import nurgling.NGameUI;
 import nurgling.db.DatabaseManager;
 import nurgling.db.dao.StackSizeDao;
-import nurgling.sessions.SessionContext;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Shared, self-correcting override for {@code nurgling.tools.StackSupporter}'s static stack-size
  * table. See {@code docs/inventory-grid-system.md} for the feature this backs.
  *
- * <p>Stack-size knowledge is a fact about the <em>item</em>, not per-character/per-window data, so
- * unlike {@link FishLocationDbService} (per-session) this keeps one shared cache and syncs once per
- * distinct live <em>profile</em> (world/genus) - the same "group by profile, not session" choice
- * {@link PeerPositionDbService} already makes, and for the same reason: every character logged into
- * the same world would otherwise duplicate identical sync work.
+ * <p><b>Not profile/genus-scoped, unlike {@link AreaService}/{@link PeerPositionDbService}.</b> An
+ * area or a player position is inherently a fact about a specific world; an item's max stack size
+ * is a fact about the game's item definitions, which - barring a server deliberately running
+ * modified game balance - is the same everywhere. Everything here uses one fixed row key
+ * ({@link #PROFILE}), matching the {@code profile='global'} the seeding migration already writes
+ * under (migration 13, {@code nurgling/db/migration/MigrationManager.java}).
+ *
+ * <p>An earlier version of this class scoped rows by the session's live genus instead, following
+ * the PeerPositionDbService pattern uncritically. That silently broke the seeding goal: the 801
+ * seeded rows sat under {@code profile='global'} while every real lookup/write resolved the
+ * player's actual genus, so the bulk load for any real world found zero rows, and every stackable
+ * item a player had ever seen looked "unknown" every session - each one firing a real passive-
+ * learning write on first sight instead of a cheap cache hit. Harmless per {@link #lookup}'s
+ * null-means-fall-back-to-static-table contract, but it defeated most of the point of seeding and
+ * added avoidable background DB writes that could contend with every other feature's fire-and-
+ * forget saves (they all share one single-threaded queue, see {@link DatabaseManager#executeWithRetry}).
  *
  * <p>{@link #lookup} is the hot path - {@code StackSupporter.isStackable}/{@code getFullStackSize}
  * are called on bots' inner loops - and is a pure synchronous in-memory read, exactly like {@link
@@ -36,6 +42,9 @@ import java.util.concurrent.TimeUnit;
  * the background poller and by explicit async writes (never blocking the caller).
  */
 public class StackSizeService {
+
+    /** The single row-scope every {@code stack_sizes} row lives under - see the class doc. */
+    private static final String PROFILE = "global";
 
     /** One item's cached stack-size facts. Immutable; a change replaces the cache entry wholesale. */
     public static final class StackInfo {
@@ -53,15 +62,13 @@ public class StackSizeService {
     private final DatabaseManager databaseManager;
     private final StackSizeDao dao = new StackSizeDao();
 
-    /** profile -> name -> info. The live cache; reads never touch the database. */
-    private final ConcurrentHashMap<String, ConcurrentHashMap<String, StackInfo>> cache = new ConcurrentHashMap<>();
+    /** name -> info. The live cache; reads never touch the database. */
+    private final ConcurrentHashMap<String, StackInfo> cache = new ConcurrentHashMap<>();
 
-    /** Profiles that have had their bulk load. Clearing forces every profile to bulk-load again. */
-    private final Set<String> bulkLoadedProfiles = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    /** The row versions already applied, so a delta poll only fetches what actually changed. */
+    private final Map<String, Integer> knownVersions = new HashMap<>();
 
-    /** Per-profile view of the row versions already applied, so a poll only fetches changes. */
-    private final ConcurrentHashMap<String, Map<String, Integer>> knownVersions = new ConcurrentHashMap<>();
-
+    private final AtomicBoolean bulkLoaded = new AtomicBoolean(false);
     private volatile boolean syncEnabled = false;
     private ScheduledExecutorService syncScheduler = null;
 
@@ -72,26 +79,12 @@ public class StackSizeService {
     // -------------------- Hot-path read --------------------
 
     /**
-     * Synchronous, in-memory only - never touches the database. Null means "this profile's cache
-     * has no opinion on this name," in which case the caller (StackSupporter) falls back to its
-     * static table, not "this item doesn't stack."
+     * Synchronous, in-memory only - never touches the database. Null means "the cache has no
+     * opinion on this name," in which case the caller (StackSupporter) falls back to its static
+     * table, not "this item doesn't stack."
      */
     public StackInfo lookup(String name) {
-        Map<String, StackInfo> byName = cache.get(currentProfile());
-        return (byName != null) ? byName.get(name) : null;
-    }
-
-    private static String currentProfile() {
-        try {
-            NGameUI gui = nurgling.NUtils.getGameUI();
-            if (gui != null) {
-                String genus = gui.getGenus();
-                if (genus != null && !genus.isEmpty()) return genus;
-            }
-        } catch (RuntimeException ignore) {
-            // No session bound on this thread, or genus not resolved yet - fall through.
-        }
-        return "global";
+        return cache.get(name);
     }
 
     // -------------------- Write path --------------------
@@ -103,50 +96,43 @@ public class StackSizeService {
      * same or a smaller stack is again a pure in-memory compare.
      */
     public CompletableFuture<Void> observeAndMaybeLearnAsync(String name, int observedCount) {
-        String profile = currentProfile();
-        ConcurrentHashMap<String, StackInfo> byName = cache.computeIfAbsent(profile, p -> new ConcurrentHashMap<>());
-        StackInfo current = byName.get(name);
+        StackInfo current = cache.get(name);
         if (current != null && observedCount <= current.maxStack) {
             return CompletableFuture.completedFuture(null);
         }
         // Optimistic in-memory update first, so this same session sees the fix immediately
         // without waiting for the next poll.
-        byName.put(name, new StackInfo(observedCount, true, "learned"));
+        cache.put(name, new StackInfo(observedCount, true, "learned"));
         String touchedBy = currentPlayerName();
         return databaseManager.executeWithRetry(adapter -> {
-            dao.upsertIfBigger(adapter, profile, name, observedCount, touchedBy);
+            dao.upsertIfBigger(adapter, PROFILE, name, observedCount, touchedBy);
             return (Void) null;
         }, "learn stack size " + name);
     }
 
     /** Calibration-UI write: unconditionally set an item's values, provenance forced to 'manual'. */
     public CompletableFuture<Void> setManualAsync(String name, int maxStack, boolean stackable) {
-        String profile = currentProfile();
-        cache.computeIfAbsent(profile, p -> new ConcurrentHashMap<>())
-            .put(name, new StackInfo(maxStack, stackable, "manual"));
+        cache.put(name, new StackInfo(maxStack, stackable, "manual"));
         String touchedBy = currentPlayerName();
         return databaseManager.executeWithRetry(adapter -> {
-            dao.setManual(adapter, profile, name, maxStack, stackable, touchedBy);
+            dao.setManual(adapter, PROFILE, name, maxStack, stackable, touchedBy);
             return (Void) null;
         }, "set stack size " + name);
     }
 
     /** Calibration-UI delete: the item falls back to StackSupporter's static table again. */
     public CompletableFuture<Void> deleteAsync(String name) {
-        String profile = currentProfile();
-        Map<String, StackInfo> byName = cache.get(profile);
-        if (byName != null) byName.remove(name);
+        cache.remove(name);
         String touchedBy = currentPlayerName();
         return databaseManager.executeWithRetry(adapter -> {
-            dao.tombstone(adapter, profile, name, touchedBy);
+            dao.tombstone(adapter, PROFILE, name, touchedBy);
             return (Void) null;
         }, "delete stack size " + name);
     }
 
-    /** Defensive snapshot of the current profile's known entries, for the calibration UI. */
+    /** Defensive snapshot of every known entry, for the calibration UI. */
     public Map<String, StackInfo> snapshotForUi() {
-        Map<String, StackInfo> byName = cache.get(currentProfile());
-        return (byName != null) ? new HashMap<>(byName) : Collections.emptyMap();
+        return new HashMap<>(cache);
     }
 
     // -------------------- Sync --------------------
@@ -154,21 +140,22 @@ public class StackSizeService {
     public void startSync(long intervalSeconds) {
         if (syncEnabled) stopSync();
         this.syncEnabled = true;
-        this.bulkLoadedProfiles.clear();
-        this.knownVersions.clear();
+        this.bulkLoaded.set(false);
+        synchronized (knownVersions) {
+            knownVersions.clear();
+        }
         this.syncScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "StackSize-Sync-Worker");
             t.setDaemon(true);
             return t;
         });
         syncScheduler.scheduleAtFixedRate(this::syncTick, 1, intervalSeconds, TimeUnit.SECONDS);
-        System.out.println("Stack size sync started, interval=" + intervalSeconds + "s (by profile)");
+        System.out.println("Stack size sync started, interval=" + intervalSeconds + "s");
     }
 
     public void stopSync() {
         syncEnabled = false;
-        bulkLoadedProfiles.clear();
-        knownVersions.clear();
+        bulkLoaded.set(false);
         if (syncScheduler != null) {
             syncScheduler.shutdown();
             try {
@@ -188,101 +175,74 @@ public class StackSizeService {
         if (!syncEnabled) return;
         if (databaseManager == null || !databaseManager.isReady()) return;
 
-        Collection<SessionContext> sessions;
         try {
-            sessions = nurgling.sessions.SessionManager.getInstance().getAllSessions();
-        } catch (RuntimeException e) {
-            return;
-        }
-        if (sessions == null || sessions.isEmpty()) return;
-
-        // Every session logged into the same world shares one profile's worth of sync work -
-        // see the class doc for why this is grouped by profile rather than by session.
-        Set<String> liveProfiles = new HashSet<>();
-        for (SessionContext sc : sessions) {
-            if (sc == null || sc.ui == null) continue;
-            NGameUI gui = sc.getGameUI();
-            if (gui == null) continue;
-            String profile = gui.getGenus();
-            if (profile == null || profile.isEmpty()) profile = "global";
-            liveProfiles.add(profile);
-        }
-        if (liveProfiles.isEmpty()) return;
-
-        // Drop tracking (and cached data) for profiles nobody is in anymore, so these maps don't
-        // grow across logouts.
-        bulkLoadedProfiles.retainAll(liveProfiles);
-        knownVersions.keySet().retainAll(liveProfiles);
-        cache.keySet().retainAll(liveProfiles);
-
-        for (String profile : liveProfiles) {
-            try {
-                if (bulkLoadedProfiles.add(profile)) {
-                    runBulkLoad(profile);
-                } else {
-                    runDeltaPoll(profile);
-                }
-            } catch (SQLException | RuntimeException e) {
-                // Let the next tick retry (bulk-loading again if that is what failed).
-                bulkLoadedProfiles.remove(profile);
-                String msg = e.getMessage();
-                if (msg != null && !msg.contains("no such table") && !msg.contains("no such column")
-                    && !msg.contains("does not exist")) {
-                    System.err.println("Stack size sync error (profile=" + profile + "): " + msg);
-                }
+            if (bulkLoaded.compareAndSet(false, true)) {
+                runBulkLoad();
+            } else {
+                runDeltaPoll();
+            }
+        } catch (SQLException | RuntimeException e) {
+            // Let the next tick retry (bulk-loading again if that is what failed).
+            bulkLoaded.set(false);
+            String msg = e.getMessage();
+            if (msg != null && !msg.contains("no such table") && !msg.contains("no such column")
+                && !msg.contains("does not exist")) {
+                System.err.println("Stack size sync error: " + msg);
             }
         }
     }
 
-    private void runBulkLoad(String profile) throws SQLException {
+    private void runBulkLoad() throws SQLException {
         long t0 = System.currentTimeMillis();
         List<StackSizeDao.StackSizeRow> rows = databaseManager.executeOperation(
-            adapter -> dao.loadAll(adapter, profile));
+            adapter -> dao.loadAll(adapter, PROFILE));
 
-        ConcurrentHashMap<String, StackInfo> byName = new ConcurrentHashMap<>();
         Map<String, Integer> versions = new HashMap<>();
         for (StackSizeDao.StackSizeRow row : rows) {
-            byName.put(row.name, new StackInfo(row.maxStack, row.stackable, row.provenance));
+            cache.put(row.name, new StackInfo(row.maxStack, row.stackable, row.provenance));
             versions.put(row.name, row.version);
         }
-        cache.put(profile, byName);
-        knownVersions.put(profile, versions);
+        synchronized (knownVersions) {
+            knownVersions.clear();
+            knownVersions.putAll(versions);
+        }
 
         System.out.println("Stack size sync: bulk-loaded " + rows.size() + " rows in "
-            + (System.currentTimeMillis() - t0) + "ms (profile=" + profile + ")");
+            + (System.currentTimeMillis() - t0) + "ms");
     }
 
-    private void runDeltaPoll(String profile) throws SQLException {
-        Map<String, Integer> known = knownVersions.computeIfAbsent(profile, k -> new HashMap<>());
-        ConcurrentHashMap<String, StackInfo> byName = cache.computeIfAbsent(profile, p -> new ConcurrentHashMap<>());
-
+    private void runDeltaPoll() throws SQLException {
         Map<String, StackSizeDao.VersionInfo> dbVersions = databaseManager.executeOperation(
-            adapter -> dao.getAllVersions(adapter, profile));
+            adapter -> dao.getAllVersions(adapter, PROFILE));
 
         List<String> fetch = new ArrayList<>();
-        for (Map.Entry<String, StackSizeDao.VersionInfo> e : dbVersions.entrySet()) {
-            String name = e.getKey();
-            StackSizeDao.VersionInfo info = e.getValue();
-            Integer localVersion = known.get(name);
+        synchronized (knownVersions) {
+            for (Map.Entry<String, StackSizeDao.VersionInfo> e : dbVersions.entrySet()) {
+                String name = e.getKey();
+                StackSizeDao.VersionInfo info = e.getValue();
+                Integer localVersion = knownVersions.get(name);
 
-            if (info.tombstoned) {
-                if (localVersion != null) {
-                    byName.remove(name);
-                    known.remove(name);
+                if (info.tombstoned) {
+                    if (localVersion != null) {
+                        cache.remove(name);
+                        knownVersions.remove(name);
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if (localVersion == null || info.version > localVersion) {
-                fetch.add(name);
+                if (localVersion == null || info.version > localVersion) {
+                    fetch.add(name);
+                }
             }
         }
         if (fetch.isEmpty()) return;
 
         List<StackSizeDao.StackSizeRow> rows = databaseManager.executeOperation(
-            adapter -> dao.loadByNames(adapter, profile, fetch));
-        for (StackSizeDao.StackSizeRow row : rows) {
-            byName.put(row.name, new StackInfo(row.maxStack, row.stackable, row.provenance));
-            known.put(row.name, row.version);
+            adapter -> dao.loadByNames(adapter, PROFILE, fetch));
+        synchronized (knownVersions) {
+            for (StackSizeDao.StackSizeRow row : rows) {
+                cache.put(row.name, new StackInfo(row.maxStack, row.stackable, row.provenance));
+                knownVersions.put(row.name, row.version);
+            }
         }
     }
 
