@@ -699,10 +699,34 @@ public class NInventory extends Inventory
      * map-get-and-compare unless a genuinely bigger stack is observed (see
      * StackSizeService.observeAndMaybeLearnAsync()'s own doc for why that's a no-op DB call after
      * the first correction). See docs/inventory-grid-system.md §8 for the feature this backs.
+     *
+     * <p><b>Skips {@code SortInventory.EXCLUDE_WINDOWS}</b> (crafting/processing stations - Herbalist
+     * Table, Smoke Shed, Tub, Kiln, etc.) - not defensive paranoia. Reported live (2026-09): a
+     * Herbalist Table's drying-slot display apparently groups several units of a genuinely
+     * non-stacking item (e.g. Dried Morels) into the same {@code ItemStack} widget real stacks use;
+     * without this check, that got passively learned as "stacks to 4," corrupting the shared table
+     * for every client, then feeding {@code StackSupporter}'s now-wrong answer into every other
+     * caller. Root-caused (code-traced, not independently watched live) to
+     * {@code TransferToContainer.transfer()}'s isStackable()-branch merge attempt against a truly
+     * non-stacking item hanging on the server's silent refusal until its bounded {@code WaitFreeHand}
+     * wait times out and the bot aborts - matching the exact "Incorrect final of task class
+     * nurgling.tasks.WaitFreeHand" / bot-stopped failure reported for the Unboxing-from-Area bot.
+     * This is the same veto {@code StackSupporter.isStackable()} already applies via its own,
+     * narrower {@code unstackableContainers} list; reusing {@code SortInventory}'s broader list here
+     * is deliberately more conservative, since passive learning should never trust a container's
+     * apparent stack shape unless sorting/stacking bots already trust it too.
      */
     private void observeStackSizesForLearning() {
         if (!(Boolean) NConfig.get(NConfig.Key.stackSizeLearning)) {
             return;
+        }
+        Window wnd = getparent(Window.class);
+        if (wnd != null && wnd.cap != null) {
+            for (String excluded : SortInventory.EXCLUDE_WINDOWS) {
+                if (wnd.cap.contains(excluded)) {
+                    return;
+                }
+            }
         }
         nurgling.db.DatabaseManager dbm = NCore.databaseManager;
         if (dbm == null) {
