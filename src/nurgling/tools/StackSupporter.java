@@ -128,6 +128,12 @@ public class StackSupporter {
         catExceptions.add("Mammoth Tusk");
         catExceptions.add("Troll Mushrooms");
         catExceptions.add("Boreworm Beak");
+        // Categorized under "Edible Mushroom" (putAll(4, ...) above) like any fresh mushroom, but
+        // confirmed live (2026-09) not to stack at all - same category-mismatch pattern "Troll
+        // Mushrooms" above already corrects. Reported after a passive-learning bug (fixed separately,
+        // see NInventory.observeStackSizesForLearning()) additionally taught the DB it stacks to 4;
+        // this static-table entry is the independent root-cause fix, not a workaround for that bug.
+        catExceptions.add("Dried Morels");
     }
 
     private static final NAlias unstackableContainers = new NAlias(

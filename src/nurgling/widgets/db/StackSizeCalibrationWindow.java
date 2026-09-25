@@ -201,7 +201,15 @@ public class StackSizeCalibrationWindow extends Window {
 
     private void save(String name, int maxStack, boolean stackable) {
         if (!ready()) return;
-        service().setManualAsync(name, maxStack, stackable)
+        // A max stack of 1 unambiguously means "doesn't stack", regardless of what the Stackable
+        // toggle happens to still say - the two controls are independent widgets, so it's easy to
+        // edit only the number and leave the toggle at whatever a previous (possibly wrong) value
+        // set it to, silently saving a self-contradictory row. Confirmed live (2026-09): doing
+        // exactly that for Dried Morels re-saved stackable=true alongside max=1, and
+        // StackSupporter.isStackable() only ever reads the flag, so TransferToContainer kept trying
+        // to merge it. Normalizing here, once, covers both this window's Save buttons.
+        boolean effectiveStackable = stackable && maxStack > 1;
+        service().setManualAsync(name, maxStack, effectiveStackable)
             .thenRun(() -> {
                 setStatus("Saved " + name + ".", Color.GREEN);
                 refreshRows();

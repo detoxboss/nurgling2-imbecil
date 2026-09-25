@@ -296,11 +296,33 @@ public class TransferToContainer implements Action
     /**
      * Ждёт освобождения руки. Если таймаут — возвращает предмет в основной инвентарь.
      * @return true если рука освободилась, false если таймаут (предмет возвращён)
+     *
+     * <p>The {@code wfh.criticalExit} check below was dead code: {@code NCore.addTask()} throws
+     * {@link nurgling.tasks.TaskCriticalExitException} the instant a bounded task's own timeout
+     * fires (see that class's doc — the exact "Incorrect final of task ..." message this produced),
+     * which happens *inside* the {@code NUtils.addTask(wfh)} call above and unwinds straight past
+     * this method's own field check. So a hand that never clears — e.g. an {@code itemact} merge
+     * attempt against an item the server silently refuses to stack (confirmed live 2026-09, Dried
+     * Morels wrongly marked stackable) — always threw out of this method uncaught, out of {@link
+     * #transfer}, and out of every caller with no containment of its own ({@code FreeContainers},
+     * {@code FreeContainersInUnboxZone}), killing the whole bot instead of just this one item.
+     * {@code TaskCriticalExitException} is caught first (before the broader {@code
+     * InterruptedException} a real stop-button cancellation still throws and must keep propagating)
+     * so the intended recovery here actually runs.
      */
     private static boolean waitFreeHandOrReturn() throws InterruptedException
     {
         WaitFreeHand wfh = new WaitFreeHand();
-        NUtils.addTask(wfh);
+        try
+        {
+            NUtils.addTask(wfh);
+        }
+        catch (nurgling.tasks.TaskCriticalExitException e)
+        {
+            NUtils.dropToInv();
+            NUtils.addTask(new WaitFreeHand());
+            return false;
+        }
         if (wfh.criticalExit)
         {
             NUtils.dropToInv();

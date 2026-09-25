@@ -58,6 +58,17 @@ class StackSupporterTest {
         assertEquals(1, StackSupporter.getFullStackSize("Wolf's Claw"));
     }
 
+    /**
+     * Regression test for the Dried Morels fix: categorized under "Edible Mushroom"
+     * (putAll(4, ...)) like any fresh mushroom, but confirmed live (2026-09) not to stack at all -
+     * same category-mismatch pattern the pre-existing "Troll Mushrooms" exception already corrects.
+     */
+    @Test
+    void driedMorelsExceptionOverridesCategoryGuess() {
+        assertFalse(StackSupporter.isStackableByName("Dried Morels"));
+        assertEquals(1, StackSupporter.getFullStackSize("Dried Morels"));
+    }
+
     @Test
     void seedCandidateNamesIncludesKnownEntries() {
         java.util.Set<String> names = StackSupporter.seedCandidateNames();
