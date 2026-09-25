@@ -296,7 +296,9 @@ public class StackSizeCalibrationWindow extends Window {
         final Entry entry;
         private final Label infoLabel;
         private final TextEntry maxEntry;
+        private final Button toggle;
         private final int infoW;
+        private boolean lastShownStackable;
 
         Row(Entry e, Coord sz) {
             super(sz);
@@ -319,12 +321,15 @@ public class StackSizeCalibrationWindow extends Window {
             maxEntry.move(new Coord(maxX, Math.max(0, (sz.y - maxEntry.sz.y) / 2)));
             maxEntry.settip("Max stack size");
 
-            boolean[] stackablePending = { e.stackable };
-            Button toggle = add(new Button(TOGGLE_W, e.stackable ? "Stackable" : "Not stackable") {
+            // Writes straight to entry.stackable (a live, mutable field, not a click-local copy) so
+            // this button's own tick() below can always display the truth - including a value that
+            // changed for a reason other than this button (a background sync poll, or save()'s own
+            // max<=1-forces-not-stackable normalization landing after a refresh) - rather than a
+            // label frozen at whatever entry.stackable happened to be when this row was first built.
+            toggle = add(new Button(TOGGLE_W, e.stackable ? "Stackable" : "Not stackable") {
                 public void click() {
                     super.click();
-                    stackablePending[0] = !stackablePending[0];
-                    change(stackablePending[0] ? "Stackable" : "Not stackable");
+                    entry.stackable = !entry.stackable;
                 }
             }, Coord.z);
             toggle.move(new Coord(toggleX, Math.max(0, (sz.y - toggle.sz.y) / 2)));
@@ -343,7 +348,7 @@ public class StackSizeCalibrationWindow extends Window {
                         setStatus("Max stack must be at least 1.", Color.ORANGE);
                         return;
                     }
-                    save(entry.name, maxStack, stackablePending[0]);
+                    save(entry.name, maxStack, entry.stackable);
                 }
             }, Coord.z);
             save.move(new Coord(saveX, Math.max(0, (sz.y - save.sz.y) / 2)));
@@ -357,6 +362,7 @@ public class StackSizeCalibrationWindow extends Window {
             reset.move(new Coord(resetX, Math.max(0, (sz.y - reset.sz.y) / 2)));
             reset.tooltip = Text.render("Delete this override - falls back to the built-in table.").tex();
 
+            lastShownStackable = e.stackable;
             updateInfoLabel(infoW);
         }
 
@@ -371,6 +377,13 @@ public class StackSizeCalibrationWindow extends Window {
         public void tick(double dt) {
             super.tick(dt);
             updateInfoLabel(infoW);
+            // Refresh the toggle's label whenever entry.stackable changed for any reason since we
+            // last displayed it - a click on this same button, a background sync poll picking up
+            // someone else's edit, or save()'s own max<=1 normalization landing after a refresh.
+            if (entry.stackable != lastShownStackable) {
+                lastShownStackable = entry.stackable;
+                toggle.change(entry.stackable ? "Stackable" : "Not stackable");
+            }
         }
 
         private Label addCentered(Label label, int x, int rowH) {
