@@ -95,6 +95,22 @@ public class BotRegistry {
                 "maintainstock",
                 false
         ));
+        bots.add(new BotDescriptor(
+                H4DMarketScanner.BOT_ID,
+                BotDescriptor.BotType.UTILS,
+                "H4D Market Scanner",
+                "Scans every barter stand in a market NArea and publishes an atomic snapshot to h4d.shop",
+                true,
+                true,
+                H4DMarketScanner.class,
+                "worldexplorer",
+                false,
+                Map.of(
+                        "endpoint", H4DMarketScanner.DEFAULT_ENDPOINT,
+                        "expectedStands", H4DMarketScanner.DEFAULT_STAND_COUNT,
+                        "firstCorner", "north-west"
+                )
+        ));
 
         // RESOURCES (using localization keys: bot.<id>.title and bot.<id>.desc)
         bots.add(new BotDescriptor("choper", BotDescriptor.BotType.RESOURCES, "bot.chopper.title", "bot.chopper.desc", false, true, Chopper.class, "choper", false));
