@@ -93,18 +93,48 @@ matching item with no `Amount` info, so only safe when every match is guaranteed
   client-side heuristic table** (per-name overrides, a `catExceptions` never-stacks set, then
   category lookup in `categorySize`, e.g. `"Berry"`/`"Fruit or Berry"`/`"Seed of Tree or Bush"`/
   `"Mushroom"` → 4), not anything read from the server/protocol — but as of the shared `stack_sizes`
-  DB table (migration 13, `nurgling/db/migration/MigrationManager.java`;
-  `nurgling/db/service/StackSizeService.java`), both methods consult that table *first* whenever a
-  database is configured, and only fall back to the static table when the DB has no opinion on a
-  given name. The DB-backed table starts seeded from the static one, then self-corrects: it's
-  passively updated whenever a client observes a real stack bigger than what's on record
-  (`NInventory.observeStackSizesForLearning()`, gated by `NConfig.Key.stackSizeLearning`), and can be
-  edited directly by a player via the "Stack Size Calibration" window
-  (`nurgling/widgets/db/StackSizeCalibrationWindow.java`, reachable from the Database settings
-  panel). Corrections sync to every client sharing the same database the way `NArea`s do. Treat the
-  *static table alone* as "best known, may need updating if game balance changes, not ground truth"
-  — but with the DB layer configured, staleness for any item someone has actually played with (or
-  manually calibrated) self-heals without a client update.
+  DB table (migration 15 as of the 2026-09-30 upstream sync, previously 13 —
+  `nurgling/db/migration/MigrationManager.java`; `nurgling/db/service/StackSizeService.java`), both
+  methods consult that table *first* whenever a database is configured, and only fall back to the
+  static table when the DB has no opinion on a given name. The DB-backed table starts seeded from
+  the static one, then self-corrects: it's passively updated whenever a client observes a real
+  stack bigger than what's on record (`NInventory.observeStackSizesForLearning()`, gated by
+  `NConfig.Key.stackSizeLearning`), and can be edited directly by a player via the "Stack Size
+  Calibration" window (`nurgling/widgets/db/StackSizeCalibrationWindow.java`, reachable from the
+  Database settings panel). Corrections sync to every client sharing the same database the way
+  `NArea`s do. Treat the *static table alone* as "best known, may need updating if game balance
+  changes, not ground truth" — but with the DB layer configured, staleness for any item someone has
+  actually played with (or manually calibrated) self-heals without a client update.
+  - **Why migration 15, not 13.** This fork's migration 13 (`stack_sizes`) and upstream Nurgling2's
+    own migration 13 (`quest_shares`)/14 (`timers`) were two independently-shipped, version-colliding
+    schema lineages — `MigrationManager.runMigrations()` only runs a migration whose version is
+    strictly above the database's recorded one, so a database already stamped 13 by a released fork
+    client would have skipped upstream's migration 13 forever. Migration 15 is the compatibility
+    bridge, reached from either lineage: it ensures `quest_shares`, `timers`, and `stack_sizes` all
+    exist (whichever subset a given database is missing), then reconciles `stack_sizes`.
+  - **Static-seed reconciliation.** When `stack_sizes` already exists, migration 15 recomputes every
+    live `provenance='seed'` row against the *current* static table and corrects it in place
+    (`reconcileStackSizes()` in `MigrationManager.java`). This exists because a 'seed' row is a
+    generated guess from whatever static table was current when it was written, and
+    `StackSizeService.lookup()` is an unconditional override of the static table — so a stale seed
+    row silently **shadows** a later static-table correction forever, something passive learning
+    cannot fix in the downward direction (`StackSizeDao.upsertIfBigger` only ever raises
+    `max_stack`).
+  - **Manual/learned precedence.** Reconciliation never touches `provenance='manual'` (a player's
+    calibration) or `provenance='learned'` (an actually-observed stack) rows, and never resurrects a
+    tombstoned row (`deleted_at IS NOT NULL` — a player's explicit "forget this, fall back to the
+    static table" action). Only live `'seed'` rows are rewritten.
+  - **Version increment requirement.** Every corrected row's `version` is incremented as part of the
+    same UPDATE. This is load-bearing, not cosmetic: `StackSizeService.runDeltaPoll()` only refetches
+    a row when the database's recorded version exceeds the version it last cached, so a reconciliation
+    UPDATE that didn't bump `version` would correct the row in storage but never propagate to any
+    other client already running against the same database.
+  - **Future invariant.** Migration 15 reconciles the generation of `provenance='seed'` rows that
+    exists *at the time this sync landed*, once. **A future release that changes a built-in static
+    stack fact already represented by a live `provenance='seed'` row must ship its own
+    reconciliation/version-bump mechanism** (a new migration, or equivalent) — otherwise that
+    database row can shadow the newer static fallback indefinitely, with no self-healing path, since
+    a downward max-stack correction is exactly what passive learning cannot do on its own.
 - `nurgling/tasks/GetNotFullStack.java` / `GetNotStack.java` find an existing mergeable stack/lone
   item of a given name by comparing `wmap.size()` against `getFullStackSize(name)`.
 - **Quality does not gate stacking** — `haven/res/ui/tt/stackn/Stack.java:56-72` *averages*
