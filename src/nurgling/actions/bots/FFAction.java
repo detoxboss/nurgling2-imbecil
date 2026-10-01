@@ -71,7 +71,9 @@ public class FFAction implements Action {
                 {
                     NContext context = new NContext(gui);
                     context.workstation = new NContext.Workstation("gfx/terobjs/anvil", null);
-                    context.workstation.selected = Finder.findGob(NContext.findSpec(Specialisation.SpecName.anvil.toString()), new NAlias("anvil")).id;
+                    // selected stays -1: UseWorkStation resolves it lazily via ChunkNav
+                    // global navigation (navigateToAreaIfNeeded), which is required when
+                    // the anvil area is inside a building separate from the forge area.
 
                     new FreeContainers(containers).run(gui);
 
