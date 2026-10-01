@@ -274,9 +274,12 @@ public class NCore extends Widget
                     // Start area and route sync after database is initialized
                     startAreaSync();
                     startPlanningSync();
+                    startTodoSync();
                     startFishSync();
                     startPeerPositionSync();
                     startStackSizeSync();
+                    startQuestShareSync();
+                    startTimerSync();
                 }
             }
         }
@@ -296,6 +299,18 @@ public class NCore extends Widget
         {
             startStackSizeSync();
         }
+        if((Boolean) NConfig.get(NConfig.Key.ndbenable) && databaseManager != null && !todoSyncStarted)
+        {
+            startTodoSync();
+        }
+        if((Boolean) NConfig.get(NConfig.Key.ndbenable) && databaseManager != null && !questShareSyncStarted)
+        {
+            startQuestShareSync();
+        }
+        if((Boolean) NConfig.get(NConfig.Key.ndbenable) && databaseManager != null && !timerSyncStarted)
+        {
+            startTimerSync();
+        }
 
         if(!(Boolean) NConfig.get(NConfig.Key.ndbenable) && databaseManager != null)
         {
@@ -303,9 +318,12 @@ public class NCore extends Widget
                 if (databaseManager != null) {
                     stopAreaSync();
                     stopPlanningSync();
+                    stopTodoSync();
                     stopFishSync();
                     stopPeerPositionSync();
                     stopStackSizeSync();
+                    stopQuestShareSync();
+                    stopTimerSync();
                     databaseManager.shutdown();
                     databaseManager = null;
                 }
@@ -885,10 +903,13 @@ public class NCore extends Widget
 
     private static volatile boolean areaSyncStarted = false;
     private static volatile boolean planningSyncStarted = false;
+    private static volatile boolean todoSyncStarted = false;
     private static volatile boolean fishSyncStarted = false;
     private static volatile boolean routeSyncStarted = false;
     private static volatile boolean peerPositionSyncStarted = false;
     private static volatile boolean stackSizeSyncStarted = false;
+    private static volatile boolean questShareSyncStarted = false;
+    private static volatile boolean timerSyncStarted = false;
 
     /**
      * Start periodic area sync from database
@@ -1093,6 +1114,61 @@ public class NCore extends Widget
         peerPositionSyncStarted = false;
     }
 
+    /**
+     * Start quest sharing with villagers. Same locking as peer positions: every session ticks this
+     * on its own UI thread against one shared service.
+     */
+    private void startQuestShareSync() {
+        if (questShareSyncStarted || databaseManager == null || !databaseManager.isReady()) {
+            return;
+        }
+        synchronized (dbLock) {
+            if (questShareSyncStarted || databaseManager == null || !databaseManager.isReady()) {
+                return;
+            }
+            nurgling.db.service.QuestShareDbService svc = databaseManager.getQuestShareService();
+            if (svc == null) return;   // optional migration was refused; the tracker has no Village tab
+
+            svc.startSync();
+            questShareSyncStarted = true;
+        }
+    }
+
+    /**
+     * Rows are left in place: a character's quests stay true while the database is off, and the
+     * tracker hides the Village tab by itself once the service is gone.
+     */
+    private void stopQuestShareSync() {
+        if (databaseManager != null && databaseManager.getQuestShareService() != null) {
+            databaseManager.getQuestShareService().stopSync();
+        }
+        questShareSyncStarted = false;
+    }
+
+    /** Start sharing timers with villagers. Same locking as quest sharing, for the same reason. */
+    private void startTimerSync() {
+        if (timerSyncStarted || databaseManager == null || !databaseManager.isReady()) {
+            return;
+        }
+        synchronized (dbLock) {
+            if (timerSyncStarted || databaseManager == null || !databaseManager.isReady()) {
+                return;
+            }
+            nurgling.db.service.TimerSyncService svc = databaseManager.getTimerSyncService();
+            if (svc == null) return;   // optional migration not run yet; timers stay on their file
+
+            svc.startSync(15);
+            timerSyncStarted = true;
+        }
+    }
+
+    private void stopTimerSync() {
+        if (databaseManager != null && databaseManager.getTimerSyncService() != null) {
+            databaseManager.getTimerSyncService().stopSync();
+        }
+        timerSyncStarted = false;
+    }
+
     private void stopFishSync() {
         if (databaseManager != null && databaseManager.getFishLocationService() != null) {
             databaseManager.getFishLocationService().stopSync();
@@ -1179,6 +1255,26 @@ public class NCore extends Widget
             databaseManager.getPlanningService().stopSync();
         }
         planningSyncStarted = false;
+    }
+
+    /**
+     * Start the shared To-Do list sync. Each session's TodoStore does the work; the service only
+     * drives it, so one loop serves every session.
+     */
+    private void startTodoSync() {
+        if (todoSyncStarted || databaseManager == null || !databaseManager.isReady()
+            || databaseManager.getTodoService() == null) {
+            return;
+        }
+        databaseManager.getTodoService().startSync(4);
+        todoSyncStarted = true;
+    }
+
+    private void stopTodoSync() {
+        if (databaseManager != null && databaseManager.getTodoService() != null) {
+            databaseManager.getTodoService().stopSync();
+        }
+        todoSyncStarted = false;
     }
 
 }

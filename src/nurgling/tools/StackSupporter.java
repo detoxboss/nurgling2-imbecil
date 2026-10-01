@@ -50,6 +50,13 @@ public class StackSupporter {
         customStackSizes.put("Jotun Clam Meat", 5);
         // Registered under "Stackable Curiosities" (stack size 4), but the server stacks it 5 deep.
         customStackSizes.put("Curious Needle", 5);
+        // Registered under "Stackable Curiosities" (stack size 4), but the server stacks these shallower.
+        customStackSizes.put("Small Brain", 3);
+        customStackSizes.put("Brain", 2);
+        customStackSizes.put("Aurochs Hair", 3);
+        // gfx/invobjs/peapod. In no VSpec category.
+        customStackSizes.put("Peapod", 3);
+        customStackSizes.put("Adder's Lying Tongue", 3);
         // gfx/invobjs/branch. Sits in "Wicker" for what it crafts into, but the server
         // stacks it 5 deep, not 3 like the rest of that category.
         customStackSizes.put("Branch", 5);
@@ -80,7 +87,14 @@ public class StackSupporter {
         );
 
         putAll(5,
-                "Entrails", "Feather", "Fine Feather", " Meat",
+                /* "Meat" (the weird-meat category: Ant Meat, Cave Louse Meat, Chasm Conch Meat),
+                 * not " Meat". PR #11 renamed VSpec's own category key from " Meat" to "Meat" but
+                 * left this one with its leading space, and categorySize is an exact Map lookup
+                 * (VSpec.getCategory compares with String.equals, no trimming), so the entry had
+                 * been dead ever since: every weird meat reported unstackable/1. Corrected here
+                 * rather than deferred because MigrationManager's migration 15 uses this very table
+                 * as the seed/reconciliation source of truth. */
+                "Entrails", "Feather", "Fine Feather", "Meat",
                 "Raw Meat", "Bollock", "Filet of ", "Raw Chevon",
                 "Raw Beef", "Raw Mutton", "Raw Pork", "Raw Horsemeat",
                 "Raw ", "Crab Meat", "Poultry", "Soil", "Mulch", "Nuts"
@@ -106,7 +120,6 @@ public class StackSupporter {
         catExceptions.add("Reindeer Antlers");
         catExceptions.add("Roe Deer Antlers");
         catExceptions.add("Wolf's Claw");
-        catExceptions.add("Lynx Claws");
         catExceptions.add("Silkworm");
         catExceptions.add("Female Silkmoth");
         catExceptions.add("Male Silkmoth");
@@ -144,8 +157,12 @@ public class StackSupporter {
         // Context/substring vetoes: about *where* the item sits or a name *fragment*, not a fact
         // about the exact item name, so these can never be represented as a per-name DB row (see
         // isStackableByName below). Always run first, unconditionally.
+        //
+        // "Lynx Claws" used to be vetoed here and listed in catExceptions. Upstream removed both in
+        // the 2026-09-30 sync range (it does stack); the catExceptions removal auto-merged, this one
+        // was the conflict. It never belonged in this block anyway - it is an exact-name fact, not a
+        // context or substring one, so it is now simply a plain FineBones category item.
         if (NParser.checkName(win.cap, unstackableContainers)
-            || NParser.checkName(name, new NAlias("Lynx Claws"))
             || name.equals("Silkworm")
             || name.equals("Tick")
             || name.contains("Dried Filet")) {
@@ -160,8 +177,11 @@ public class StackSupporter {
 
     /**
      * Exact-name stackability — no window/context dependency, so it also serves as the seed data
-     * generator for the shared DB-backed override table (migration 13,
+     * generator for the shared DB-backed override table (migration 15,
      * nurgling/db/migration/MigrationManager.java) and as {@link #getFullStackSize}'s fallback.
+     *
+     * <p>Static-table only: it never consults {@link #stackSizeInfo}, which is what makes it safe
+     * to call from inside a migration.
      *
      * <p>Checks the exception set before the custom-size table. {@code isStackable} and {@code
      * getFullStackSize} used to check these in opposite orders (custom size first in the latter) —
@@ -195,7 +215,24 @@ public class StackSupporter {
         if (info != null) {
             return info.maxStack;
         }
+        return getFullStackSizeStatic(name);
+    }
 
+    /**
+     * {@link #getFullStackSize} with the shared DB-backed override deliberately bypassed — the
+     * built-in table's own answer and nothing else.
+     *
+     * <p>Exists so migration-time seeding and reconciliation
+     * (nurgling/db/migration/MigrationManager.java, migration 15) can read the static table
+     * explicitly instead of calling the DB-aware method and relying on
+     * {@code StackSizeService} not being constructed yet. That ordering does hold today —
+     * {@code DatabaseManager} runs migrations before it builds any service, so
+     * {@code getStackSizeService()} is still null while a migration runs — but depending on it
+     * silently would make seeding wrong the moment that order changed.
+     *
+     * <p>Pure function over the static tables: it never touches the database and cannot throw.
+     */
+    public static int getFullStackSizeStatic(String name) {
         if (catExceptions.contains(name)) {
             return 1;
         }
@@ -216,6 +253,36 @@ public class StackSupporter {
         return 1;
     }
 
+    /** One item's static-table facts — see {@link #staticSeedSnapshot}. */
+    public static final class StaticStackFact {
+        public final int maxStack;
+        public final boolean stackable;
+
+        StaticStackFact(int maxStack, boolean stackable) {
+            this.maxStack = maxStack;
+            this.stackable = stackable;
+        }
+    }
+
+    /**
+     * The whole static table as a name -&gt; {@link StaticStackFact} map: every name
+     * {@link #seedCandidateNames()} knows about, with the answer {@link #isStackableByName} and
+     * {@link #getFullStackSizeStatic} would give for it.
+     *
+     * <p>This is the explicit static-only view migration 15 seeds and reconciles {@code
+     * stack_sizes} from. Best-effort by inheritance from {@code seedCandidateNames()}: a category
+     * VSpec cannot resolve is skipped rather than failing, so callers must treat an absent name as
+     * "not known here", never as "delete it".
+     */
+    public static java.util.Map<String, StaticStackFact> staticSeedSnapshot() {
+        java.util.Map<String, StaticStackFact> out = new java.util.LinkedHashMap<>();
+        for (String name : seedCandidateNames()) {
+            boolean stackable = isStackableByName(name);
+            out.put(name, new StaticStackFact(stackable ? getFullStackSizeStatic(name) : 1, stackable));
+        }
+        return out;
+    }
+
     /**
      * The shared DB-backed table's answer for this name, or null if no service is available (DB
      * disabled/unavailable, or the optional migration that creates {@code stack_sizes} was refused)
@@ -233,9 +300,10 @@ public class StackSupporter {
 
     /**
      * Every exact item name this table has an opinion about, stackable or not. Used only to seed
-     * the shared DB-backed override table (migration 13,
+     * and reconcile the shared DB-backed override table (migration 15,
      * nurgling/db/migration/MigrationManager.java) with a starting point equivalent to this static
-     * table's current answers — nothing else should need this.
+     * table's current answers — nothing else should need this directly; prefer
+     * {@link #staticSeedSnapshot()}.
      */
     public static java.util.Set<String> seedCandidateNames() {
         java.util.Set<String> names = new java.util.HashSet<>();

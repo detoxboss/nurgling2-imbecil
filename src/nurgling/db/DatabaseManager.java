@@ -27,10 +27,13 @@ public class DatabaseManager {
     private StorageItemService storageItemService;
     private AreaService areaService;
     private nurgling.db.service.PlanningService planningService;
+    private nurgling.db.service.TodoService todoService;
     private KinSecretService kinSecretService;
     private nurgling.db.service.FishLocationDbService fishLocationService;
     private nurgling.db.service.PeerPositionDbService peerPositionService;
     private nurgling.db.service.StackSizeService stackSizeService;
+    private nurgling.db.service.QuestShareDbService questShareService;
+    private nurgling.db.service.TimerSyncService timerSyncService;
     private nurgling.db.service.FishLocationSeeder fishLocationSeeder;
     private nurgling.db.service.MapDbService mapDbService;
     private nurgling.db.service.VillagerService villagerService;
@@ -387,6 +390,8 @@ public class DatabaseManager {
         this.storageItemService = new StorageItemService(this);
         this.areaService = new AreaService(this);
         this.planningService = new nurgling.db.service.PlanningService(this);
+        /* Uses the routes table, which every schema version has; see TodoDao. */
+        this.todoService = new nurgling.db.service.TodoService(this);
         this.kinSecretService =
             skippedMigrations.containsKey(nurgling.db.migration.MigrationManager.MIGRATION_KIN_SECRETS)
                 ? null : new KinSecretService(this);
@@ -416,6 +421,23 @@ public class DatabaseManager {
         if (!peerPosOk) {
             System.err.println("[DatabaseManager] peer_positions unavailable; "
                 + "live player positions will not be shown");
+        }
+
+        /* Checked like peer_positions. Without it the quest tracker simply has no Village tab. */
+        boolean questShareOk = tableUsable("quest_shares");
+        this.questShareService = questShareOk ? new nurgling.db.service.QuestShareDbService(this) : null;
+        if (!questShareOk) {
+            System.err.println("[DatabaseManager] quest_shares unavailable; "
+                + "villagers' quests will not be shared");
+        }
+
+        /* Checked like the others. Without it timers stay on their JSON file: everything works except
+         * sharing them with villagers. */
+        boolean timersOk = tableUsable("timers");
+        this.timerSyncService = timersOk ? new nurgling.db.service.TimerSyncService(this) : null;
+        if (!timersOk) {
+            System.err.println("[DatabaseManager] timers unavailable; "
+                + "timers stay on their JSON file and are not shared");
         }
 
         boolean mapOk = tableUsable("map_grids")
@@ -542,8 +564,14 @@ public class DatabaseManager {
                 feature = "Map sharing";
             } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_PEER_POSITIONS) {
                 feature = "Player position sharing";
+            } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_QUEST_SHARES) {
+                feature = "Quest sharing";
+            } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_TIMERS) {
+                feature = "Timer sharing";
             } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_STACK_SIZES) {
-                feature = "Stack size calibration sync";
+                /* Migration 15 is also the fork/upstream schema-lineage bridge, so a skip here can
+                 * mean quest_shares or timers is missing too, not only stack_sizes. */
+                feature = "Stack size calibration sync (schema compatibility bridge)";
             } else {
                 feature = "Schema update " + e.getKey();
             }
@@ -796,6 +824,13 @@ public class DatabaseManager {
     }
 
     /**
+     * Get the shared To-Do list service.
+     */
+    public nurgling.db.service.TodoService getTodoService() {
+        return todoService;
+    }
+
+    /**
      * Get kin secret service (shared hearth secrets).
      */
     public KinSecretService getKinSecretService() {
@@ -808,6 +843,16 @@ public class DatabaseManager {
      */
     public nurgling.db.service.PeerPositionDbService getPeerPositionService() {
         return peerPositionService;
+    }
+
+    /** Null when quest_shares is missing or unreadable; the tracker then shows no Village tab. */
+    public nurgling.db.service.QuestShareDbService getQuestShareService() {
+        return questShareService;
+    }
+
+    /** Null when the timers table is missing or unreadable; timers then stay on their file. */
+    public nurgling.db.service.TimerSyncService getTimerSyncService() {
+        return timerSyncService;
     }
 
     public nurgling.db.service.FishLocationDbService getFishLocationService() {

@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  */
 public class SessionManager {
     /** Singleton instance */
-    private static SessionManager instance;
+    private static volatile SessionManager instance;
 
     /** All sessions, keyed by session ID */
     private final Map<String, SessionContext> sessions = new LinkedHashMap<>();
@@ -63,14 +63,23 @@ public class SessionManager {
     /** Lock for session operations */
     private final Object sessionsLock = new Object();
 
+    /** One timer store per world, shared by every session logged into it; see {@link nurgling.timers.TimerStore}. */
+    private final ConcurrentHashMap<String, nurgling.timers.TimerStore> timerStores = new ConcurrentHashMap<>();
+
     /**
      * Get the singleton SessionManager instance.
      */
-    public static synchronized SessionManager getInstance() {
-        if (instance == null) {
-            instance = new SessionManager();
+    public static SessionManager getInstance() {
+        /* Double-checked: called per gob per frame from parallel tick
+         * threads, where a synchronized getter parked them 10+ ms. */
+        SessionManager ret = instance;
+        if (ret != null)
+            return ret;
+        synchronized (SessionManager.class) {
+            if (instance == null)
+                instance = new SessionManager();
+            return instance;
         }
-        return instance;
     }
 
     /**
@@ -525,6 +534,18 @@ public class SessionManager {
     public NUI getActiveUI() {
         SessionContext active = activeSession;
         return (active != null) ? active.ui : null;
+    }
+
+    /** The timers of a world. Every session on that world gets the same instance. */
+    public nurgling.timers.TimerStore timerStore(String genus) {
+        String key = (genus == null || genus.isEmpty()) ? "" : genus;
+        return timerStores.computeIfAbsent(key, g -> new nurgling.timers.TimerStore(g,
+            nurgling.profiles.ConfigFactory.getConfig(g).getResourceTimersPath()));
+    }
+
+    /** Every world that has had a timer store opened this run; the sync service walks these. */
+    public Collection<nurgling.timers.TimerStore> timerStores() {
+        return timerStores.values();
     }
 
     /**

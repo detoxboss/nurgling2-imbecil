@@ -327,6 +327,45 @@ public class OptWnd extends Window {
 		    grp.check(prefs.syncmode.val.ordinal());
 		    done[0] = true;
 		}
+		prev = add(new Label(L10n.get("opt.video.renderer")), prev.pos("bl").adds(0, 5).x(0));
+		{
+		    boolean[] done = {false};
+		    RadioGroup grp = new RadioGroup(this) {
+			    public void changed(int btn, String lbl) {
+				if(!done[0])
+				    return;
+				haven.iosys.tk.RendererPref.set((btn == 1) ? haven.iosys.tk.RendererPref.VULKAN : haven.iosys.tk.RendererPref.GL);
+			    }
+			};
+		    prev = grp.add(L10n.get("opt.video.renderer_gl"), prev.pos("bl").adds(5, 2));
+		    prev = grp.add(L10n.get("opt.video.renderer_vk"), prev.pos("bl").adds(0, 2));
+		    grp.check(haven.iosys.tk.RendererPref.VULKAN.equals(haven.iosys.tk.RendererPref.get()) ? 1 : 0);
+		    done[0] = true;
+		    prev = add(new Label("") {
+			    private boolean set = false;
+
+			    /* Not in added(): the panel is built before it is
+			     * attached to the UI, so ui is still null there. */
+			    public void tick(double dt) {
+				super.tick(dt);
+				if(set || (ui == null))
+				    return;
+				set = true;
+				Environment env = ui.getenv();
+				if(env == null)
+				    return;
+				Environment.Caps caps = env.caps();
+				String api = caps.driver();
+				int sp = api.indexOf(' ');
+				if(sp > 0)
+				    api = api.substring(0, sp);
+				settext(L10n.get("opt.video.renderer_active", api + ", " + caps.device()));
+			    }
+			}, prev.pos("bl").adds(0, 2));
+		    String notice = haven.iosys.tk.RendererPref.notice();
+		    if(notice != null)
+			prev = add(new Label(notice), prev.pos("bl").adds(0, 2));
+		}
 		/* XXXRENDER
 		composer.add(new CheckBox("Antialiasing") {
 			{a = cf.fsaa.val;}
@@ -823,6 +862,8 @@ public class OptWnd extends Window {
 		y = addbtn(cont, L10n.get("opt.keybind.quick_action_alt"), NMapView.kb_quickignaction, y);
 		y = addbtn(cont, L10n.get("opt.keybind.nature"), NMapView.kb_togglenature, y);
 		y = addbtn(cont, L10n.get("opt.keybind.night"), NMiniMapWnd.kb_night, y);
+		y = addbtn(cont, L10n.get("opt.keybind.timers"), NMiniMapWnd.kb_resourcetimers, y);
+		y = addbtn(cont, L10n.get("opt.keybind.timers_quickadd"), nurgling.widgets.timers.TimersPanel.kb_quickadd, y);
 		y = addbtn(cont, L10n.get("opt.keybind.sort_inventory"), GameUI.kb_sort, y);
 		y = addbtn(cont, L10n.get("opt.keybind.interrupt_bots"), nurgling.widgets.BotsInterruptWidget.kb_interrupt_bots, y);
 		y = cont.adda(new Label("Session Hotkeys"), cont.sz.x / 2, y + UI.scale(10), 0.5, 0.0).pos("bl").adds(0, 5).y;

@@ -1988,6 +1988,7 @@ public class VSpec {
         ArrayList<JSONObject> finebones = new ArrayList<>();
         finebones.addAll(goatHorn);
         finebones.add(new JSONObject("{\"static\":\"gfx/invobjs/beartooth\",\"name\":\"Bear Tooth\"}"));
+        finebones.add(new JSONObject("{\"static\":\"gfx/invobjs/polarbeartooth\",\"name\":\"Ice Bear Tooth\"}"));
         finebones.add(new JSONObject("{\"static\":\"gfx/invobjs/boartusk\",\"name\":\"Boar Tusk\"}"));
         finebones.add(new JSONObject("{\"static\":\"gfx/invobjs/bogturtleshell\",\"name\":\"Bog Turtle Shell\"}"));
         finebones.add(new JSONObject("{\"static\":\"gfx/invobjs/borewormbeak\",\"name\":\"Boreworm Beak\"}"));
@@ -2272,6 +2273,7 @@ public class VSpec {
         raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-badger\"], \"name\": \"Raw Badger\"}"));
         raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-bat\"], \"name\": \"Raw Bat\"}"));
         raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-bear\"], \"name\": \"Raw Bear\"}"));
+        raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-polarbear\"], \"name\": \"Raw Ice Bear\"}"));
         raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-beaver\"], \"name\": \"Raw Beaver\"}"));
         raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-bogturtle\"], \"name\": \"Raw Bog Turtle\"}"));
         raw.add(new JSONObject("{\"layer\": [\"gfx/invobjs/meat-raw\", \"gfx/invobjs/meat-spermwhale\"], \"name\": \"Raw Cachalot\"}"));
@@ -2549,6 +2551,7 @@ public class VSpec {
         hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/greysealhide-blood\",\"name\":\"Fresh Grey Seal Hide\"}"));
         hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/hedgehoghide-blood\",\"name\":\"Fresh Hedgehog Skin\"}"));
         hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/horsehide-blood\",\"name\":\"Fresh Horse Hide\"}"));
+        hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/polarbearhide-blood\",\"name\":\"Fresh Ice Bear Hide\"}"));
         hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/lynxhide-blood\",\"name\":\"Fresh Lynx Hide\"}"));
         hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/mammothhide-blood\",\"name\":\"Fresh Mammoth Hide\"}"));
         hidesFresh.add(new JSONObject("{\"static\":\"gfx/invobjs/molehide-blood\",\"name\":\"Fresh Mole Hide\"}"));
@@ -2593,6 +2596,7 @@ public class VSpec {
         preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/greysealhide\",\"name\":\"Grey Seal Hide\"}"));
         preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/hedgehoghide\",\"name\":\"Hedgehog Skin\"}"));
         preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/horsehide\",\"name\":\"Horse Hide\"}"));
+        preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/polarbearhide\",\"name\":\"Ice Bear Hide\"}"));
         preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/lynxhide\",\"name\":\"Lynx Hide\"}"));
         preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/mammothhide\",\"name\":\"Mammoth Hide\"}"));
         preparedAnimalHides.add(new JSONObject("{\"static\":\"gfx/invobjs/molehide\",\"name\":\"Mole Hide\"}"));
@@ -3240,15 +3244,21 @@ public class VSpec {
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/cattailhead\",\"name\":\"Cattail Head\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/yulecracker\",\"name\":\"Yule Cracker\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/brain-tiny\",\"name\":\"Tiny Brain\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/brain-small\",\"name\":\"Small Brain\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/brain\",\"name\":\"Brain\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/petrifiedshell\",\"name\":\"Petrified Seashell\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/flotsam\",\"name\":\"Peculiar Flotsam\"}"));
         StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/curiousneedle\",\"name\":\"Curious Needle\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/whirlingsnowflake\",\"name\":\"Whirling Snowflake\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/precioussnowflake\",\"name\":\"Precious Snowflake\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/rabbitfrost\",\"name\":\"Rabbit Frost\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/aurochshair\",\"name\":\"Aurochs Hair\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/frostflower\",\"name\":\"Frost Flower\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/cavelantern\",\"name\":\"Cave Lantern\"}"));
+        StackableCurios.add(new JSONObject("{\"static\":\"gfx/invobjs/addertongue\",\"name\":\"Adder's Lying Tongue\"}"));
         categories.put("Stackable Curiosities", StackableCurios);
 
         ArrayList<JSONObject> NoneStackableCurio = new ArrayList<>();
-        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/rabbitfrost\",\"name\":\"Rabbit Frost\"}"));
-        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/whirlingsnowflake\",\"name\":\"Whirling Snowflake\"}"));
-        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/precioussnowflake\",\"name\":\"Precious Snowflake\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/ghostapple\",\"name\":\"Ghost Apple\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/sleighbell\",\"name\":\"Sleighbell\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/easteregg0\",\"name\":\"Easter Egg\"}"));
@@ -3259,7 +3269,6 @@ public class VSpec {
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/plushbat\",\"name\":\"Plush Bat\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/itsybitsyhome\",\"name\":\"Itsy Bitsy Weaver\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/horribleknot\",\"name\":\"Horrible Knot\"}"));
-        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/aurochshair\",\"name\":\"Aurochs Hair\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/commonstarfish\",\"name\":\"Common Starfish\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/cruelsplinter\",\"name\":\"Cruel Splinter\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/goldeneagletalon\",\"name\":\"Golden Eagle Talon\"}"));
@@ -3517,11 +3526,64 @@ public class VSpec {
      */
     public static String getSeedForTree(String treePath) {
         ArrayList<String> products = object.get(treePath);
-        if (products != null && !products.isEmpty()) {
-            // Return the last item in the list (typically the seed)
-            return products.get(products.size() - 1);
+        if (products == null || products.isEmpty()) {
+            return null;
         }
-        return null;
+
+        /* Positional guesses do not work here, and both of the ones this method has carried were
+         * wrong for a long tail of species. BlueprintTreePlanter uses the answer as the *exact*
+         * item name to match in inventory and drop into a Treeplanter's Pot (see
+         * getSeedFromLogistics/putSeedInPot), so a wrong answer is a hard bot failure, not a
+         * cosmetic one.
+         *
+         *   products.get(size - 1) - the original - returned the bough for Beech and Poplar, the
+         *   leaves for Teabush, and the "Yesteryear's ..." variant for all ~21 seasonal-pair
+         *   species (Apple, Cherry, Pear, Plum, Fig, ...).
+         *
+         *   products.get(0) - upstream's correction in the 2026-09-30 sync range - fixes every
+         *   Yesteryear case and Beech/Poplar/Teabush, but is wrong for the 14 species whose list
+         *   happens to start with a bough or leaf: Alder (Alder Bough), Conker Tree (Conker Leaf),
+         *   Elm, Fig Tree (Fig Leaf), Fir, Gray Alder, Laurel (Laurel Leaves), Linden, Maple
+         *   (Maple Leaf), Mulberry (Mulberry Leaf), Olive (Olive Branch), Spruce, Sweetgum and Yew.
+         *
+         * So select semantically instead: the plantable product is the one that is not a
+         * bough/branch, not a leaf product, not bark, and not a seasonal "Yesteryear's" counterpart
+         * of another product in the same list. Verified against every populated entry in `object`
+         * (164 of them): exactly one survivor each, no ambiguity and no empty result. The
+         * bough/leaf predicates deliberately mirror nurgling.tools.LpExplorer's
+         * isBoughProduct/isLeafProduct, including Olive's oddly-named "Olive Branch". */
+        String fallback = null;
+        for (String product : products) {
+            if (product.startsWith(HarvestState.YESTERYEAR_PREFIX)) {
+                continue;
+            }
+            if (fallback == null) {
+                fallback = product;
+            }
+            if (!isNonSeedTreeProduct(product)) {
+                return product;
+            }
+        }
+        /* Nothing survived the filter - a species whose only listed products are boughs/leaves, or
+         * a future entry shaped differently. Prefer the first non-seasonal product over nothing, so
+         * behaviour degrades to upstream's get(0) rather than to a hard "No seed found" error. */
+        return (fallback != null) ? fallback : products.get(0);
+    }
+
+    /**
+     * True for a tree/bush product that is harvestable but never the plantable seed: a bough or
+     * branch, a leaf product, or bark. Used only by {@link #getSeedForTree}.
+     *
+     * <p>{@code " Bark"} is matched as a suffix, not a substring, deliberately: "Crampbark Berries"
+     * contains "bark" and is the Crampbark bush's actual seed product.
+     */
+    private static boolean isNonSeedTreeProduct(String product) {
+        return product.contains("Bough")
+            // Olive's bough-equivalent is the only one not named "<Species> Bough".
+            || product.equals("Olive Branch")
+            || product.contains("Leaf")
+            || product.contains("Leaves")
+            || product.endsWith(" Bark");
     }
 
     private static final class TreeProductIndex {

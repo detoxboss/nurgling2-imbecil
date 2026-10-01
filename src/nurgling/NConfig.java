@@ -86,6 +86,7 @@ public class NConfig
         discordNotification,
         discordWebhookUrl,
         showGrid,
+        graphics,
         showView,
         disableWinAnim,
         disableMenugridKeys,
@@ -124,7 +125,7 @@ public class NConfig
         smokeprop,
         worldexplorerprop,
         questNotified, lpassistent, fishingsettings,
-        serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, shareHearthSecret, autoHearthSecret, sharePosition, showPeerPositions, dbGrantRole, dbStatsOverlay, mapShareMarkers, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
+        serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, shareHearthSecret, autoHearthSecret, sharePosition, showPeerPositions, todoNotify, dbGrantRole, dbStatsOverlay, mapShareMarkers, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
         temsmarktime, exploredAreaEnable, chunkNavOverlay, minimapTogglesShown, player_box, player_fov, temsmarkdist, tempmark, tempmarkIgnoreDist, gridbox, gridWallColor, useGlobalPf, useHFinGlobalPF, boxFillColor, boxEdgeColor, boxLineWidth, ropeAfterFeeding, ropeAfterTaiming, eatingConf, deersprop,dropConf, printpfmap, showPlayerCoords, fonts,
         areaRankPresets,  // Map of areaId -> Map of animalType -> presetName
         shortCupboards,
@@ -132,6 +133,7 @@ public class NConfig
         shortWalls,
         hideStockpileScale,
         decalsOnTop,
+        lockDecals,
         fillCompostWithSwill,
         ignoreStrawInFarmers,
         persistentBarrelLabels,
@@ -146,6 +148,9 @@ public class NConfig
         skipButcherInDuck,
         skipPluckingDrakesInDuck,
         studyDeskLayout,
+        studyReportGhosts,   // per-character study report slot history, drawn as ghosts (NStudyInventory)
+        showStudyReportGhosts,
+        curioFinishedSound,
         milestones,          // MilestoneRegistry's persisted gobHash -> {location, destinations[]} map
         milestoneTracking,   // Whether MilestoneTracker passively records signpost/milestone travel
         waypointRetryOnStuck,
@@ -248,6 +253,15 @@ public class NConfig
         starvationVignetteCriticalThreshold,
         starvationSoundThreshold,
         starvationSoundInterval,
+        // Timer notifications
+        timerSoundResource,
+        timerSoundPin,
+        timerSoundReminder,
+        timerFlashTaskbar,
+        timerCombatQuiet,
+        timerMyCharacters,
+        taskHeadsUpMinutes,
+        taskNotifyDone,
         // Auto-logout settings
         autoLogoutEnabled,
         autoLogoutThreshold,
@@ -259,6 +273,8 @@ public class NConfig
         // Bot path display
         showBotPathOnMinimap,
         showBotPathOnGround,
+        // Route Walker: the route picked last, so the window reopens on it
+        routeWalkerLast,
         // Movement waypoints (alt+click) drawn in the 3D world
         showWaypointsInWorld,
         pingSound,
@@ -272,9 +288,12 @@ public class NConfig
         // Map tools panel
         showTreeIcons,
         showFishIcons,
+        clusterMinedMarks,
         prospectMarks,
         // Localization
-        language
+        language,
+        // Calculators window: cheese rack calculator rows and stage-hour overrides (JSON string)
+        cheeseRackCalculator
     }
 
     public enum BBDisplayMode
@@ -297,7 +316,7 @@ public class NConfig
             this.profileManager = new ProfileManager(genus);
             this.profileManager.ensureProfileExists();
         }
-        conf = new HashMap<>();
+        conf = new ConfMap();
 
         conf.put(Key.vilol, false);
         conf.put(Key.claimol, false);
@@ -339,10 +358,12 @@ public class NConfig
         conf.put(Key.invert_ver, false);
         conf.put(Key.show_drag_menu, true);
         conf.put(Key.discordWebhookUrl, "");
+        conf.put(Key.cheeseRackCalculator, "");
         conf.put(Key.showGrid, false);
         conf.put(Key.showView, false);
         conf.put(Key.showTreeIcons, true);
         conf.put(Key.showFishIcons, true);
+        conf.put(Key.clusterMinedMarks, true);
         conf.put(Key.prospectMarks, new ProspectMarkSettings());
         conf.put(Key.disableWinAnim, true);
         conf.put(Key.disableMenugridKeys, false);
@@ -384,6 +405,7 @@ public class NConfig
          * are separately switchable in Database settings. */
         conf.put(Key.sharePosition, true);
         conf.put(Key.showPeerPositions, true);
+        conf.put(Key.todoNotify, true);
         conf.put(Key.autoHearthSecret, true);
         conf.put(Key.dbGrantRole, "PUBLIC");
         conf.put(Key.dbStatsOverlay, false);
@@ -419,6 +441,7 @@ public class NConfig
         conf.put(Key.shortWalls, false);
         conf.put(Key.hideStockpileScale, 50);  // Hide stockpile display size percentage (25-100)
         conf.put(Key.decalsOnTop, false);
+        conf.put(Key.lockDecals, false);
         conf.put(Key.fillCompostWithSwill, false);
         conf.put(Key.ignoreStrawInFarmers, false);
         conf.put(Key.skipButcherInKFC, false);
@@ -436,6 +459,9 @@ public class NConfig
         conf.put(Key.showTerrainName, false);
         conf.put(Key.validateAllCropsBeforeHarvest, false);
         conf.put(Key.studyDeskLayout, "");
+        conf.put(Key.studyReportGhosts, "");
+        conf.put(Key.showStudyReportGhosts, true);
+        conf.put(Key.curioFinishedSound, true);
         conf.put(Key.milestones, "");
         conf.put(Key.milestoneTracking, true);
         conf.put(Key.waypointRetryOnStuck, true);
@@ -530,6 +556,7 @@ public class NConfig
         arearadprop.add(new NAreaRad("gfx/kritter/woodscorpion/woodscorpion", 30));
         arearadprop.add(new NAreaRad("gfx/kritter/rat/caverat", 100));
         arearadprop.add(new NAreaRad("gfx/kritter/ooze/greenooze", 100));
+        arearadprop.add(new NAreaRad("gfx/kritter/caveangler/caveangler", 100));
         conf.put(Key.animalrad, arearadprop);
 
         // Movement speed setting (0=Crawl, 1=Walk, 2=Run, 3=Sprint)
@@ -680,6 +707,16 @@ public class NConfig
         conf.put(Key.starvationSoundThreshold, 2000);  // Sound alarm threshold (0 to disable)
         conf.put(Key.starvationSoundInterval, 10000);  // Sound interval in milliseconds
 
+        // Timer notifications: alarm resource per kind ("none" = silent)
+        conf.put(Key.timerSoundResource, "alarm/question");
+        conf.put(Key.timerSoundPin, "alarm/quest");
+        conf.put(Key.timerSoundReminder, "alarm/quest");
+        conf.put(Key.timerFlashTaskbar, true);   // flash the taskbar button when the game is in the background
+        conf.put(Key.timerCombatQuiet, true);    // hold banners and sound until a fight ends
+        conf.put(Key.timerMyCharacters, "");     // alts that count as "me", comma separated
+        conf.put(Key.taskHeadsUpMinutes, 60);    // heads-up banner this long before a task is due; 0 = off
+        conf.put(Key.taskNotifyDone, true);      // banner when someone finishes a task I created
+
         // Auto-logout settings
         conf.put(Key.autoLogoutEnabled, false);
         conf.put(Key.autoLogoutThreshold, 0);    // Energy threshold (0 = disabled)
@@ -693,6 +730,7 @@ public class NConfig
         // Bot path display
         conf.put(Key.showBotPathOnMinimap, false);
         conf.put(Key.showBotPathOnGround, false);
+        conf.put(Key.routeWalkerLast, "");
         conf.put(Key.showWaypointsInWorld, true);
         conf.put(Key.pingSound, true);
 
@@ -703,7 +741,45 @@ public class NConfig
     }
 
 
-    HashMap<Key, Object> conf = new HashMap<>();
+    ConfMap conf = new ConfMap();
+
+    /* Config values are read per gob per frame from parallel tick threads,
+     * so reads must not share a lock (a synchronized HashMap parked frame
+     * threads for 10+ ms). A ConcurrentHashMap gives lock-free reads; it
+     * can't hold nulls, so null values are stored as a sentinel. Writers
+     * still synchronize on the map for their compound updates. */
+    static final class ConfMap extends AbstractMap<Key, Object> {
+        private static final Object NULL = new Object();
+        private final java.util.concurrent.ConcurrentHashMap<Key, Object> m = new java.util.concurrent.ConcurrentHashMap<>();
+
+        private static Object wrap(Object v) {return (v == null) ? NULL : v;}
+        private static Object unwrap(Object v) {return (v == NULL) ? null : v;}
+
+        @Override public Object get(Object key) {return (key == null) ? null : unwrap(m.get(key));}
+        @Override public boolean containsKey(Object key) {return (key != null) && m.containsKey(key);}
+        @Override public Object put(Key key, Object val) {return unwrap(m.put(key, wrap(val)));}
+        @Override public Object remove(Object key) {return (key == null) ? null : unwrap(m.remove(key));}
+        @Override public int size() {return m.size();}
+        @Override public void clear() {m.clear();}
+
+        @Override public Set<Entry<Key, Object>> entrySet() {
+            return new AbstractSet<Entry<Key, Object>>() {
+                public int size() {return m.size();}
+                public Iterator<Entry<Key, Object>> iterator() {
+                    Iterator<Entry<Key, Object>> it = m.entrySet().iterator();
+                    return new Iterator<Entry<Key, Object>>() {
+                        public boolean hasNext() {return it.hasNext();}
+                        public Entry<Key, Object> next() {
+                            Entry<Key, Object> e = it.next();
+                            return new SimpleEntry<>(e.getKey(), unwrap(e.getValue()));
+                        }
+                        public void remove() {it.remove();}
+                    };
+                }
+            };
+        }
+    }
+
     private boolean isUpd = false;
     private boolean isRoutesUpd = false;
     private boolean isScenariosUpd = false;
@@ -748,9 +824,7 @@ public class NConfig
         NConfig cfg = resolveConfig();
         if (cfg == null)
             return null;
-        synchronized (cfg.conf) {
-            return cfg.conf.get(key);
-        }
+        return cfg.conf.get(key);
     }
 
     /** Coerces a config value that may be a Map or a raw JSON String into Map&lt;String,Object&gt;; empty map if neither. */
@@ -774,9 +848,7 @@ public class NConfig
     public static Object getGlobal(Key key) {
         NConfig cur = current;
         if (cur == null) return null;
-        synchronized (cur.conf) {
-            return cur.conf.get(key);
-        }
+        return cur.conf.get(key);
     }
 
     public static void set(Key key, Object val)
@@ -1382,6 +1454,7 @@ public class NConfig
                 {"gfx/kritter/woodscorpion/woodscorpion", "30"},
                 {"gfx/kritter/rat/caverat", "100"},
                 {"gfx/kritter/ooze/greenooze", "100"},
+                {"gfx/kritter/caveangler/caveangler", "100"},
             };
             for (String[] entry : newAnimals) {
                 if (!existingNames.contains(entry[0])) {

@@ -119,12 +119,31 @@ steering logic in the same file (see that cycle's history entry), confirming the
 independent and both needed.
 
 **Minimum hook that must survive:** explicit session resolution in `NMiniMap`'s per-tick logic must
-survive any upstream rewrite of the surrounding rendering/steering code in this file.
+survive any upstream rewrite of the surrounding rendering/steering code in this file. As of the
+2026-09-30 sync, this now also covers two draw/interaction methods upstream introduced or left behind
+in this same file:
+
+- `drawTimers(GOut g)` — upstream's shared-timer rendering (replacing the fork's deleted
+  `drawResourceTimers`), which also populates `drawnTimers` for hover/click hit-testing. Arrived
+  resolving `NGameUI gui = NUtils.getGameUI()` (ambient); changed during the merge to
+  `(this.ui != null) ? this.ui.gui : null`, matching `tick()`'s existing pattern.
+- `labeledMarkClusters()` — pre-existing fork code backing both drawing and hover/right-click
+  hit-testing of water/soil/prospect quality marks. Was still resolving ambiently; corrected in the
+  same merge pass once the `drawTimers` case made the general risk visible again.
+
+Both read per-session state (`gui.timerStore`, `gui.labeledMarkService`) and both drive interaction,
+not just drawing — an ambient lookup here doesn't just mis-render a backgrounded tab, it lets that
+tab's clicks/hovers act on a *different* session's timers or marks.
 
 **Verify:** two sessions, each viewing a different part of the map; confirm each minimap tracks its own
-session's player position, not the other's.
+session's player position, not the other's. As of 2026-09-30: also open two sessions with different
+timer sets and different labeled marks, switch the foreground tab, and confirm each minimap keeps
+drawing and hit-testing only its own session's timers and marks, never the other session's.
 
-**Superseded when:** same condition as `NGameUI` teardown, above.
+**Superseded when:** same condition as `NGameUI` teardown, above. **Not yet superseded** — see the
+note at the end of this document on upstream's partial multi-session convergence: upstream removed
+one ambient lookup in this release range (`MCache.getnolcut`) while introducing a new one in this
+exact file (`drawTimers`'s original form). The fork's protection is still load-bearing.
 
 ## Passive tableware-breakage food-take guard
 
@@ -219,9 +238,13 @@ so fork strings live alongside upstream's.
 **Minimum hook that must survive:** every fork-added key, in both language files, stays present with
 its fork-authored value (not silently replaced by an upstream string that happens to reuse the key).
 
-**Verify:** grep both files for known fork-prefixed keys (e.g. `lpassistantbot.*`, anything
-`combatreactor`-prefixed) after a sync; confirm the fork's translated value, not a blank or
-upstream-substituted one.
+**Verify:** grep both files for known fork-prefixed keys (e.g. `lpassistantbot.*`, `combat.*`) after
+a sync; confirm the fork's translated value, not a blank or upstream-substituted one. Correction
+(2026-09-30 sync): there is no `combatreactor`-prefixed key family — the Combat Reactor settings
+panel uses a hardcoded `"Combat Reactor"` label in `NSettingsWindow.java`, not `L10n.get(...)`; the
+only Combat Reactor-adjacent i18n keys are the 6 `combat.*` ones (`combat.distance_title`,
+`combat.set_distance`, `combat.reset`, `combat.auto`, `combat.current_dist`, `combat.no_target`),
+which back the Combat Distance Tool, a different feature.
 
 **Note:** these two files also carry a handful of duplicate-key entries with identical values on both
 occurrences — this predates the fork's own history and is not a fork customization; see the scope note
@@ -707,3 +730,134 @@ confirm resetting one never clears the other.
 **Superseded when:** upstream ships an equivalent per-instance override for this window, keyed by a
 persistent per-object identity of its own — at which point this override should be diffed against
 upstream's approach rather than assumed to still be correct.
+
+## DB-backed shared stack-size system
+
+**Files:** `src/nurgling/tools/StackSupporter.java`, `src/nurgling/db/service/StackSizeService.java`,
+`src/nurgling/db/dao/StackSizeDao.java`, `src/nurgling/db/migration/MigrationManager.java`
+(migrations 13 → now 15, see below), `src/nurgling/widgets/db/StackSizeCalibrationWindow.java`,
+`src/nurgling/db/DatabaseManager.java` (`getStackSizeService()`), `src/nurgling/NInventory.java`
+(passive learning), `src/nurgling/NConfig.java` (`Key.stackSizeLearning`).
+
+**Fork behavior:** Upstream's stack-size knowledge is a static, hand-maintained client table only
+(`StackSupporter`'s `customStackSizes`/`catExceptions`/`categorySize`). The fork adds a shared,
+self-correcting DB layer in front of it: `StackSupporter.isStackable`/`getFullStackSize` consult
+`StackSizeService.lookup(name)` *first*, and only fall back to the static table when the DB has no
+opinion on that exact name. The DB table starts seeded from the static table (one-time, at table
+creation), then self-corrects two ways: passively, whenever a client observes a real stack bigger
+than what's on record (`NInventory.observeStackSizesForLearning()`); and explicitly, via the "Stack
+Size Calibration" window. Every row carries a `provenance` of `'seed'` (generated), `'learned'`
+(passively observed), or `'manual'` (player-edited), in that increasing order of authority — later
+provenance always wins, and corrections sync to every client sharing the database the way `NArea`s
+do.
+
+**Why:** The static table is "best known at the time it was written, not ground truth" — the game's
+own stack depths are not exposed by the protocol and have to be reverse-engineered. A shared,
+self-correcting table means a correction one player makes (or the client observes) benefits every
+other client on the same database immediately, without waiting on a client release.
+
+**Deliberately NOT genus/session-scoped.** An earlier version scoped rows by the live session's
+genus, following the `PeerPositionDbService` pattern uncritically — this silently defeated seeding:
+seed rows sat under `profile='global'` while every real lookup resolved the player's actual genus,
+so the bulk load found zero rows for any real world, and every item looked "unknown" on first sight
+every session, firing a real passive-learning DB write that should have been a cache hit. Fixed by
+using one fixed row key, `profile='global'`, for every row — unlike an area or a player position, an
+item's max stack size is a fact about the game's item definitions, not about a specific world.
+
+**`lookup()`'s null-means-fall-back contract.** `StackSizeService.lookup(name)` is a pure,
+synchronous, in-memory read (never touches the database on the hot path) that returns `null` when
+the cache has no opinion on a name — which `StackSupporter` treats as "ask the static table," never
+as "this item doesn't stack." Do not change this contract to distinguish "no opinion" from "known
+unstackable" without updating every caller.
+
+**`upsertIfBigger`'s raise-only asymmetry.** Passive learning
+(`StackSizeDao.upsertIfBigger`) only ever *raises* a cached `max_stack`, and can flip a wrongly-seeded
+`stackable=false` to `true` once a real stack is observed — but it can never lower a `max_stack`, and
+it can never flip a wrongly-seeded `stackable=true` back to `false`. A downward correction (the
+game's actual balance turning out smaller than what a stale seed row recorded) requires the migration
+15 reconciliation path below; passive learning alone cannot self-heal that direction.
+
+**Compatibility bridge — migration 13 renumbered to 15 (2026-09-30 sync).** This fork's original
+`stack_sizes` migration was numbered 13, independently colliding with upstream Nurgling2's own
+migration 13 (`quest_shares`, upstream's village-quest-sharing feature) — two incompatible schema
+lineages claiming the same version number. Resolved during the 2026-09-30 upstream sync by
+renumbering this fork's migration to **15** and turning it into a compatibility bridge: it now
+ensures `quest_shares`/`timers`/`stack_sizes` all exist regardless of which lineage a given database
+came from, then reconciles `stack_sizes`'s generated (`provenance='seed'`) rows against the current
+static table — manual/learned rows and tombstones are never touched. Full design and the "future
+release" obligation this creates are in `docs/inventory-grid-system.md` §3; do not re-derive the
+reconciliation rules here, that document is canonical for this subsystem.
+
+**`version` increment requirement for sync propagation.** Any write that changes a row's stored
+value — passive learning, manual calibration, or migration-time reconciliation — must increment
+`version` in the same statement. `StackSizeService.runDeltaPoll()` only refetches a row when the
+database's version exceeds its last-cached version; a value change with no version bump corrects
+storage but never reaches any other client already running against that database.
+
+**Minimum hook that must survive:** the DB-first/static-fallback resolution order in `isStackable`/
+`getFullStackSize`; the `profile='global'` non-genus row key; `lookup()`'s null-means-fall-back
+contract; the provenance precedence (`manual` > `learned` > `seed`, tombstone beats all); the
+`version`-increment-on-every-write discipline.
+
+**Verify:** `docs/inventory-grid-system.md` §3's own verify steps (passive learning raises a cached
+value live; the Calibration window reads/writes/deletes correctly; a fresh/upstream-lineage/
+fork-lineage database all converge to schema 15 with every table present — see that document's
+migration-lineage test matrix).
+
+**Superseded when:** never wholesale — this is an open-ended self-correcting system, not a single
+override to retire.
+
+## H4D Market Scanner
+
+**Files:** `src/nurgling/actions/bots/H4DMarketScanner.java`, `src/nurgling/market/MarketApiClient.java`,
+`src/nurgling/market/MarketScanSpool.java`, `src/nurgling/market/MarketStandOrdering.java`,
+`src/nurgling/actions/bots/registry/BotRegistry.java` (`H4DMarketScanner.BOT_ID`).
+
+**Fork behavior:** A schedulable bot (`BotType` + `BotDescriptor` in `BotRegistry`, id constant
+`H4DMarketScanner.BOT_ID` = `"h4d_market_scan"`) that walks a village's barter stands
+(`gfx/terobjs/barterstand`), reads their listings via `Shopbox`/`ItemInfo`/`ItemTex`, and uploads a
+structured snapshot to an external market API (`MarketApiClient`), with local spooling for
+offline/retry (`MarketScanSpool`) and stand-ordering logic (`MarketStandOrdering`) so repeated scans
+visit stands in a stable, efficient order.
+
+**Why:** Lets a village operator keep an external market index up to date automatically on a
+schedule, instead of manually re-entering stand contents.
+
+**Minimum hook that must survive:** the bot id string `h4d_market_scan` (external scheduler/scenario
+configs reference it by this string, not by class name) must never be renamed without a
+compatibility migration for those configs; `H4DMarketScanner.BOT_ID` must stay the single source of
+truth for that string (don't let a future registration hardcode the literal a second place). The bot
+must stay registered exactly once in `BotRegistry`'s `bots` list.
+
+**Verify:** `docs/h4d-market-scanner.md`'s own verification section; after any upstream sync, diff
+`BotRegistry`'s bot-id set before/after and confirm `h4d_market_scan` present exactly once, alongside
+every other fork and upstream bot id with zero duplicates.
+
+**Superseded when:** never — fork-specific integration with an external service upstream has no
+equivalent for.
+
+## A note on upstream's multi-session convergence (2026-09-30 sync)
+
+Several of the "owning-session, not ambient" entries above note a "superseded when upstream ships
+native multi-session support" condition. As of the 2026-09-30 sync, upstream is visibly **moving
+toward** that model in places — but has not reached it, and in the very same range also introduced a
+*new* ambient lookup this fork had to correct. Treat this as partial, ongoing convergence, not
+supersession:
+
+- **Toward it:** `MCache.getnolcut`/`getnedgecut` changed signature from `(Integer id, Coord cc)` to
+  `(NOverlay nol, Coord cc)` specifically so overlay-cut lookups resolve through the overlay's own
+  owning session rather than `NUtils.getGameUI()` (upstream's own commit message: *"not looked up
+  through NUtils.getGameUI(): with several sessions that is the active one..."*). `NGItem`'s
+  quest-framing logic was similarly changed to prefer the item's own session
+  (`(ui != null && ui.gui != null) ? ui.gui : NUtils.getGameUI()`). A new `NArea.getArea(MCache)`
+  overload resolves an area's bounds against an explicitly-passed session's map rather than the
+  ambiently-active one.
+- **Against it, same range:** upstream's new `NMiniMap.drawTimers()` (the shared-timer rendering
+  replacing the fork's deleted `drawResourceTimers`) arrived resolving
+  `NGameUI gui = NUtils.getGameUI()` — a fresh ambient lookup, in the exact file the fork's
+  owning-session ledger entry already covers. Corrected during the merge (see that entry, above).
+
+**Do not read this as the fork's multi-session protections becoming obsolete.** They remain
+load-bearing; upstream has not shipped a general multi-session architecture, only scattered
+improvements in specific call sites that happen to touch the same seam. Re-assess each "superseded
+when" condition independently, per its own entry, each sync — not as a batch.

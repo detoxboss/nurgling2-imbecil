@@ -2,6 +2,7 @@ package nurgling.plugins;
 
 import nurgling.NConfig;
 import nurgling.NGameUI;
+import nurgling.widgets.charsel.NCharselScreen;
 
 import java.io.File;
 import java.io.InputStream;
@@ -35,7 +36,7 @@ public class NPluginManager {
     private static boolean loaded = false;
     private static X509Certificate trusted = null;
 
-    /** Discover and load all plugin jars. Idempotent. */
+    /** Discover and load all plugin jars. Idempotent; called at client startup, the later calls are fallbacks. */
     public static synchronized void loadAll() {
         if (loaded) return;
         loaded = true;
@@ -57,8 +58,21 @@ public class NPluginManager {
                     plugins.add(p);
                     System.out.println("[Plugins] Loaded: " + p.name() + " (" + jar.getName() + ")");
                 }
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
+                // LinkageError: a jar built against an older client (missing class or method). Skip it, don't stop startup.
                 System.out.println("[Plugins] Failed to load " + jar.getName() + ": " + e);
+            }
+        }
+    }
+
+    /** Called when a session shows character selection; notifies every loaded plugin. */
+    public static synchronized void onCharsel(NCharselScreen screen) {
+        loadAll();
+        for (NPlugin p : plugins) {
+            try {
+                p.onCharsel(screen);
+            } catch (RuntimeException | LinkageError e) {
+                System.out.println("[Plugins] onCharsel error in " + p.name() + ": " + e);
             }
         }
     }
@@ -69,7 +83,7 @@ public class NPluginManager {
         for (NPlugin p : plugins) {
             try {
                 p.onLoad(gui);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException | LinkageError e) {
                 System.out.println("[Plugins] onLoad error in " + p.name() + ": " + e);
             }
         }

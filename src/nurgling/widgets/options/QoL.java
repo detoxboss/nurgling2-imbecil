@@ -38,6 +38,7 @@ public class QoL extends Panel {
     private CheckBox shortPalisades;
     private CheckBox shortWalls;
     private CheckBox decalsOnTop;
+    private CheckBox lockDecals;
     private CheckBox thinOutlines;
     private CheckBox printpfmap;
     private CheckBox showPlayerCoords;
@@ -65,6 +66,8 @@ public class QoL extends Panel {
     private CheckBox invGilding;
     private CheckBox invVarOverlay;
     private CheckBox invSlotNumbers;
+    private CheckBox invStudyGhosts;
+    private CheckBox curioFinishedSound;
     private CheckBox invStackOverlay;
     private CheckBox invAutoSplit;
     private TextEntry treeScaleMinThresholdEntry;
@@ -149,6 +152,8 @@ public class QoL extends Panel {
         leftPrev = shortPalisades = leftColumn.add(new CheckBox(L10n.get("qol.short_palisades")), leftPrev.pos("bl").adds(0, 5));
         leftPrev = shortWalls = leftColumn.add(new CheckBox(L10n.get("qol.short_walls")), leftPrev.pos("bl").adds(0, 5));
         leftPrev = decalsOnTop = leftColumn.add(new CheckBox(L10n.get("qol.decals_on_top")), leftPrev.pos("bl").adds(0, 5));
+        leftPrev = lockDecals = leftColumn.add(new CheckBox(L10n.get("qol.lock_decals")), leftPrev.pos("bl").adds(0, 5));
+        lockDecals.settip(L10n.get("qol.lock_decals_tip"));
         leftPrev = thinOutlines = leftColumn.add(new CheckBox(L10n.get("qol.thin_outlines")), leftPrev.pos("bl").adds(0, 5));
         leftPrev = leftColumn.add(new Label(L10n.get("qol.hide_stockpile_scale")), leftPrev.pos("bl").adds(10, 3));
         {
@@ -335,6 +340,8 @@ public class QoL extends Panel {
         rightPrev = invSlotNumbers = rightColumn.add(new CheckBox(L10n.get("qol.inv_slot_numbers")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = invStackOverlay = rightColumn.add(new CheckBox(L10n.get("qol.inv_stack_overlay")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = invAutoSplit = rightColumn.add(new CheckBox(L10n.get("qol.inv_auto_split")), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = invStudyGhosts = rightColumn.add(new CheckBox(L10n.get("qol.inv_study_ghosts")), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = curioFinishedSound = rightColumn.add(new CheckBox(L10n.get("qol.curio_finished_sound")), rightPrev.pos("bl").adds(0, 5));
 
         rightPrev = rightColumn.add(new Label("● " + L10n.get("qol.section.debug")), rightPrev.pos("bl").adds(0, 15));
         rightPrev = debug = rightColumn.add(new CheckBox(L10n.get("qol.debug")), rightPrev.pos("bl").adds(0, 5));
@@ -403,6 +410,7 @@ public class QoL extends Panel {
         shortPalisades.a = getBool(NConfig.Key.shortPalisades);
         shortWalls.a = getBool(NConfig.Key.shortWalls);
         decalsOnTop.a = getBool(NConfig.Key.decalsOnTop);
+        lockDecals.a = getBool(NConfig.Key.lockDecals);
         thinOutlines.a = getBool(NConfig.Key.thinOutlines);
         uniformBiomeColors.a = getBool(NConfig.Key.uniformBiomeColors);
         showTerrainName.a = getBool(NConfig.Key.showTerrainName);
@@ -431,6 +439,8 @@ public class QoL extends Panel {
         invSlotNumbers.a = getBool(NConfig.Key.showInventoryNums);
         invStackOverlay.a = getBool(NConfig.Key.showStackOverlay);
         invAutoSplit.a = getBool(NConfig.Key.autoSplitter);
+        invStudyGhosts.a = getBool(NConfig.Key.showStudyReportGhosts);
+        curioFinishedSound.a = getBool(NConfig.Key.curioFinishedSound);
 
         Object treeScalePref = NConfig.get(NConfig.Key.treeDisplayScale);
         int treeScaleValue = 100;
@@ -578,6 +588,7 @@ public class QoL extends Panel {
         boolean oldDecalsOnTop = getBool(NConfig.Key.decalsOnTop);
         NConfig.set(NConfig.Key.shortCupboards, shortCupboards.a);
         NConfig.set(NConfig.Key.decalsOnTop, decalsOnTop.a);
+        NConfig.set(NConfig.Key.lockDecals, lockDecals.a);
         if(oldShortCupboards != shortCupboards.a || oldDecalsOnTop != decalsOnTop.a) {
             rebuildCupboards();
         }
@@ -736,6 +747,8 @@ public class QoL extends Panel {
         NConfig.set(NConfig.Key.showStackOverlay, invStackOverlay.a);
         haven.res.ui.tt.stackn.Stack.show = invStackOverlay.a;
         NConfig.set(NConfig.Key.autoSplitter, invAutoSplit.a);
+        NConfig.set(NConfig.Key.showStudyReportGhosts, invStudyGhosts.a);
+        NConfig.set(NConfig.Key.curioFinishedSound, curioFinishedSound.a);
 
         NConfig.needUpdate();
     }

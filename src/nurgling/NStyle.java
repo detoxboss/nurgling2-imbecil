@@ -27,6 +27,12 @@ public class NStyle {
     public static final Color questCondDone  = new Color(122, 175, 122); // satisfied objective
     public static final Color questDim       = new Color(143, 163, 164); // counters, chevrons, hints
     public static final Color questHover     = new Color(255, 255, 255, 26);
+    public static final Color questVillage   = new Color(179, 140, 255); // villagers' quests: tab, item frame
+    /** Name-chip colors for villagers in the quest tracker, picked by name hash. */
+    public static final Color[] questHolders = {
+        new Color(179, 140, 255), new Color(231, 168, 216), new Color(159, 215, 255),
+        new Color(201, 226, 138), new Color(242, 197, 124), new Color(143, 227, 196)
+    };
 
     /**
      * Resolves the window content-area background color, honoring the user's
@@ -165,19 +171,6 @@ public class NStyle {
             Resource.loadtex("nurgling/hud/alarm/10"),
             Resource.loadtex("nurgling/hud/alarm/11")};
 
-    public static final Tex[] question = new Tex[]{
-            Resource.loadtex("nurgling/hud/question/0"),
-            Resource.loadtex("nurgling/hud/question/1"),
-            Resource.loadtex("nurgling/hud/question/2"),
-            Resource.loadtex("nurgling/hud/question/3"),
-            Resource.loadtex("nurgling/hud/question/4"),
-            Resource.loadtex("nurgling/hud/question/5"),
-            Resource.loadtex("nurgling/hud/question/6"),
-            Resource.loadtex("nurgling/hud/question/7"),
-            Resource.loadtex("nurgling/hud/question/8"),
-            Resource.loadtex("nurgling/hud/question/9"),
-            Resource.loadtex("nurgling/hud/question/10"),
-            Resource.loadtex("nurgling/hud/question/11")};
 
     public static final TexI[] canceli = new TexI[]{
             new TexI(Resource.loadsimg("nurgling/hud/buttons/cancel/u")),
