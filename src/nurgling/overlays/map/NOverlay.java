@@ -10,7 +10,7 @@ import java.util.*;
 
 public class NOverlay extends MapView.MapRaster
 {
-    final Integer id;
+    public final Integer id;
     public boolean requpdate2 = false;
 
     public boolean requpdate(){
@@ -19,12 +19,12 @@ public class NOverlay extends MapView.MapRaster
     Color bc;
     public final Grid base = new Grid<RenderTree.Node>() {
         public RenderTree.Node getcut(Coord cc) {
-            return(map.getnolcut(id, cc));
+            return(map.getnolcut(NOverlay.this, cc));
         }
     };
     public final Grid outl = new Grid<RenderTree.Node>() {
         public RenderTree.Node getcut(Coord cc) {
-            return(map.getnedgecut(id, cc));
+            return(map.getnedgecut(NOverlay.this, cc));
         }
     };
 
@@ -37,13 +37,52 @@ public class NOverlay extends MapView.MapRaster
         this.id = id;
     }
 
+    /* Grids by id, snapshotted once per frame by NMapView.oltick for areaCuts.
+     * Per overlay, not static: with several sessions, a background
+     * session's oltick would otherwise swap in its own grids. */
+    public Map<Long, MCache.Grid> gridsById = Collections.emptyMap();
+
     public void tick() {
         super.tick();
         if(area != null) {
+            if(id >= 0)
+                area = areaCuts(area);
             base.tick();
             outl.tick();
         }
         requpdate2 = false;
+    }
+
+    /* An area covers a few tiles, usually a single cut, yet the view window spans
+     * 5x5 cuts. Ticking only the cuts the area overlaps keeps the per-frame cost from
+     * scaling with the number of saved areas. Grid.tick removes every cut outside the
+     * returned area, so an area that moves, shrinks or leaves the view is cleaned up. */
+    private Area areaCuts(Area win) {
+        NArea narea = map.areas.get(id);
+        NArea.Space space = (narea == null) ? null : narea.space;
+        if(space == null)
+            return(win);
+        Map<Long, MCache.Grid> grids = gridsById;
+        Coord ul = null, br = null;
+        try {
+            for(Map.Entry<Long, NArea.VArea> e : space.space.entrySet()) {
+                Area va = e.getValue().area;
+                if(!va.positive())
+                    continue;
+                MCache.Grid g = grids.get(e.getKey());
+                if(g == null)
+                    continue;
+                Coord cul = g.ul.add(va.ul).div(MCache.cutsz);
+                Coord cbr = g.ul.add(va.br).sub(1, 1).div(MCache.cutsz).add(1, 1);
+                ul = (ul == null) ? cul : Coord.of(Math.min(ul.x, cul.x), Math.min(ul.y, cul.y));
+                br = (br == null) ? cbr : Coord.of(Math.max(br.x, cbr.x), Math.max(br.y, cbr.y));
+            }
+        } catch(ConcurrentModificationException e) {
+            /* A bot is editing the area's geometry in place; tick the whole window this frame. */
+            return(win);
+        }
+        Area cuts = (ul == null) ? null : new Area(ul, br).overlap(win);
+        return((cuts == null) ? new Area(win.ul, win.ul) : cuts);
     }
 
     public void added(RenderTree.Slot slot) {
@@ -73,8 +112,7 @@ public class NOverlay extends MapView.MapRaster
     }
 
     public RenderTree.Node makenol(MapMesh mm, Long grid_id, Coord grid_ul) {
-        if(mm.olvert == null)
-            mm.olvert = mm.makeolvbuf();
+        mm.olvert();
         class Buf implements Tiler.MCons {
             short[] fl = new short[16];
             int fn = 0;
@@ -88,14 +126,24 @@ public class NOverlay extends MapView.MapRaster
         }
         Coord t = new Coord();
         Buf buf = new Buf();
-        NArea.VArea space = NUtils.getArea(id).space.space.get(grid_id);
+        /* This overlay's own session's area: NUtils.getArea goes through
+         * the active session, which with several sessions may not be the
+         * one this mesh is built for. */
+        NArea area = map.areas.get(id);
+        if(area == null || area.space == null || area.space.space == null)
+            return(null);
+        NArea.VArea space = area.space.space.get(grid_id);
+        if(space == null)
+            return(null);
         Area curArea = space.area.xl(grid_ul);
         for(t.y = 0; t.y < mm.sz.y; t.y++) {
             for(t.x = 0; t.x < mm.sz.x; t.x++) {
                 Coord gc = t.add(mm.ul);
                 if(curArea.contains(gc))
                 {
-                    mm.map.tiler(mm.map.gettile(gc)).lay(mm, t, gc, buf, false);
+                    Tiler tl = mm.map.tiler(mm.map.gettile(gc));
+                    if(tl != null)
+                        tl.lay(mm, t, gc, buf, false);
                 }
             }
         }
@@ -109,8 +157,7 @@ public class NOverlay extends MapView.MapRaster
     }
 
     public RenderTree.Node makenolol(MapMesh mm, Long grid_id, Coord grid_ul) {
-        if(mm.olvert == null)
-            mm.olvert = mm.makeolvbuf();
+        mm.olvert();
         class Buf implements Tiler.MCons {
             int mask;
             short[] fl = new short[16];
@@ -140,7 +187,7 @@ public class NOverlay extends MapView.MapRaster
         Area a = Area.sized(mm.ul, mm.sz);
 
         Buf buf = new Buf();
-        NArea area = NUtils.getArea(id);
+        NArea area = map.areas.get(id);
         if (area == null || area.space == null || area.space.space == null) {
             return null;
         }
@@ -149,7 +196,7 @@ public class NOverlay extends MapView.MapRaster
             return null;
         }
         Area curArea = space.area.xl(grid_ul);
-        Area fullarea = area.getArea();
+        Area fullarea = area.getArea(map);
         if (fullarea == null) {
             return null;
         }
@@ -161,8 +208,11 @@ public class NOverlay extends MapView.MapRaster
                     if(!fullarea.contains(t.add(Coord.uecw[d])))
                         buf.mask |= 1 << d;
                 }
-                if(buf.mask != 0)
-                    mm.map.tiler(mm.map.gettile(t)).lay(mm, t.sub(a.ul), t, buf, false);
+                if(buf.mask != 0) {
+                    Tiler tl = mm.map.tiler(mm.map.gettile(t));
+                    if(tl != null)
+                        tl.lay(mm, t.sub(a.ul), t, buf, false);
+                }
             }
         }
         if(buf.fn == 0)

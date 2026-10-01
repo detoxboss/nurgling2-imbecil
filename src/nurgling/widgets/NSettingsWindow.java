@@ -114,12 +114,14 @@ public class NSettingsWindow extends Widget {
         general.addChild(new SettingsItem(L10n.get("nsettings.item.item_overlays"), new ItemOverlaySettings(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.navigation"), navigation = new Navigation(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.map_settings"), new MapSettings(), container));
+        general.addChild(new SettingsItem(L10n.get("nsettings.item.graphics"), new GraphicsSettings(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.qol"), qol = new QoL(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.database"), new DatabaseSettings(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.auto_mapper"), new AutoMapper(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.auto_selection"), as = new AutoSelection(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.quick_actions"), qa = new QuickActions(), container));
         general.addChild(new SettingsItem(L10n.get("nsettings.item.discord"), new DiscordSettings(), container));
+        general.addChild(new SettingsItem(L10n.get("nsettings.item.timers"), new TimerSettings(), container));
 
         SettingsCategory gameenvironment = new SettingsCategory(L10n.get("nsettings.cat.game_environment"), new Panel(L10n.get("nsettings.cat.game_environment")), container);
         gameenvironment.addChild(new SettingsItem(L10n.get("nsettings.item.world"), world = new World(), container));
@@ -138,6 +140,7 @@ public class NSettingsWindow extends Widget {
         bots.addChild(new SettingsItem(L10n.get("nsettings.item.eating_bot"), new Eater(), container));
         bots.addChild(new SettingsItem(L10n.get("nsettings.item.farming"), new FarmingSettingsPanel(), container));
         bots.addChild(new SettingsItem(L10n.get("nsettings.item.cheese_orders"), new CheeseOrdersPanel(), container));
+        bots.addChild(new SettingsItem(L10n.get("nsettings.item.cheese_conveyor"), new CheeseConveyorPanel(), container));
         bots.addChild(new SettingsItem(L10n.get("nsettings.item.pickling"), new PicklingSettings(), container));
         bots.addChild(new SettingsItem(L10n.get("nsettings.item.parasite"), new ParasiteSettings(), container));
         bots.addChild(new SettingsItem(L10n.get("nsettings.item.equipment"), new EquipmentBotSettings(), container));

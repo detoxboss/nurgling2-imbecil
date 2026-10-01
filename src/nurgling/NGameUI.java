@@ -50,13 +50,20 @@ public class NGameUI extends GameUI
     private AllowVisitingStatusBuff allowVisitingBuff = null;
     public NRecentActionsPanel recentActionsPanel;
     public DrinkMeter drinkMeter;
-    public LocalizedResourceTimersWindow localizedResourceTimersWindow = null;
-    private LocalizedResourceTimerDialog localizedResourceTimerDialog = null;
-    public LocalizedResourceTimerService localizedResourceTimerService;
+    /** This world's timers; the same instance for every session on the world. */
+    public nurgling.timers.TimerStore timerStore;
+    public nurgling.timers.TimerNotifier timerNotifier;
+    public nurgling.todo.TaskDeadlines taskDeadlines;
+    public nurgling.widgets.timers.TimerBanners timerBanners;
+    public nurgling.widgets.timers.TimersPanel timersPanel;
+    private nurgling.widgets.timers.TimerPopover timerPopover;
     public WaypointMovementService waypointMovementService;
     public PingService pingService;
     public FishLocationService fishLocationService;
+    public nurgling.todo.TodoStore todoStore;
     public PeerPositionService peerPositionService;
+    /** Quest sharing with villagers on the database; written by QuestShareDbService, read by the tracker. */
+    public nurgling.widgets.quest.VillageQuestStore villageQuests;
     public FishSearchWindow fishSearchWindow = null;
     public final Map<String, FishLocationDetailsWindow> openFishDetailWindows = new HashMap<>();
     public TreeLocationService treeLocationService;
@@ -66,6 +73,7 @@ public class NGameUI extends GameUI
     public final Map<String, TreeLocationDetailsWindow> openTreeDetailWindows = new HashMap<>();
     public LabeledMarkService labeledMarkService;
     public MapToolsWindow mapToolsWindow = null;
+    public RouteWalkerWindow routeWalkerWindow = null;
     public StudyDeskPlannerWidget studyDeskPlanner = null;
     public NDraggableWidget studyReportWidget = null;
     public DbStatsOverlay dbStatsOverlay = null;
@@ -223,7 +231,9 @@ public class NGameUI extends GameUI
         waypointMovementService = new WaypointMovementService(this);
         pingService = new PingService(this);
         fishLocationService = new FishLocationService(this, genus);
+        todoStore = new nurgling.todo.TodoStore(this, genus);
         peerPositionService = new PeerPositionService(this);
+        villageQuests = new nurgling.widgets.quest.VillageQuestStore();
         treeLocationService = new TreeLocationService(this, genus);
         labeledMarkService = new LabeledMarkService(this, genus);
         // These widgets depend on areas which is created in GameUI constructor
@@ -234,10 +244,12 @@ public class NGameUI extends GameUI
         add(spec = new Specialisation(), new Coord(sz.x/2 - spec.sz.x/2, sz.y/2 - spec.sz.y/2));
         spec.hide();
 
-        // Heavy service widgets
-        add(localizedResourceTimerDialog = new LocalizedResourceTimerDialog(), new Coord(200, 200));
-        localizedResourceTimerService = new LocalizedResourceTimerService(this, genus);
-        add(localizedResourceTimersWindow = new LocalizedResourceTimersWindow(localizedResourceTimerService), new Coord(100, 100));
+        // Timers: the store is per world, the widgets per session
+        timerStore = nurgling.sessions.SessionManager.getInstance().timerStore(genus);
+        timerNotifier = new nurgling.timers.TimerNotifier(this);
+        taskDeadlines = new nurgling.todo.TaskDeadlines(this);
+        add(timersPanel = new nurgling.widgets.timers.TimersPanel(), new Coord(100, 100));
+        add(timerBanners = new nurgling.widgets.timers.TimerBanners(), Coord.z);
         
         // Database debug overlay - shows in top-right corner
         add(dbStatsOverlay = new DbStatsOverlay(), new Coord(sz.x - 290, 10));
@@ -295,9 +307,20 @@ public class NGameUI extends GameUI
     }
 
     @Override
+    public void tick(double dt) {
+        super.tick(dt);
+        if(todoStore != null)
+            todoStore.tick();
+        if(timerNotifier != null)
+            timerNotifier.tick();
+        if(taskDeadlines != null)
+            taskDeadlines.tick();
+    }
+
+    @Override
     public void dispose() {
-        if(localizedResourceTimerService != null)
-            localizedResourceTimerService.dispose();
+        if(todoStore != null)
+            todoStore.flushFile();
         if(fishLocationService != null)
             fishLocationService.dispose();
         if(labeledMarkService != null)
@@ -1205,11 +1228,56 @@ public class NGameUI extends GameUI
         return super.keydown(ev);
     }
 
+    /* Photo mode (a graphics option, Vulkan only): hides the
+     * interface for screenshots; see nurgling.render.Photo. */
+    public static final KeyBinding kb_photo = KeyBinding.get("photo-mode", KeyMatch.forchar('P', KeyMatch.C | KeyMatch.S));
+    private final java.util.List<Widget> photohidden = new java.util.ArrayList<>();
+
+    public void photomode(boolean on) {
+        if (on == nurgling.render.Photo.on)
+            return;
+        if (on) {
+            if ((ui == null) || !nurgling.render.NGfx.supported(ui.getenv())) {
+                msg(nurgling.i18n.L10n.get("photo.novulkan"));
+                return;
+            }
+            photohidden.clear();
+            for (Widget w = child; w != null; w = w.next) {
+                if ((w != map) && w.visible) {
+                    photohidden.add(w);
+                    w.hide();
+                }
+            }
+            nurgling.render.Photo.focus = 0;
+            nurgling.render.Photo.since = Utils.rtime();
+            nurgling.render.Photo.on = true;
+            if (map != null)
+                setfocus(map);
+        } else {
+            nurgling.render.Photo.on = false;
+            for (Widget w : photohidden)
+                w.show();
+            photohidden.clear();
+        }
+    }
+
     @Override
     public boolean globtype(GlobKeyEvent ev) {
+        /* Combat Reactor stays first: it needs to claim a combat key before anything else can
+         * consume it (see docs/fork-customization-ledger.md, "Combat Reactor protocol hooks").
+         * Upstream's photo-mode and timer quick-add checks follow, then session switching, then
+         * interrupt-all-bots, then the superclass. */
         if(combatReactor != null && combatReactor.handleGlobalKey(ev))
             return true;
 
+        if (kb_photo.key().match(ev.awt)) {
+            photomode(!nurgling.render.Photo.on);
+            return true;
+        }
+        if (timersPanel != null && nurgling.widgets.timers.TimersPanel.kb_quickadd.key().match(ev.awt)) {
+            timersPanel.showQuickAdd();
+            return true;
+        }
         nurgling.sessions.SessionManager sm = nurgling.sessions.SessionManager.getInstance();
 
         // Check session switching keybindings
@@ -1238,14 +1306,45 @@ public class NGameUI extends GameUI
         return super.globtype(ev);
     }
 
-    public void toggleResourceTimerWindow() {
-        if(localizedResourceTimerService != null) {
-            localizedResourceTimerService.showTimerWindow();
+    public void toggleTimersPanel() {
+        if(timersPanel == null)
+            return;
+        if(timersPanel.visible())
+            timersPanel.hide();
+        else
+            timersPanel.show();
+    }
+
+    /** Open the To-Do window on one task. */
+    public void openTodoTask(int taskId) {
+        if(todoStore == null)
+            return;
+        if(todoWnd == null || !todoWnd.visible())
+            toggleTodo();
+        if(todoWnd != null) {
+            todoWnd.focusTask(taskId);
+            todoWnd.raise();
         }
     }
-    
-    public LocalizedResourceTimerDialog getAddResourceTimerWidget() {
-        return localizedResourceTimerDialog;
+
+    public void showTimersPanel() {
+        if(timersPanel != null)
+            timersPanel.show();
+    }
+
+    /** Open a timer popover next to the mouse, closing any other one. */
+    public void showTimerPopover(nurgling.widgets.timers.TimerPopover p) {
+        if(p == null) {
+            msg(nurgling.i18n.L10n.get("timers.not_on_map"));
+            return;
+        }
+        if(timerPopover != null && timerPopover.parent != null)
+            ui.destroy(timerPopover);
+        timerPopover = p;
+        Coord at = ui.mc.sub(rootpos()).add(UI.scale(12), UI.scale(12));
+        add(p, at);
+        p.c = Coord.of(Math.max(0, Math.min(at.x, sz.x - p.sz.x)), Math.max(0, Math.min(at.y, sz.y - p.sz.y)));
+        p.raise();
     }
 
     /**

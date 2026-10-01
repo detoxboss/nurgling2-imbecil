@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pure unit tests for {@link StackSupporter}'s exact-name static fallback (isStackableByName /
  * getFullStackSize) - the logic the shared DB-backed override table (see
- * nurgling/db/migration/MigrationManager.java migration 13, nurgling/db/service/StackSizeService.java)
+ * nurgling/db/migration/MigrationManager.java migration 15, nurgling/db/service/StackSizeService.java)
  * falls back to whenever it has no opinion of its own. Runs with no game session and no database
  * (NCore.databaseManager stays null in this harness), which is exactly the "DB unavailable" path
  * getFullStackSize/isStackable's early stackSizeInfo() check is meant to fall through on - so these
@@ -65,5 +65,90 @@ class StackSupporterTest {
         // VSpec's category data loaded in this harness.
         assertTrue(names.contains("Reeds"));
         assertTrue(names.contains("Wolf's Claw"));
+    }
+
+    /**
+     * Stack-size facts upstream corrected in the 2026-09-30 sync range. These items sit in
+     * "Stackable Curiosities" (category size 4) but the server stacks them shallower, so they are
+     * customStackSizes entries that must win over the category.
+     */
+    @Test
+    void upstreamShallowCurioCorrections() {
+        assertTrue(StackSupporter.isStackableByName("Brain"));
+        assertEquals(2, StackSupporter.getFullStackSizeStatic("Brain"));
+
+        assertTrue(StackSupporter.isStackableByName("Small Brain"));
+        assertEquals(3, StackSupporter.getFullStackSizeStatic("Small Brain"));
+
+        assertTrue(StackSupporter.isStackableByName("Aurochs Hair"));
+        assertEquals(3, StackSupporter.getFullStackSizeStatic("Aurochs Hair"));
+
+        assertTrue(StackSupporter.isStackableByName("Adder's Lying Tongue"));
+        assertEquals(3, StackSupporter.getFullStackSizeStatic("Adder's Lying Tongue"));
+
+        // Peapod is in no VSpec category at all - only its customStackSizes entry makes it stack.
+        assertTrue(StackSupporter.isStackableByName("Peapod"));
+        assertEquals(3, StackSupporter.getFullStackSizeStatic("Peapod"));
+    }
+
+    /**
+     * Upstream removed "Lynx Claws" from catExceptions and from isStackable's context-veto block in
+     * the same range; the merge took both. It is a plain FineBones item again, so it stacks 4 deep
+     * like the rest of that category. Regression guard: the veto used to live in two places, and
+     * only one of them conflicted during the merge.
+     */
+    @Test
+    void lynxClawsNowStacks() {
+        assertTrue(StackSupporter.isStackableByName("Lynx Claws"));
+        assertEquals(4, StackSupporter.getFullStackSizeStatic("Lynx Claws"));
+    }
+
+    /**
+     * Regression test for the " Meat" / "Meat" category-key mismatch fixed in the 2026-09-30 sync.
+     * PR #11 renamed VSpec's weird-meat category from " Meat" to "Meat" but left StackSupporter's
+     * categorySize key with its leading space; categorySize is an exact Map lookup, so every weird
+     * meat silently reported unstackable/1 and never reached the stack_sizes seed set either.
+     */
+    @Test
+    void weirdMeatCategoryContributesStackSizes() {
+        for (String meat : new String[] {"Ant Meat", "Cave Louse Meat", "Chasm Conch Meat"}) {
+            assertTrue(StackSupporter.isStackableByName(meat), meat + " should be stackable");
+            assertEquals(5, StackSupporter.getFullStackSizeStatic(meat), meat + " stack size");
+            assertTrue(StackSupporter.seedCandidateNames().contains(meat),
+                meat + " should be seeded into stack_sizes");
+        }
+    }
+
+    /**
+     * The static-only view migration 15 seeds and reconciles from must agree with the per-name
+     * static methods, and must carry the corrections above.
+     */
+    @Test
+    void staticSeedSnapshotMatchesStaticMethods() {
+        java.util.Map<String, StackSupporter.StaticStackFact> snap = StackSupporter.staticSeedSnapshot();
+
+        StackSupporter.StaticStackFact brain = snap.get("Brain");
+        assertTrue(brain != null, "Brain missing from the static seed snapshot");
+        assertEquals(2, brain.maxStack);
+        assertTrue(brain.stackable);
+
+        StackSupporter.StaticStackFact lynx = snap.get("Lynx Claws");
+        assertTrue(lynx != null, "Lynx Claws missing from the static seed snapshot");
+        assertEquals(4, lynx.maxStack);
+        assertTrue(lynx.stackable);
+
+        // An unstackable exception is recorded as (1, false), never as its category size.
+        StackSupporter.StaticStackFact wolf = snap.get("Wolf's Claw");
+        assertTrue(wolf != null, "Wolf's Claw missing from the static seed snapshot");
+        assertEquals(1, wolf.maxStack);
+        assertFalse(wolf.stackable);
+
+        // Every entry must be self-consistent with the methods it was generated from.
+        for (java.util.Map.Entry<String, StackSupporter.StaticStackFact> e : snap.entrySet()) {
+            boolean stackable = StackSupporter.isStackableByName(e.getKey());
+            assertEquals(stackable, e.getValue().stackable, e.getKey() + " stackable");
+            assertEquals(stackable ? StackSupporter.getFullStackSizeStatic(e.getKey()) : 1,
+                e.getValue().maxStack, e.getKey() + " maxStack");
+        }
     }
 }

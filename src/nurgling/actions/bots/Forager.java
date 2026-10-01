@@ -5,6 +5,7 @@ import nurgling.*;
 import nurgling.actions.*;
 import nurgling.actions.bots.forager.DetourBranchBudget;
 import nurgling.actions.bots.forager.RouteLookahead;
+import nurgling.actions.bots.forager.SightingNotifier;
 import nurgling.areas.NArea;
 import nurgling.areas.NContext;
 import nurgling.conf.NDiscordNotification;
@@ -196,7 +197,7 @@ public class Forager implements Action {
         }
 
         // Runs continuously in the background so a mid-walk threat still triggers the safety action immediately.
-        threatWatcher = startGuardWatcher(gui, guardingProfile, Thread.currentThread());
+        threatWatcher = startGuardWatcher(gui, guardingProfile, SightingNotifier.create(gui, guardingProfile, path.name), Thread.currentThread());
 
         // One-time Put-area audit for Maintain's pickup budget; skipped if the preset ignores Maintain limits.
         maintainAreaStock = preset.ignoreMaintainLimits
@@ -452,6 +453,9 @@ public class Forager implements Action {
 
     // Max world-unit distance for a single PathFinder hop - PathFinder's search grid fails to path once the span exceeds this.
     private static final double MAX_HOP_DISTANCE = 250.0;
+
+    // How long a PICK waits for the picked gob to vanish before moving on - well under the Stuck guard's default 10s.
+    private static final int PICK_REMOVAL_WAIT_TICKS = 200;
 
     // Scan radius (world units) for finding actionable gobs to detour towards.
     private static final double SCAN_RADIUS = 100000.0;
@@ -920,8 +924,16 @@ public class Forager implements Action {
                 // a coracle) would otherwise keep getting re-picked as "nearest" forever.
                 processedGobs.add(gob.id);
                 if (!walk(gui, preset, new PathFinder(gob), false).IsSuccess()) break;
-                new SelectFlowerAction("Pick", gob).run(gui);
-                NUtils.getUI().core.addTask(new nurgling.tasks.WaitGobRemoval(gob.id));
+                if (!new SelectFlowerAction("Pick", gob).run(gui).IsSuccess()) break;
+                // Bounded: a pick the server never carries out (e.g. out of reach from a coracle) would otherwise wait here until the Stuck guard fires.
+                NUtils.getUI().core.addTask(new nurgling.tasks.NTask() {
+                    int count = 0;
+
+                    @Override
+                    public boolean check() {
+                        return Finder.findGob(gob.id) == null || ++count > PICK_REMOVAL_WAIT_TICKS;
+                    }
+                });
                 break;
             }
             case FLOWER_ACTION: {
@@ -980,7 +992,7 @@ public class Forager implements Action {
                 }
             } else if (action.notifyTarget == ForagerAction.NotifyTarget.CHAT) {
                 if (action.chatChannelName != null && !action.chatChannelName.isEmpty()) {
-                    ChatUI.Channel targetChannel = findChatChannelByName(gui, action.chatChannelName);
+                    ChatUI.Channel targetChannel = SightingNotifier.findChatChannel(gui, action.chatChannelName);
                     if (targetChannel != null && targetChannel instanceof ChatUI.EntryChannel) {
                         ((ChatUI.EntryChannel) targetChannel).send(message);
                     }
@@ -1114,7 +1126,7 @@ public class Forager implements Action {
     }
 
     /** Background thread polling in-flight guards independent of the bot thread; records the firing guard and interrupts the bot thread, but doesn't perform its outcome itself. */
-    private Thread startGuardWatcher(NGameUI gui, GuardingProfile profile, Thread botThread) {
+    private Thread startGuardWatcher(NGameUI gui, GuardingProfile profile, SightingNotifier sightings, Thread botThread) {
         List<Guard> guards = buildGuards(profile.inflightGuards);
         GuardContext ctx = new GuardContext(gui, profile.ignoreBats);
         // Bind the calling thread's NUI here too, mirroring BotExecutor.runAsync, so NConfig reads use this session's config.
@@ -1127,6 +1139,9 @@ public class Forager implements Action {
             try {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
+                    // Before the guards, so a sighting that also fires one still gets reported.
+                    if (sightings != null)
+                        sightings.scan();
                     for (Guard guard : guards) {
                         if (guard.trigger.check(ctx)) {
                             // Only interrupt if this watcher actually won the claim - guards
@@ -1171,20 +1186,6 @@ public class Forager implements Action {
                             && !GateDetector.isGate(gob)) {
                         return gob;
                     }
-                }
-            }
-        }
-        return null;
-    }
-    
-    private ChatUI.Channel findChatChannelByName(NGameUI gui, String channelName) {
-        if (gui.chat == null) return null;
-        
-        for (Widget w = gui.chat.child; w != null; w = w.next) {
-            if (w instanceof ChatUI.Channel) {
-                ChatUI.Channel chan = (ChatUI.Channel) w;
-                if (chan.name().equalsIgnoreCase(channelName)) {
-                    return chan;
                 }
             }
         }

@@ -21,7 +21,7 @@ public class MigrationManager {
      * and this older client may not understand the new columns/tables; we
      * refuse to sync in that case rather than write incompatible rows.
      */
-    public static final int CLIENT_MAX_SCHEMA_VERSION = 13;
+    public static final int CLIENT_MAX_SCHEMA_VERSION = 15;
 
     /** Version of the migration that creates kin_secrets; optional, see {@link Migration#optional}. */
     public static final int MIGRATION_KIN_SECRETS = 9;
@@ -35,8 +35,26 @@ public class MigrationManager {
     /** Version of the migration that creates peer_positions; optional, see {@link Migration#optional}. */
     public static final int MIGRATION_PEER_POSITIONS = 12;
 
-    /** Version of the migration that creates stack_sizes; optional, see {@link Migration#optional}. */
-    public static final int MIGRATION_STACK_SIZES = 13;
+    /** Version of the migration that creates quest_shares; optional, see {@link Migration#optional}. */
+    public static final int MIGRATION_QUEST_SHARES = 13;
+
+    /** Version of the migration that creates timers; optional, see {@link Migration#optional}. */
+    public static final int MIGRATION_TIMERS = 14;
+
+    /**
+     * Version of the compatibility migration that converges this fork's schema lineage with
+     * upstream Nurgling2's, and creates/reconciles stack_sizes; optional, see
+     * {@link Migration#optional}.
+     *
+     * <p><b>Why this exists.</b> Two incompatible version-13 lineages shipped independently: this
+     * fork's 13 created {@code stack_sizes}, upstream's 13 created {@code quest_shares} and its 14
+     * created {@code timers}. {@link #runMigrations} only runs a migration whose version is
+     * strictly greater than the database's recorded version, so a released fork database already
+     * stamped 13 would skip upstream's migration 13 forever and never get {@code quest_shares}.
+     * Migration 15 is the bridge: it is reached from either lineage and makes every required
+     * structure exist, whichever of them is already there.
+     */
+    public static final int MIGRATION_STACK_SIZES = 15;
 
     public static class SchemaTooNewException extends SQLException {
         public final int clientVersion;
@@ -641,65 +659,286 @@ public class MigrationManager {
             }
         });
 
-        /* Optional: stack_sizes backs the shared, self-correcting item stack-size table that
-         * supersedes nurgling.tools.StackSupporter's static table wherever a DB-backed answer is
-         * available. A role without CREATE on the schema must not lose area, planning and recipe
-         * sync over it - every caller already falls back to StackSupporter's static table when
-         * this is unavailable, exactly like fish_locations falls back to its JSON file. */
-        migrations.add(new Migration(13, "Create stack_sizes table for shared item stack-size calibration", true) {
+        /* Optional: quest_shares backs only the Village tab of the quest tracker. A role without CREATE
+         * on the schema must not lose area, planning and recipe sync over it. */
+        migrations.add(new Migration(MIGRATION_QUEST_SHARES, "Create quest_shares table for villagers' shared quests", true) {
             @Override
             public void run(DatabaseAdapter adapter) throws SQLException {
-                if (adapter.tableExists("stack_sizes")) {
+                if (adapter.tableExists("quest_shares")) {
                     return;
                 }
-                boolean pg = (adapter instanceof nurgling.db.PostgresAdapter);
-                String boolType = pg ? "BOOLEAN" : "INTEGER";
-                String boolDefault = pg ? "TRUE" : "1";
+                createQuestSharesTable(adapter);
+            }
+        });
 
-                createTable(adapter, "stack_sizes",
-                    "CREATE TABLE stack_sizes (" +
-                    "profile VARCHAR(255) NOT NULL DEFAULT 'global', " +
-                    "name VARCHAR(255) NOT NULL, " +
-                    "max_stack INTEGER NOT NULL, " +
-                    "stackable " + boolType + " NOT NULL DEFAULT " + boolDefault + ", " +
-                    /* 'seed' | 'learned' | 'manual' - see StackSizeDao. Not a foreign-keyed enum
-                     * table: three fixed values, checked only in Java. */
-                    "provenance VARCHAR(32) NOT NULL DEFAULT 'seed', " +
-                    "version INTEGER NOT NULL DEFAULT 1, " +
-                    "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
-                    "last_touched_by VARCHAR(255), " +
-                    "last_touched_at TIMESTAMP, " +
-                    "deleted_at TIMESTAMP, " +
-                    "PRIMARY KEY (profile, name)" +
-                    ")");
-                safeCreateIndex(adapter, "CREATE INDEX idx_ss_profile ON stack_sizes (profile)");
-                safeCreateIndex(adapter, "CREATE INDEX idx_ss_deleted ON stack_sizes (deleted_at)");
-                System.out.println("Created stack_sizes table");
-
-                /* Seed from StackSupporter's current static table, so the DB starts at least as
-                 * good as today. Goes through the real static-lookup methods rather than
-                 * re-implementing their priority logic here, so seed data can never drift from what
-                 * the static fallback itself would answer - see StackSupporter.seedCandidateNames()
-                 * / isStackableByName(). Seeded under profile 'global' since the static table isn't
-                 * genus-specific; per-genus rows only start appearing once passive learning or a
-                 * manual edit happens on a specific genus. */
-                java.util.Set<String> names = nurgling.tools.StackSupporter.seedCandidateNames();
-                int seeded = 0;
-                for (String name : names) {
-                    boolean stackable = nurgling.tools.StackSupporter.isStackableByName(name);
-                    int maxStack = stackable ? nurgling.tools.StackSupporter.getFullStackSize(name) : 1;
-                    Object stackableValue = pg ? stackable : (stackable ? 1 : 0);
-                    adapter.executeUpdate(
-                        "INSERT INTO stack_sizes (profile, name, max_stack, stackable, provenance, version) " +
-                        "VALUES ('global', ?, ?, ?, 'seed', 1)",
-                        name, maxStack, stackableValue);
-                    seeded++;
+        /* Optional: timers backs only village-shared resource timers, map pins, reminders and To-Do task
+         * deadlines, which
+         * stay on their JSON file when the table is missing. A role without CREATE on the schema must
+         * not lose area, planning and recipe sync over it. */
+        migrations.add(new Migration(MIGRATION_TIMERS, "Create timers table for shared resource timers, pins and reminders", true) {
+            @Override
+            public void run(DatabaseAdapter adapter) throws SQLException {
+                if (adapter.tableExists("timers")) {
+                    return;
                 }
-                System.out.println("Seeded " + seeded + " rows into stack_sizes from the static table");
+                createTimersTable(adapter);
+            }
+        });
+
+        /* Optional: the compatibility bridge between this fork's and upstream Nurgling2's
+         * independently-shipped version-13 schemas - see MIGRATION_STACK_SIZES for why it has to
+         * exist at all. Reached from either lineage, it makes every structure both lineages expect
+         * exist, whichever subset is already there, and then brings generated stack_sizes seed data
+         * back in line with the current static table.
+         *
+         * Deliberately NOT written as per-step try/catch. Swallowing a SQLException here would let
+         * runMigrations() record version 15 even though a required structure was never created,
+         * burying the missing one for good, and on PostgreSQL would carry on inside an already-
+         * aborted transaction. Every step therefore lets its SQLException propagate: the outer loop
+         * rolls back, does NOT record 15, reports it in the skipped map (DatabaseManager surfaces it
+         * as "Stack size calibration sync (schema compatibility bridge)"), lets the client
+         * initialise against whichever optional tables do exist, and retries the whole migration on
+         * the next start. Covered by MigrationLineageTest's failure/retry case. */
+        migrations.add(new Migration(MIGRATION_STACK_SIZES,
+                "Converge fork/upstream schema lineages: ensure quest_shares, timers and stack_sizes", true) {
+            @Override
+            public void run(DatabaseAdapter adapter) throws SQLException {
+                /* An existing fork database stamped 13 skipped upstream's migration 13 entirely,
+                 * because runMigrations() only runs versions strictly above the recorded one. */
+                if (!adapter.tableExists("quest_shares")) {
+                    createQuestSharesTable(adapter);
+                }
+                /* Normally already created by migration 14; absent only if that was skipped. */
+                if (!adapter.tableExists("timers")) {
+                    createTimersTable(adapter);
+                }
+                if (!adapter.tableExists("stack_sizes")) {
+                    createStackSizesTable(adapter);
+                    seedStackSizes(adapter);
+                } else {
+                    reconcileStackSizes(adapter);
+                }
             }
         });
 
         return migrations;
+    }
+
+    /* ---------------- Shared DDL, so migrations 13/14/15 cannot drift apart ---------------- */
+
+    /** Upstream's quest_shares DDL. Called by migration 13 and, for a fork-lineage database that
+     *  skipped it, by migration 15. */
+    private static void createQuestSharesTable(DatabaseAdapter adapter) throws SQLException {
+        boolean pg = (adapter instanceof nurgling.db.PostgresAdapter);
+
+        /* Logged, unlike peer_positions: an offline villager's quests are still real, and
+         * nobody would republish them after a server restart until that villager logs in.
+         *
+         * fillfactor 70 and no index on updated_at for the same reason as migration 12: the
+         * once-a-minute heartbeat rewrites only updated_at, and leaving room on the page keeps
+         * that a HOT update. */
+        createTable(adapter, "quest_shares",
+            "CREATE TABLE quest_shares (" +
+            "profile VARCHAR(255) NOT NULL, " +
+            "char_name VARCHAR(255) NOT NULL, " +
+            /* JSON, see nurgling.widgets.quest.SharedQuests */
+            "data TEXT NOT NULL, " +
+            /* Changes with every content write, never with a heartbeat, so readers refetch
+             * data only when there is something new in it. */
+            "version INTEGER NOT NULL DEFAULT 1, " +
+            /* Written from the database's clock, in UTC on PostgreSQL; see QuestShareDao. */
+            "updated_at TIMESTAMP NOT NULL, " +
+            "PRIMARY KEY (profile, char_name)" +
+            ")" + (pg ? " WITH (fillfactor = 70)" : ""));
+        System.out.println("Created quest_shares table");
+    }
+
+    /** Upstream's timers DDL. Called by migration 14 and, as a backstop, by migration 15. */
+    private static void createTimersTable(DatabaseAdapter adapter) throws SQLException {
+        createTable(adapter, "timers",
+            "CREATE TABLE timers (" +
+            /* Deterministic for resource timers (see nurgling.timers.Timer.resourceId), so two
+             * villagers timing one resource share a row; random for pins and reminders. */
+            "id VARCHAR(64) PRIMARY KEY, " +
+            "profile VARCHAR(255) NOT NULL DEFAULT 'global', " +
+            "kind VARCHAR(16) NOT NULL, " +
+            /* Server grid id plus the tile offset inside it; NULL for reminders. */
+            "grid_id BIGINT, " +
+            "ox INTEGER, " +
+            "oy INTEGER, " +
+            "res_type VARCHAR(255), " +
+            "name VARCHAR(255) NOT NULL, " +
+            "icon VARCHAR(64), " +
+            /* Epoch ms on the database's clock; clients convert with their measured offset. */
+            "started_at BIGINT NOT NULL, " +
+            "duration_ms BIGINT NOT NULL, " +
+            "repeat_ms BIGINT NOT NULL DEFAULT 0, " +
+            "set_by VARCHAR(255), " +
+            /* Task deadlines only: the To-Do item they belong to, and who it is assigned to. */
+            "task_id INTEGER, " +
+            "assignee VARCHAR(255), " +
+            "version INTEGER NOT NULL DEFAULT 1, " +
+            "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "last_touched_by VARCHAR(255), " +
+            "deleted_at TIMESTAMP" +
+            ")");
+        safeCreateIndex(adapter, "CREATE INDEX idx_timers_profile ON timers (profile)");
+        safeCreateIndex(adapter, "CREATE INDEX idx_timers_deleted ON timers (profile, deleted_at)");
+        safeCreateIndex(adapter, "CREATE INDEX idx_timers_grid ON timers (profile, grid_id)");
+        System.out.println("Created timers table");
+    }
+
+    /**
+     * This fork's stack_sizes DDL - the shared, self-correcting item stack-size table that
+     * supersedes {@code nurgling.tools.StackSupporter}'s static table wherever a DB-backed answer is
+     * available. Optional, like fish_locations: a role without CREATE must not lose area, planning
+     * and recipe sync over it, because every caller already falls back to the static table.
+     */
+    private static void createStackSizesTable(DatabaseAdapter adapter) throws SQLException {
+        boolean pg = (adapter instanceof nurgling.db.PostgresAdapter);
+        String boolType = pg ? "BOOLEAN" : "INTEGER";
+        String boolDefault = pg ? "TRUE" : "1";
+
+        createTable(adapter, "stack_sizes",
+            "CREATE TABLE stack_sizes (" +
+            "profile VARCHAR(255) NOT NULL DEFAULT 'global', " +
+            "name VARCHAR(255) NOT NULL, " +
+            "max_stack INTEGER NOT NULL, " +
+            "stackable " + boolType + " NOT NULL DEFAULT " + boolDefault + ", " +
+            /* 'seed' | 'learned' | 'manual' - see StackSizeDao. Not a foreign-keyed enum
+             * table: three fixed values, checked only in Java. */
+            "provenance VARCHAR(32) NOT NULL DEFAULT 'seed', " +
+            "version INTEGER NOT NULL DEFAULT 1, " +
+            "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "last_touched_by VARCHAR(255), " +
+            "last_touched_at TIMESTAMP, " +
+            "deleted_at TIMESTAMP, " +
+            "PRIMARY KEY (profile, name)" +
+            ")");
+        safeCreateIndex(adapter, "CREATE INDEX idx_ss_profile ON stack_sizes (profile)");
+        safeCreateIndex(adapter, "CREATE INDEX idx_ss_deleted ON stack_sizes (deleted_at)");
+        System.out.println("Created stack_sizes table");
+    }
+
+    /**
+     * First-time population of a freshly created stack_sizes, so the DB starts at least as good as
+     * the built-in table.
+     *
+     * <p>Reads {@link nurgling.tools.StackSupporter#staticSeedSnapshot()} - the deliberately
+     * <b>static-only</b> view - rather than the DB-aware {@code getFullStackSize()}, so seeding can
+     * never depend on whether {@code StackSizeService} happens to be constructed yet. Seeded under
+     * profile 'global' because the static table is not genus-specific.
+     */
+    private static void seedStackSizes(DatabaseAdapter adapter) throws SQLException {
+        boolean pg = (adapter instanceof nurgling.db.PostgresAdapter);
+        Map<String, nurgling.tools.StackSupporter.StaticStackFact> snapshot =
+            nurgling.tools.StackSupporter.staticSeedSnapshot();
+        int seeded = 0;
+        for (Map.Entry<String, nurgling.tools.StackSupporter.StaticStackFact> e : snapshot.entrySet()) {
+            nurgling.tools.StackSupporter.StaticStackFact fact = e.getValue();
+            Object stackableValue = pg ? fact.stackable : (fact.stackable ? 1 : 0);
+            adapter.executeUpdate(
+                "INSERT INTO stack_sizes (profile, name, max_stack, stackable, provenance, version) " +
+                "VALUES ('global', ?, ?, ?, 'seed', 1)",
+                e.getKey(), fact.maxStack, stackableValue);
+            seeded++;
+        }
+        System.out.println("Seeded " + seeded + " rows into stack_sizes from the static table");
+    }
+
+    /**
+     * Brings an existing stack_sizes table's <b>generated</b> rows back in line with the current
+     * static table, and inserts rows for names the static table has newly learned about.
+     *
+     * <p>Necessary because {@link nurgling.tools.StackSupporter} consults the DB <i>first</i> and
+     * only falls back to the static table when the DB has no opinion. A 'seed' row written by an
+     * older client therefore <b>shadows</b> any correction a later client's static table carries,
+     * and passive learning cannot undo that in general: {@code StackSizeDao.upsertIfBigger} only
+     * ever raises {@code max_stack} (it can flip a wrongly-unstackable row to stackable once a real
+     * stack is seen, but can never correct a max_stack downwards).
+     *
+     * <p>Rules, in order of precedence:
+     * <ul>
+     *   <li>{@code provenance='manual'} and {@code 'learned'} rows are never touched - a player's
+     *       calibration and an actually-observed stack both outrank a generated guess.</li>
+     *   <li>Tombstoned rows ({@code deleted_at IS NOT NULL}) are never resurrected and never
+     *       updated. A tombstone is the calibration UI's "forget this row, go back to the static
+     *       table" - which, post-merge, means the <i>new</i> static table. Resurrecting it would
+     *       silently undo a deliberate player action.</li>
+     *   <li>A live 'seed' row whose values no longer match the static table is updated, with
+     *       {@code version = version + 1}. The version bump is load-bearing, not cosmetic:
+     *       {@code StackSizeService.runDeltaPoll()} refetches a row only when the database's
+     *       version exceeds its cached one, so a silent in-place update would never reach any other
+     *       client sharing this database.</li>
+     *   <li>{@code last_touched_by}/{@code last_touched_at} are deliberately left alone. They record
+     *       <i>who</i> edited a row; a generated reconciliation has no human author, and
+     *       overwriting them would misattribute this change to whoever last touched the row.</li>
+     *   <li>A name the static table knows and the table has no row for at all - not even a
+     *       tombstone - is inserted as a fresh 'seed' row.</li>
+     * </ul>
+     *
+     * <p><b>Stale live seed rows absent from the current static snapshot are corrected in place,
+     * not tombstoned.</b> Tombstoning on absence was considered and rejected: the snapshot is
+     * best-effort by construction ({@code seedCandidateNames()} skips any category VSpec cannot
+     * resolve, swallowing the error), so treating "absent from the snapshot" as "delete it" turns a
+     * tolerant read into a destructive write that could wipe hundreds of valid rows the one time
+     * VSpec is incomplete. Instead this recomputes the current static answer for every live seed row
+     * by name - {@code isStackableByName}/{@code getFullStackSizeStatic} are pure functions over the
+     * static tables and cannot throw - so a row whose name the static table no longer recognises is
+     * simply rewritten to the fallback answer (unstackable, 1), which is behaviourally identical to
+     * the row not existing, without any of the risk.
+     */
+    private static void reconcileStackSizes(DatabaseAdapter adapter) throws SQLException {
+        boolean pg = (adapter instanceof nurgling.db.PostgresAdapter);
+
+        /* Every row's current state, read once. liveSeed holds the rows this may rewrite; present
+         * holds every name with any row at all (tombstones and manual/learned included) so an
+         * INSERT is only attempted for a name the table has never heard of. */
+        Map<String, int[]> liveSeed = new LinkedHashMap<>();
+        java.util.Set<String> present = new java.util.HashSet<>();
+        try (ResultSet rs = adapter.executeQuery(
+                "SELECT name, max_stack, stackable, provenance, deleted_at FROM stack_sizes WHERE profile = 'global'")) {
+            while (rs.next()) {
+                String name = rs.getString("name");
+                present.add(name);
+                boolean live = (rs.getTimestamp("deleted_at") == null);
+                if (live && "seed".equals(rs.getString("provenance"))) {
+                    liveSeed.put(name, new int[] {rs.getInt("max_stack"), rs.getBoolean("stackable") ? 1 : 0});
+                }
+            }
+        }
+
+        /* Union of "what the static table knows now" and "what we already generated", so a seed row
+         * for a name the static table has since dropped is still corrected rather than left stale. */
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>(
+            nurgling.tools.StackSupporter.staticSeedSnapshot().keySet());
+        names.addAll(liveSeed.keySet());
+
+        int updated = 0, inserted = 0;
+        for (String name : names) {
+            boolean stackable = nurgling.tools.StackSupporter.isStackableByName(name);
+            int maxStack = stackable ? nurgling.tools.StackSupporter.getFullStackSizeStatic(name) : 1;
+            int[] cur = liveSeed.get(name);
+            if (cur != null) {
+                if (cur[0] != maxStack || (cur[1] != 0) != stackable) {
+                    adapter.executeUpdate(
+                        "UPDATE stack_sizes SET max_stack = ?, stackable = ?, version = version + 1, " +
+                        "updated_at = CURRENT_TIMESTAMP " +
+                        "WHERE profile = 'global' AND name = ? AND provenance = 'seed' AND deleted_at IS NULL",
+                        maxStack, pg ? stackable : (stackable ? 1 : 0), name);
+                    updated++;
+                }
+            } else if (!present.contains(name)) {
+                adapter.executeUpdate(
+                    "INSERT INTO stack_sizes (profile, name, max_stack, stackable, provenance, version) " +
+                    "VALUES ('global', ?, ?, ?, 'seed', 1)",
+                    name, maxStack, pg ? stackable : (stackable ? 1 : 0));
+                inserted++;
+            }
+            /* else: a manual, learned or tombstoned row - left exactly as it is. */
+        }
+        System.out.println("Reconciled stack_sizes against the static table: "
+            + updated + " seed row(s) corrected, " + inserted + " added");
     }
 
     /**
