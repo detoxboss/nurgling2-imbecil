@@ -93,8 +93,9 @@ matching item with no `Amount` info, so only safe when every match is guaranteed
   client-side heuristic table** (per-name overrides, a `catExceptions` never-stacks set, then
   category lookup in `categorySize`, e.g. `"Berry"`/`"Fruit or Berry"`/`"Seed of Tree or Bush"`/
   `"Mushroom"` → 4), not anything read from the server/protocol — but as of the shared `stack_sizes`
-  DB table (migration 15 as of the 2026-09-30 upstream sync, previously 13 —
-  `nurgling/db/migration/MigrationManager.java`; `nurgling/db/service/StackSizeService.java`), both
+  DB table (created by the fork migration ledger as of the 2026-10-07 upstream sync; previously
+  upstream migration 15, and before that 13 —
+  `nurgling/db/migration/ForkMigrationManager.java`; `nurgling/db/service/StackSizeService.java`), both
   methods consult that table *first* whenever a database is configured, and only fall back to the
   static table when the DB has no opinion on a given name. The DB-backed table starts seeded from
   the static one, then self-corrects: it's passively updated whenever a client observes a real
@@ -105,16 +106,27 @@ matching item with no `Amount` info, so only safe when every match is guaranteed
   `NArea`s do. Treat the *static table alone* as "best known, may need updating if game balance
   changes, not ground truth" — but with the DB layer configured, staleness for any item someone has
   actually played with (or manually calibrated) self-heals without a client update.
-  - **Why migration 15, not 13.** This fork's migration 13 (`stack_sizes`) and upstream Nurgling2's
-    own migration 13 (`quest_shares`)/14 (`timers`) were two independently-shipped, version-colliding
-    schema lineages — `MigrationManager.runMigrations()` only runs a migration whose version is
-    strictly above the database's recorded one, so a database already stamped 13 by a released fork
-    client would have skipped upstream's migration 13 forever. Migration 15 is the compatibility
-    bridge, reached from either lineage: it ensures `quest_shares`, `timers`, and `stack_sizes` all
-    exist (whichever subset a given database is missing), then reconciles `stack_sizes`.
-  - **Static-seed reconciliation.** When `stack_sizes` already exists, migration 15 recomputes every
-    live `provenance='seed'` row against the *current* static table and corrects it in place
-    (`reconcileStackSizes()` in `MigrationManager.java`). This exists because a 'seed' row is a
+  - **Why a separate fork migration ledger, not an upstream version number (2026-10-07 sync).** This
+    fork claimed a number in upstream's positive `schema_version` sequence twice, and collided both
+    times: `stack_sizes` as 13 against upstream's `quest_shares` 13, then the compatibility bridge as
+    15 against upstream's `forage_finds` 15. The pattern is structural — any positive number this
+    fork takes is a number upstream will eventually reach — so fork-specific migrations no longer use
+    that sequence at all. `nurgling/db/migration/ForkMigrationManager.java` records fork migrations by
+    stable string id in its own `fork_schema_migrations` table and writes nothing to
+    `schema_version`; `schema_version` remains the upstream migration namespace (upstream's own
+    numbered migrations still record themselves there, as they should). See
+    `docs/fork-customization-ledger.md`, "Fork database extensions: additive, isolated, own ledger",
+    for the standing rule and the compatibility property this buys.
+  - **The convergence migration.** The fork's first ledger migration
+    (`MIGRATION_STACK_SIZES_BRIDGE`, id `0001-stack-sizes-lineage-bridge`) is the bridge, reached from
+    every lineage: it ensures `quest_shares`, `timers`, `forage_finds` and `stack_sizes` all exist
+    (whichever subset a given database is missing), then reconciles `stack_sizes`. `forage_finds` is
+    in that list specifically because a released fork v1.0.9 database already reads positive version
+    15, so upstream's own migration 15 can never run on it again. It reuses
+    `MigrationManager.createForageFindsTable()` rather than carrying a second copy of that DDL.
+  - **Static-seed reconciliation.** When `stack_sizes` already exists, the convergence migration
+    recomputes every live `provenance='seed'` row against the *current* static table and corrects it
+    in place (`reconcileStackSizes()` in `ForkMigrationManager.java`). This exists because a 'seed' row is a
     generated guess from whatever static table was current when it was written, and
     `StackSizeService.lookup()` is an unconditional override of the static table — so a stale seed
     row silently **shadows** a later static-table correction forever, something passive learning
@@ -129,12 +141,14 @@ matching item with no `Amount` info, so only safe when every match is guaranteed
     a row when the database's recorded version exceeds the version it last cached, so a reconciliation
     UPDATE that didn't bump `version` would correct the row in storage but never propagate to any
     other client already running against the same database.
-  - **Future invariant.** Migration 15 reconciles the generation of `provenance='seed'` rows that
-    exists *at the time this sync landed*, once. **A future release that changes a built-in static
-    stack fact already represented by a live `provenance='seed'` row must ship its own
-    reconciliation/version-bump mechanism** (a new migration, or equivalent) — otherwise that
-    database row can shadow the newer static fallback indefinitely, with no self-healing path, since
-    a downward max-stack correction is exactly what passive learning cannot do on its own.
+  - **Future invariant.** The convergence migration reconciles the generation of `provenance='seed'`
+    rows that exists *at the time it first runs on a given database*, once. **A future release that
+    changes a built-in static stack fact already represented by a live `provenance='seed'` row must
+    ship its own reconciliation/version-bump mechanism** — now a *new fork ledger migration* (a new
+    string id in `ForkMigrationManager.getForkMigrations()`), never a new positive `schema_version`
+    number. Otherwise that database row can shadow the newer static fallback indefinitely, with no
+    self-healing path, since a downward max-stack correction is exactly what passive learning cannot
+    do on its own.
 - `nurgling/tasks/GetNotFullStack.java` / `GetNotStack.java` find an existing mergeable stack/lone
   item of a given name by comparing `wmap.size()` against `getFullStackSize(name)`.
 - **Quality does not gate stacking** — `haven/res/ui/tt/stackn/Stack.java:56-72` *averages*

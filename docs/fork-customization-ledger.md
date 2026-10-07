@@ -70,10 +70,29 @@ not assumed to still be the better choice.
 ## Explicit-session area/scenario/explored-area persistence
 
 **Files:** `src/nurgling/NConfig.java` (`writeAreas`/`writeScenarios` with an explicit session
-argument), `src/nurgling/tools/ExploredArea.java` (`saveIfDue()`/`saveNow()`)
+argument), `src/nurgling/tools/ExploredArea.java` (`saveIfDue()`/`saveOnTeardown()`)
 
 **Fork behavior:** Persistence calls take an explicit owning-session argument rather than resolving
 "the current session" ambiently at save time.
+
+**Explored area — fork ownership over upstream's async writer (2026-10-07 sync).** `NConfig`'s
+ambient explored-area machinery (`isExploredUpd`/`lastExploredChangeTime`/`isExploredUpdated()`/
+`needExploredUpdate()`/`writeExploredArea()`) stays **deleted**; upstream keeps improving it and
+every sync re-offers it. The dirty flag, debounce window, revision counter and retry backoff all live
+on the per-session `ExploredArea` instance, and the trigger is this session's own `NCore.tick()` →
+`exploredArea.saveIfDue()`, with `NGameUI.dispose()` → `exploredArea.saveOnTeardown()` as the flush.
+Upstream's *writer* is taken in full: `saveAsync()` on a dedicated executor, and
+`mergeAndSaveToFile()`'s file lock, single retry, refuse-rather-than-clobber and
+preserve-exploration-discovered-during-the-save epoch recheck.
+
+Three invariants hold that combination together, and a future merge must not quietly drop any of
+them: the profile path is resolved **on the caller's thread** from the owning session (never inside
+the worker — that is what made it ambient in the first place); a completed save clears the dirty flag
+**only if `revision` has not moved** since it captured it, so a write that lands after newer tiles
+were discovered cannot mark them clean; and a failed/busy write leaves the flag set but advances
+`nextAttemptAt`, so a locked file costs one backed-off attempt rather than a `tryLock` plus a 100 ms
+sleep on every tick. `saveOnTeardown()` waits on a bounded budget and, on timeout, leaves the data
+dirty rather than falsely clearing it.
 
 **Why:** With multiple sessions live at once, an ambient "current session" lookup can resolve to the
 wrong session's data at the moment a background save fires — the explicit argument makes ownership
@@ -134,6 +153,24 @@ in this same file:
 Both read per-session state (`gui.timerStore`, `gui.labeledMarkService`) and both drive interaction,
 not just drawing — an ambient lookup here doesn't just mis-render a backgrounded tab, it lets that
 tab's clicks/hovers act on a *different* session's timers or marks.
+
+As of the 2026-10-07 sync this covers **three more**, all introduced by upstream's new forage-find
+feature and all corrected during that merge for the same reason:
+
+- `NMiniMap.forageClusters()` and `NMiniMap.forageRightClick()` — arrived as
+  `NGameUI gui = NUtils.getGameUI()`; changed to `(this.ui != null) ? this.ui.gui : null`.
+- `MapToolsWindow.openForageSearch()` — arrived as a `static` method resolving `NUtils.getGameUI()`;
+  changed to take the owning `NGameUI` explicitly. Its two call sites
+  (`MapToolsWindow`'s own Search button, `NMapWnd`'s forage toolbar toggle) now pass their own
+  `ui.gui`. The **other** static search helpers in `MapToolsWindow` (`openTreeSearch`,
+  `openMineralSearch`, `openFishSearch`, `showSearchTab`, …) are pre-existing and deliberately left
+  ambient — fix the lookup upstream newly introduced, don't rewrite legacy in a sync.
+
+`ForageStore` is **per-world** (`SessionManager.forageStore(genus)`), not per-session, so the
+practical failure is narrower than the timer case but real: two sessions on *different worlds* let a
+backgrounded tab draw, tooltip and right-click the other world's finds, and `openForageMenu`/
+`openForageSearch` attach their menu/window to the wrong session's widget tree in every
+multi-session case.
 
 **Verify:** two sessions, each viewing a different part of the map; confirm each minimap tracks its own
 session's player position, not the other's. As of 2026-09-30: also open two sessions with different
@@ -251,6 +288,36 @@ occurrences — this predates the fork's own history and is not a fork customiza
 at the top of this document.
 
 **Superseded when:** never wholesale.
+
+## Raw player coordinate for server clicks (`MapView.getccRaw()`)
+
+**Files:** `src/haven/MapView.java` (`getccRaw()`), `src/nurgling/actions/UseMilestone.java`
+
+**Fork behavior:** `MapView.getcc()` is upstream's and returns `Gob.getrenderc()` — the
+movement-smoothed, interpolated position, which is what the camera and the scene want. The fork adds
+a sibling `getccRaw()` returning `Gob.getc()`, the position the server last placed the player at,
+and `UseMilestone` uses it for its milestone-travel confirm/cancel click.
+
+**Why:** upstream's movement smoothing (2026-10-07 sync, PR #419/#422) changed `getcc()` from
+`pl.getc()` to `pl.getrenderc()`. `getcc()` is also what gameplay code reaches for, so every caller
+that turns "where the player is" back into a click sent to the server silently started clicking at an
+interpolated point the player is not standing on yet. Upstream's own PR called this out for
+`UseMilestone` specifically, but `UseMilestone` is fork-owned so upstream will not fix it. Disabling
+smoothing globally was rejected: it is a real visual improvement and every other caller audited
+(`PathFinder`, `H4DMarketScanner`/`MarketStandOrdering`, `ChunkNav`, both player-coordinate HUD
+readouts) reads `Gob.rc` directly and is unaffected. A narrow raw accessor is the smaller change.
+
+**Minimum hook that must survive:** `getccRaw()` keeps existing and keeps returning `pl.getc()` (not
+`getrenderc()`); `UseMilestone`'s `confirmPoint` keeps using it. **New rule for future work:** use
+`getccRaw()` for a click, a `wdgmsg`, or any interaction that must land on the authoritative
+position; use `getcc()` for rendering, camera and overlays.
+
+**Verify:** `ant test-movement-smoothing` (upstream's own harness, covers the smoothing itself); in
+client, run Forager milestone travel and confirm the peek-window confirm and the danger-guard cancel
+both land, including while moving.
+
+**Superseded when:** upstream adds an equivalent authoritative-position accessor of its own, or stops
+routing `getcc()` through the smoothed position.
 
 ## Player world-coordinate HUD text
 
@@ -731,11 +798,74 @@ confirm resetting one never clears the other.
 persistent per-object identity of its own — at which point this override should be diffed against
 upstream's approach rather than assumed to still be correct.
 
+## Fork database extensions: additive, isolated, own ledger
+
+**Files:** `src/nurgling/db/migration/ForkMigrationManager.java` (fork-owned),
+`src/nurgling/db/migration/MigrationManager.java` (upstream-owned; only a handful of package-visible
+DDL helpers are fork-facing), `src/nurgling/db/DatabaseManager.java` (runs both passes, reports them
+separately).
+
+**Fork behavior — the standing rule.** Two migration namespaces, two owners, and the boundary is not
+negotiable. The precise invariant is **fork-specific migrations never claim or advance the
+upstream-owned positive `schema_version` namespace** — not that this fork never writes that table at
+all. The merged client still runs upstream's own numbered migrations, and recording each of those in
+`schema_version` is exactly what it is supposed to do:
+
+- **`schema_version` is the upstream migration namespace.** Its positive integer sequence belongs to
+  upstream Nurgling2 alone. Rows appear in it only as upstream's own migrations are applied. **This
+  fork must never claim a number in it for fork-specific schema.**
+- **`fork_schema_migrations` is the fork-only migration namespace.** Fork-only schema migrations are
+  recorded there, keyed by a **stable descriptive string id** (e.g.
+  `0001-stack-sizes-lineage-bridge`), never by an integer borrowed from upstream's sequence.
+  `ForkMigrationManager` writes only to this table, never to `schema_version`.
+- **Fork database objects are additive and isolated.** A new fork-only object takes a `fork_` or
+  `h4d_` prefixed name, and gets a fork ledger migration. Do **not** change the *semantics* of a
+  table upstream owns without a compelling compatibility reason. `stack_sizes` keeps its unprefixed
+  name as a deliberate exception: released clients already read and write it, and renaming it would
+  strand their rows for no gain.
+
+**Why.** The fork claimed an upstream positive version twice and collided both times — `stack_sizes`
+as migration 13 against upstream's `quest_shares` 13 (2026-09-30 sync), then the compatibility
+bridge as migration 15 against upstream's `forage_finds` 15 (2026-10-07 sync). Each collision cost a
+hand-written bridge, and the first one forced a coordinated upgrade of every client sharing a
+database. The pattern is structural, not bad luck: any positive number this fork takes is a number
+upstream will eventually reach. A version-16 bridge would simply have scheduled the third collision.
+
+**The compatibility property this buys, and the one number it rests on.**
+`MigrationManager.runMigrations()` throws `SchemaTooNewException` when a database's recorded version
+exceeds the client's own `CLIENT_MAX_SCHEMA_VERSION`. Keeping fork migrations out of
+`schema_version` keeps `MAX(schema_version.version)` reporting exactly what a plain upstream client
+would report — **15** after this sync — so a released fork v1.0.9 client and a released upstream
+client both keep accepting a database this fork has migrated. Extra fork tables are inert to them:
+nothing in upstream's numbered migration list drops a table it does not know about, it only ever
+creates, and every optional feature is gated on `DatabaseManager.tableUsable(...)` (table presence),
+never on a version number.
+
+**Minimum hook that must survive:** `CLIENT_MAX_SCHEMA_VERSION` must track **upstream's** highest
+migration and nothing else; no *fork-specific* migration may insert a `schema_version` row (upstream's
+own migrations of course still do); `ForkMigrationManager`
+must stay the only writer of `fork_schema_migrations`; every fork migration stays optional (a failure
+is reported and retried, never recorded, never fatal to the rest of the database); and no fork DDL may
+be duplicated out of `MigrationManager` — reuse its package-visible creators
+(`createQuestSharesTable`, `createTimersTable`, `createForageFindsTable`, `createTable`, `grantDml`,
+`safeCreateIndex`) so one table never has two definitions that can drift.
+
+**Verify:** `test/nurgling/db/migration/MigrationLineageTest.java` — in particular
+`forkMigrationsNeverTouchSchemaVersion` (no fork row in `schema_version`, positive MAX unmoved, ids
+are not bare integers) and `postMergeDatabaseIsStillAcceptedByAMax15Client` (no
+`SchemaTooNewException`, fork tables and ledger not dropped). Plus the disposable-PostgreSQL lineage
+run recorded in `docs/upstream-sync-history/2026-10-07.md`, which additionally covers a restricted
+role that cannot create the ledger.
+
+**Superseded when:** never wholesale. The rule retires only if upstream adopts a fork-extension
+mechanism of its own — at which point the fork's ledger should be diffed against it rather than
+assumed still necessary.
+
 ## DB-backed shared stack-size system
 
 **Files:** `src/nurgling/tools/StackSupporter.java`, `src/nurgling/db/service/StackSizeService.java`,
-`src/nurgling/db/dao/StackSizeDao.java`, `src/nurgling/db/migration/MigrationManager.java`
-(migrations 13 → now 15, see below), `src/nurgling/widgets/db/StackSizeCalibrationWindow.java`,
+`src/nurgling/db/dao/StackSizeDao.java`, `src/nurgling/db/migration/ForkMigrationManager.java`
+(migration 13 → 15 → the fork ledger, see below), `src/nurgling/widgets/db/StackSizeCalibrationWindow.java`,
 `src/nurgling/db/DatabaseManager.java` (`getStackSizeService()`), `src/nurgling/NInventory.java`
 (passive learning), `src/nurgling/NConfig.java` (`Key.stackSizeLearning`).
 
@@ -777,16 +907,19 @@ it can never flip a wrongly-seeded `stackable=true` back to `false`. A downward 
 game's actual balance turning out smaller than what a stale seed row recorded) requires the migration
 15 reconciliation path below; passive learning alone cannot self-heal that direction.
 
-**Compatibility bridge — migration 13 renumbered to 15 (2026-09-30 sync).** This fork's original
-`stack_sizes` migration was numbered 13, independently colliding with upstream Nurgling2's own
-migration 13 (`quest_shares`, upstream's village-quest-sharing feature) — two incompatible schema
-lineages claiming the same version number. Resolved during the 2026-09-30 upstream sync by
-renumbering this fork's migration to **15** and turning it into a compatibility bridge: it now
-ensures `quest_shares`/`timers`/`stack_sizes` all exist regardless of which lineage a given database
-came from, then reconciles `stack_sizes`'s generated (`provenance='seed'`) rows against the current
-static table — manual/learned rows and tombstones are never touched. Full design and the "future
-release" obligation this creates are in `docs/inventory-grid-system.md` §3; do not re-derive the
-reconciliation rules here, that document is canonical for this subsystem.
+**Compatibility bridge — moved out of upstream's version sequence entirely (2026-10-07 sync).** This
+fork's `stack_sizes` migration was numbered 13, collided with upstream's `quest_shares` 13, was
+renumbered to 15 during the 2026-09-30 sync — and then collided again with upstream's
+`forage_finds` 15. It is no longer a numbered migration at all. It is now the first fork ledger
+migration (`ForkMigrationManager.MIGRATION_STACK_SIZES_BRIDGE`, id
+`0001-stack-sizes-lineage-bridge`), recorded in `fork_schema_migrations`, and it ensures
+`quest_shares`/`timers`/`forage_finds`/`stack_sizes` all exist regardless of which lineage a given
+database came from, then reconciles `stack_sizes`'s generated (`provenance='seed'`) rows against the
+current static table — manual/learned rows and tombstones are never touched. The table name
+`stack_sizes` is deliberately unchanged, for released clients' sake. See the "Fork database
+extensions" entry above for the standing rule; full design and the "future release" obligation are in
+`docs/inventory-grid-system.md` §3, which is canonical for this subsystem — do not re-derive the
+reconciliation rules here.
 
 **`version` increment requirement for sync propagation.** Any write that changes a row's stored
 value — passive learning, manual calibration, or migration-time reconciliation — must increment

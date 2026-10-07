@@ -101,7 +101,11 @@ public class UseMilestone implements Action {
         // instead of second-guessing that choice with a hardcoded trigger and outcome.
         NUtils.getUI().core.addTask(new WaitDuration(PEEK_WAIT_MS));
 
-        Coord2d confirmPoint = new Coord2d(gui.map.getcc());
+        /* getccRaw(), not getcc(): this point is clicked at, not drawn. Upstream's movement
+         * smoothing made getcc() return the interpolated render position, which is a point the
+         * player may not actually be standing on yet - and the milestone confirm/cancel click has
+         * to land on the authoritative one. See MapView.getccRaw(). */
+        Coord2d confirmPoint = new Coord2d(gui.map.getccRaw());
         Guard triggeredGuard = findTriggeredDangerGuard(gui);
         if (triggeredGuard != null) {
             gui.msg("Forager: bailing on milestone travel - " + triggeredGuard.trigger.describe()

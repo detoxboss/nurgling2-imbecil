@@ -34,6 +34,7 @@ public class DatabaseManager {
     private nurgling.db.service.StackSizeService stackSizeService;
     private nurgling.db.service.QuestShareDbService questShareService;
     private nurgling.db.service.TimerSyncService timerSyncService;
+    private nurgling.db.service.ForageSyncService forageSyncService;
     private nurgling.db.service.FishLocationSeeder fishLocationSeeder;
     private nurgling.db.service.MapDbService mapDbService;
     private nurgling.db.service.VillagerService villagerService;
@@ -44,6 +45,8 @@ public class DatabaseManager {
      * themselves unavailable; everything else initialises normally.
      */
     private volatile java.util.Map<Integer, String> skippedMigrations = java.util.Collections.emptyMap();
+    /** Fork-owned migrations this database refused, as id -> reason. See ForkMigrationManager. */
+    private volatile java.util.Map<String, String> skippedForkMigrations = java.util.Collections.emptyMap();
 
     /* Which tables this role can actually see, and the schema version, read once per connect.
      * information_schema already filters by privilege, so membership here means the same thing the
@@ -318,6 +321,12 @@ public class DatabaseManager {
                     // Run migrations FIRST using this connection
                     this.skippedMigrations = runMigrations(conn);
 
+                    /* Then the fork's own ledger, in its own table, never touching schema_version.
+                     * After upstream's, because its convergence step checks which of upstream's
+                     * tables actually ended up present; before loadSchemaSnapshot(), because the
+                     * tables it creates are what tableUsable() has to be able to see. */
+                    this.skippedForkMigrations = runForkMigrations(conn);
+
                     // One query up front; everything below reads it instead of asking per table.
                     loadSchemaSnapshot();
 
@@ -438,6 +447,14 @@ public class DatabaseManager {
         if (!timersOk) {
             System.err.println("[DatabaseManager] timers unavailable; "
                 + "timers stay on their JSON file and are not shared");
+        }
+
+        /* Checked like timers. Without it forage finds stay on their JSON file and are not shared. */
+        boolean forageOk = tableUsable("forage_finds");
+        this.forageSyncService = forageOk ? new nurgling.db.service.ForageSyncService(this) : null;
+        if (!forageOk) {
+            System.err.println("[DatabaseManager] forage_finds unavailable; "
+                + "forage finds stay on their JSON file and are not shared");
         }
 
         boolean mapOk = tableUsable("map_grids")
@@ -568,21 +585,38 @@ public class DatabaseManager {
                 feature = "Quest sharing";
             } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_TIMERS) {
                 feature = "Timer sharing";
-            } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_STACK_SIZES) {
-                /* Migration 15 is also the fork/upstream schema-lineage bridge, so a skip here can
-                 * mean quest_shares or timers is missing too, not only stack_sizes. */
-                feature = "Stack size calibration sync (schema compatibility bridge)";
+            } else if (e.getKey() == nurgling.db.migration.MigrationManager.MIGRATION_FORAGE_FINDS) {
+                feature = "Forage find sharing";
             } else {
                 feature = "Schema update " + e.getKey();
             }
-            System.err.println("[DatabaseManager] " + feature + " unavailable: " + e.getValue());
-            try {
-                if (nurgling.NUtils.getGameUI() != null) {
-                    nurgling.NUtils.getGameUI().msg(feature + " unavailable: " + e.getValue(),
-                        java.awt.Color.ORANGE);
-                }
-            } catch (Exception ignore) {}
+            reportSkipped(feature, e.getValue());
         }
+        /* Reported separately from upstream's numbered migrations, and never conflated with them:
+         * these come out of the fork's own ledger (fork_schema_migrations) and are keyed by a
+         * string id, so a reader can tell at a glance whether the database refused upstream schema
+         * or fork schema. See ForkMigrationManager. */
+        for (java.util.Map.Entry<String, String> e : skippedForkMigrations.entrySet()) {
+            String feature;
+            if (nurgling.db.migration.ForkMigrationManager.MIGRATION_STACK_SIZES_BRIDGE.equals(e.getKey())) {
+                /* This migration also converges the schema lineages, so a skip here can mean
+                 * quest_shares, timers or forage_finds is missing too, not only stack_sizes. */
+                feature = "Stack size calibration sync (fork schema convergence)";
+            } else {
+                feature = "Fork schema update " + e.getKey();
+            }
+            reportSkipped(feature, e.getValue());
+        }
+    }
+
+    private void reportSkipped(String feature, String reason) {
+        System.err.println("[DatabaseManager] " + feature + " unavailable: " + reason);
+        try {
+            if (nurgling.NUtils.getGameUI() != null) {
+                nurgling.NUtils.getGameUI().msg(feature + " unavailable: " + reason,
+                    java.awt.Color.ORANGE);
+            }
+        } catch (Exception ignore) {}
     }
 
     public nurgling.db.service.VillagerService getVillagerService() {
@@ -600,6 +634,36 @@ public class DatabaseManager {
     /** Optional migrations this database refused, as version -> reason. Empty when all applied. */
     public java.util.Map<Integer, String> getSkippedMigrations() {
         return skippedMigrations;
+    }
+
+    /** Fork-owned migrations this database refused, as id -> reason. Empty when all applied. */
+    public java.util.Map<String, String> getSkippedForkMigrations() {
+        return skippedForkMigrations;
+    }
+
+    /**
+     * Run this fork's own migrations, out of its own ledger.
+     *
+     * <p>Never throws. Every fork migration is optional by construction, so a database that refuses
+     * one must still come up with everything else working - the features involved all degrade to a
+     * local fallback, and {@link #tableUsable(String)} is what decides whether each one is wired
+     * up. A failure is reported and retried on the next start, never stamped as success.
+     */
+    private java.util.Map<String, String> runForkMigrations(Connection conn) {
+        try {
+            DatabaseAdapter forkAdapter = DatabaseAdapterFactory.createAdapter(conn);
+            java.util.Map<String, String> skipped =
+                new nurgling.db.migration.ForkMigrationManager(conn, forkAdapter).runForkMigrations();
+            conn.commit();
+            return skipped;
+        } catch (SQLException e) {
+            System.err.println("[DatabaseManager] fork migrations could not be run: " + e.getMessage());
+            try {
+                conn.rollback();
+            } catch (SQLException ignore) {
+            }
+            return java.util.Collections.singletonMap("(fork migrations)", e.getMessage());
+        }
     }
 
     /**
@@ -855,6 +919,11 @@ public class DatabaseManager {
         return timerSyncService;
     }
 
+    /** Null when the forage_finds table is missing or unreadable; finds then stay on their file. */
+    public nurgling.db.service.ForageSyncService getForageSyncService() {
+        return forageSyncService;
+    }
+
     public nurgling.db.service.FishLocationDbService getFishLocationService() {
         return fishLocationService;
     }
@@ -899,6 +968,7 @@ public class DatabaseManager {
         adapter = null;
         initialized = false;
         skippedMigrations = java.util.Collections.emptyMap();
+        skippedForkMigrations = java.util.Collections.emptyMap();
         kinSecretService = null;
         mapDbService = null;
         dbStorageService = null;

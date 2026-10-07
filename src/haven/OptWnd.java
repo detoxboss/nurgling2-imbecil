@@ -797,6 +797,20 @@ public class OptWnd extends Window {
 		    }
 		}, prev.pos("bl").adds(0, UI.scale(5)).x(0));
 		prev = buttonStyleDropbox;
+
+		prev = add(new CheckBox(L10n.get("opt.interface.new_ui")) {
+		    @Override
+		    public void set(boolean val) {
+			super.set(val);
+			NConfig.set(NConfig.Key.newUi, val);
+			NConfig.needUpdate();
+		    }
+
+		    @Override
+		    protected void added() {
+			this.a = nurgling.styles.UITheme.on();
+		    }
+		}, prev.pos("bl").adds(0, UI.scale(10)).x(0));
 	    }
 	    add(new PButton(UI.scale(200), L10n.get("opt.back"), 27, back), prev.pos("bl").adds(0, 30).x(0));
 	    pack();
@@ -818,6 +832,8 @@ public class OptWnd extends Window {
 	    int y = 0;
 	    y = cont.adda(new Label(L10n.get("opt.keybind.main_menu")), cont.sz.x / 2, y, 0.5, 0.0).pos("bl").adds(0, 5).y;
 	    y = addbtn(cont, L10n.get("opt.keybind.inventory"), GameUI.kb_inv, y);
+            y = addbtn(cont, L10n.get("atlas.title"), nurgling.NGameUI.kb_atlas, y);
+            y = addbtn(cont, L10n.get("compass.setting"), nurgling.NGameUI.kb_compass, y);
 	    y = addbtn(cont, L10n.get("opt.keybind.equipment"), GameUI.kb_equ, y);
 	    y = addbtn(cont, L10n.get("opt.keybind.character"), GameUI.kb_chr, y);
 	    y = addbtn(cont, L10n.get("opt.keybind.map"), GameUI.kb_map, y);
