@@ -204,6 +204,7 @@ public class NConfig
         foragerprop,
         trufflepigprop,
         buttonStyle,
+        newUi,
         showQuestGiverNames,
         showThingwallNames,
         showPartyMemberNames,
@@ -290,6 +291,10 @@ public class NConfig
         showFishIcons,
         clusterMinedMarks,
         prospectMarks,
+        // Forage finds: picked forageables with their quality
+        showForageFinds,
+        recordForageFinds,
+        forageMinQuality,
         // Localization
         language,
         // Calculators window: cheese rack calculator rows and stage-hour overrides (JSON string)
@@ -364,6 +369,9 @@ public class NConfig
         conf.put(Key.showTreeIcons, true);
         conf.put(Key.showFishIcons, true);
         conf.put(Key.clusterMinedMarks, true);
+        conf.put(Key.showForageFinds, true);
+        conf.put(Key.recordForageFinds, false);
+        conf.put(Key.forageMinQuality, 0);
         conf.put(Key.prospectMarks, new ProspectMarkSettings());
         conf.put(Key.disableWinAnim, true);
         conf.put(Key.disableMenugridKeys, false);
@@ -568,6 +576,7 @@ public class NConfig
         conf.put(Key.useSolidBackground, false);  // Default to texture mode
         conf.put(Key.windowBackgroundColor, new java.awt.Color(0x1C, 0x25, 0x26));  // #1C2526
         conf.put(Key.buttonStyle, "tbtn");  // Default button style
+        conf.put(Key.newUi, true);  // New look by default; Options > Interface > New UI turns it off
 
         // Pickling settings
         conf.put(Key.picklingBeetroots, true);
@@ -1130,6 +1139,13 @@ public class NConfig
      */
     public String getResourceTimersPath() {
         return getProfileAwarePath("resource_timers.nurgling.json");
+    }
+
+    /**
+     * Gets the dynamic path for the forage finds file
+     */
+    public String getForageFindsPath() {
+        return getProfileAwarePath("forage_finds.nurgling.json");
     }
 
     /**

@@ -192,6 +192,10 @@ These files have nurgling UI integrations. Most are low-risk for conflicts.
 
 **src/haven/MapView.java**
 - Map overlays, NMapView, grid checking
+- `getccRaw()` — fork-added sibling of upstream's `getcc()`, returning the unsmoothed server
+  position for code that clicks rather than draws. Added 2026-10-07 when upstream routed `getcc()`
+  through movement smoothing; see `docs/fork-customization-ledger.md`, "Raw player coordinate for
+  server clicks".
 - May have conflicts in rendering code
 
 **src/haven/MainFrame.java**
