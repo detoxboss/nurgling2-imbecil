@@ -24,9 +24,14 @@ Before changing or reviewing release packaging, read `docs/release-process.md` f
 - The legacy updater system (`etc/run_updater*.bat`, `nurgling_launcher.jar`, `NConfig.Key.baseurl`)
   is intentionally left in place but excluded from new release archives — it is not dead code to
   "clean up" as part of a packaging change; removing it is a separate, not-yet-made decision.
-  Correction (2026-09-30 sync): `build.xml`'s `pre-release`/`version` targets and the files they
-  staged (`etc/run_updater*.bat`, `nurgling_launcher.jar`) were **deleted upstream** in this sync's
-  range and the deletion was taken — those targets no longer exist in this fork's `build.xml` either.
-  Only this fork's own `release` target (used by nothing in this fork's workflow, which calls `ant
-  test`/`ant bin` directly) still references `pre-release` by name upstream-side; verify current
-  `build.xml` directly rather than trusting this note before relying on any of these target names.
+  Correction (2026-10-07 sync — **the 2026-09-30 note here was wrong and has been replaced**): that
+  note claimed `build.xml`'s `pre-release`/`version` targets no longer existed in this fork. Verified
+  against current source: **`pre-release` does still exist** (`build.xml`, target `pre-release`,
+  depends on `build-env, jar, extlib/jogl, extlib/jogl-macos, extlib/lwjgl-vk, res-jar`), and so does
+  `release` (which is just `depends="pre-release"`). Only the `version` target is gone, along with the
+  updater files `pre-release` used to stage (`etc/run_updater*.bat`, `nurgling_launcher.jar`). This
+  fork's own release workflow calls `ant test`/`ant bin` directly and never `pre-release`, so those
+  targets are unused here — but they are present, and `pre-release` is the one place in the tree that
+  already writes a Linux `haven-config.properties` with `haven.toolkit=lwjgl`, which matters for the
+  open Linux/JOGL item in `docs/fork-maintenance-backlog.md`. As that stale note itself advised:
+  verify current `build.xml` directly rather than trusting any summary of it, including this one.
