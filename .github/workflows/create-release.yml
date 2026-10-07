@@ -96,6 +96,14 @@ jobs:
             bin/json-java.jar
             bin/postgresql-42.7.5.jar
             bin/sqlite-jdbc-3.49.1.0.jar
+            bin/recipes.bin
+            bin/lwjgl-vulkan-3.4.1.jar
+            bin/lwjgl-shaderc-3.4.1.jar
+            bin/lwjgl-shaderc-3.4.1-natives-windows.jar
+            bin/lwjgl-shaderc-3.4.1-natives-linux.jar
+            bin/lwjgl-vma-3.4.1.jar
+            bin/lwjgl-vma-3.4.1-natives-windows.jar
+            bin/lwjgl-vma-3.4.1-natives-linux.jar
           )
           for f in "${required[@]}"; do
             if [ ! -f "$f" ]; then
@@ -141,6 +149,19 @@ jobs:
           check_entry bin/builtin-res.jar res/gfx/hud/buttons/loginu.res || failed=1
           check_entry bin/builtin-res.jar res/gfx/hud/buttons/logind.res || failed=1
           check_entry bin/builtin-res.jar res/gfx/hud/buttons/logino.res || failed=1
+
+          # Runtime assets embedded in hafen.jar. A silently dropped one does not fail the
+          # build - the feature just breaks at runtime - so each is asserted here.
+          #   recipes.bin       Craft Atlas offline recipe database (WikiRecipes loads it from
+          #                     the classpath when no recipes.bin sits beside the jar)
+          #   item-icons.bin    Craft Atlas offline item-icon database (ItemResources)
+          #   fire-volume.bin.gz  Vulkan 3D fire volume data
+          #   TeXFormula.class  JLaTeXMath, which build.xml unpacks into hafen.jar; used by
+          #                     nurgling.craft.FormulaImages for quality-formula rendering
+          check_entry bin/hafen.jar nurgling/craft/recipes.bin || failed=1
+          check_entry bin/hafen.jar nurgling/resources/item-icons.bin || failed=1
+          check_entry bin/hafen.jar nurgling/render/assets/fire-volume.bin.gz || failed=1
+          check_entry bin/hafen.jar org/scilab/forge/jlatexmath/TeXFormula.class || failed=1
 
           if [ "$failed" -ne 0 ]; then
             echo "::error::one or more required startup resources are missing or empty"
@@ -194,7 +215,21 @@ jobs:
             -e "s/@COMMIT@/${COMMIT}/g" \
             etc/release-readme.md > "$PKG"/README.md
 
-          required=(run.bat run.sh README.md COPYING LICENSE-GPL-3 LICENSE-LGPL-3)
+          # The copy above takes every top-level bin/ file, so these are present only if
+          # `ant bin` produced them AND the artifact round-trip kept them. Asserting both the
+          # build-time list and this one proves the package itself carries the runtime files.
+          required=(
+            run.bat run.sh README.md COPYING LICENSE-GPL-3 LICENSE-LGPL-3
+            hafen.jar
+            recipes.bin
+            lwjgl-vulkan-3.4.1.jar
+            lwjgl-shaderc-3.4.1.jar
+            lwjgl-shaderc-3.4.1-natives-windows.jar
+            lwjgl-shaderc-3.4.1-natives-linux.jar
+            lwjgl-vma-3.4.1.jar
+            lwjgl-vma-3.4.1-natives-windows.jar
+            lwjgl-vma-3.4.1-natives-linux.jar
+          )
           for f in "${required[@]}"; do
             if [ ! -f "$PKG/$f" ]; then
               echo "::error::missing required assembled file $f"
