@@ -5,6 +5,7 @@ import haven.res.lib.itemtex.*;
 import haven.res.ui.stackinv.ItemStack;
 import nurgling.iteminfo.NSearchable;
 import nurgling.styles.TooltipStyle;
+import nurgling.tools.ItemDurability;
 import nurgling.tools.NSearchItem;
 import nurgling.tools.TooltipRebuildGate;
 import nurgling.widgets.DropContainer;
@@ -69,6 +70,51 @@ public class NWItem extends WItem
             g.dispose();
             return result;
         }
+    }
+
+    private ItemDurability durability = null;
+    private int durabilitySeq = -1;
+
+    /** The item's wear, re-read only when its tooltip data changed. Null for items without durability. */
+    private ItemDurability durability() {
+        int seq = item.infoseq;
+        if (seq != durabilitySeq) {
+            try {
+                durability = ItemDurability.of(item.info());
+                durabilitySeq = seq;
+            } catch (Loading l) {
+                durability = null;  // not ready: try again next frame
+            }
+        }
+        return durability;
+    }
+
+    /**
+     * Drawn right after the item sprite, so item overlays (quality, counts, study timers) are drawn over
+     * it, and with the sprite's render state already reset so search/colour effects do not tint it.
+     */
+    @Override
+    public void drawmain(GOut g, GSprite spr) {
+        super.drawmain(g, spr);
+        if (Boolean.FALSE.equals(NConfig.get(NConfig.Key.showDurabilityBars)))
+            return;
+        ItemDurability d = durability();
+        if (d == null)
+            return;
+        g.defstate();
+        int pad = UI.scale(1);
+        int w = UI.scale(4);
+        Coord track = new Coord(pad, pad);
+        int h = sz.y - pad * 2;
+        g.chcolor(0, 0, 0, 170);
+        g.frect(track, new Coord(w, h));
+        int inner = h - pad * 2;
+        int fill = (int) Math.round(inner * d.remaining);
+        if (d.remaining > 0 || d.broken())
+            fill = Math.max(fill, pad);  // never vanish entirely: a broken item shows a red stub
+        g.chcolor(d.color);
+        g.frect(new Coord(pad * 2, pad + pad + inner - fill), new Coord(w - pad * 2, fill));
+        g.chcolor();
     }
 
     private PaddedTip nlongtip = null;

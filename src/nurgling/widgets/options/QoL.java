@@ -69,6 +69,7 @@ public class QoL extends Panel {
     private CheckBox invStudyGhosts;
     private CheckBox curioFinishedSound;
     private CheckBox invStackOverlay;
+    private CheckBox invDurabilityBars;
     private CheckBox invAutoSplit;
     private TextEntry treeScaleMinThresholdEntry;
     private HSlider treeDisplayScaleSlider;
@@ -346,6 +347,7 @@ public class QoL extends Panel {
         rightPrev = invVarOverlay = rightColumn.add(new CheckBox(L10n.get("qol.inv_var_overlay")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = invSlotNumbers = rightColumn.add(new CheckBox(L10n.get("qol.inv_slot_numbers")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = invStackOverlay = rightColumn.add(new CheckBox(L10n.get("qol.inv_stack_overlay")), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = invDurabilityBars = rightColumn.add(new CheckBox(L10n.get("qol.inv_durability_bars")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = invAutoSplit = rightColumn.add(new CheckBox(L10n.get("qol.inv_auto_split")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = invStudyGhosts = rightColumn.add(new CheckBox(L10n.get("qol.inv_study_ghosts")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = curioFinishedSound = rightColumn.add(new CheckBox(L10n.get("qol.curio_finished_sound")), rightPrev.pos("bl").adds(0, 5));
@@ -445,6 +447,7 @@ public class QoL extends Panel {
         invVarOverlay.a = getBool(NConfig.Key.showVarity);
         invSlotNumbers.a = getBool(NConfig.Key.showInventoryNums);
         invStackOverlay.a = getBool(NConfig.Key.showStackOverlay);
+        invDurabilityBars.a = getBool(NConfig.Key.showDurabilityBars);
         invAutoSplit.a = getBool(NConfig.Key.autoSplitter);
         invStudyGhosts.a = getBool(NConfig.Key.showStudyReportGhosts);
         curioFinishedSound.a = getBool(NConfig.Key.curioFinishedSound);
@@ -753,6 +756,7 @@ public class QoL extends Panel {
         NConfig.set(NConfig.Key.showInventoryNums, invSlotNumbers.a);
         NConfig.set(NConfig.Key.showStackOverlay, invStackOverlay.a);
         haven.res.ui.tt.stackn.Stack.show = invStackOverlay.a;
+        NConfig.set(NConfig.Key.showDurabilityBars, invDurabilityBars.a);
         NConfig.set(NConfig.Key.autoSplitter, invAutoSplit.a);
         NConfig.set(NConfig.Key.showStudyReportGhosts, invStudyGhosts.a);
         NConfig.set(NConfig.Key.curioFinishedSound, curioFinishedSound.a);
