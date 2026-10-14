@@ -5,6 +5,7 @@ import haven.res.ui.tt.gast.Gast;
 import haven.res.ui.tt.wear.Wear;
 import nurgling.*;
 import nurgling.i18n.L10n;
+import nurgling.iteminfo.bonus.EquipmentBonuses;
 import nurgling.styles.UITheme;
 import nurgling.tasks.GetItem;
 import nurgling.tasks.WaitItemSpr;
@@ -51,10 +52,70 @@ public class NEquipory extends Equipory
     // Queue for pending parasite checks
     private final ArrayList<NGItem> pendingParasiteChecks = new ArrayList<>();
 
+    // Collapsible "Equipment Bonuses" sidebar, to the right of the slot area
+    private final Coord baseSz;
+    private final EquipBonusPanel bonusPanel;
+    private final EquipBonusPanel.Toggle bonusToggle;
+    private boolean bonusesExpanded;
+    private long bonusSig = 0;
+    private boolean bonusDirty = true;
+    private double bonusRetryAt = 0;
+
     public NEquipory(long gobid)
     {
         super(gobid);
         initToggleButtons();
+        baseSz = sz;
+        int gap = UI.scale(4);
+        bonusToggle = add(new EquipBonusPanel.Toggle(() -> bonusesExpanded, this::toggleBonuses), new Coord(baseSz.x + gap, UI.scale(4)));
+        bonusPanel = add(new EquipBonusPanel(new Coord(UI.scale(EquipBonusPanel.WIDTH), baseSz.y)), new Coord(bonusToggle.c.x + bonusToggle.sz.x + gap, 0));
+        bonusesExpanded = Boolean.TRUE.equals(NConfig.get(NConfig.Key.equipBonusesExpanded));
+        applyBonusLayout();
+    }
+
+    private void toggleBonuses()
+    {
+        bonusesExpanded = !bonusesExpanded;
+        NConfig.set(NConfig.Key.equipBonusesExpanded, bonusesExpanded);
+        bonusDirty = true;
+        applyBonusLayout();
+        // the equipment window sized itself to this widget when it was first added
+        if (parent instanceof haven.Window)
+            parent.pack();
+    }
+
+    /** Show or hide the sidebar and size this widget (and so the window) to match. */
+    private void applyBonusLayout()
+    {
+        bonusPanel.show(bonusesExpanded);
+        int w = bonusToggle.c.x + bonusToggle.sz.x;
+        if (bonusesExpanded)
+            w = bonusPanel.c.x + bonusPanel.sz.x;
+        resize(new Coord(w, baseSz.y));
+    }
+
+    /**
+     * Recompute the totals only when the worn items or their tooltip data changed, or when a
+     * previous pass could not finish because item data was still loading.
+     */
+    private void updateBonuses()
+    {
+        if (!bonusesExpanded)
+            return;
+        java.util.List<EquipmentBonuses.Source> sources = new ArrayList<>();
+        for (GItem gi : wmap.keySet())
+            sources.add(EquipmentBonuses.of(gi));
+        long sig = EquipmentBonuses.signature(sources);
+        double now = Utils.rtime();
+        boolean changed = bonusDirty || sig != bonusSig;
+        boolean retry = bonusRetryAt != 0 && now >= bonusRetryAt;
+        if (!changed && !retry)
+            return;
+        EquipmentBonuses.Result res = EquipmentBonuses.compute(sources);
+        bonusPanel.setResult(res);
+        bonusSig = sig;
+        bonusDirty = false;
+        bonusRetryAt = res.complete() ? 0 : now + 0.5;
     }
 
     // Custom offset for STORE_HAT slot to avoid overlapping HEAD slot's button
@@ -377,6 +438,7 @@ public class NEquipory extends Equipory
         super.tick(dt);
         updatePercExpText();
         updateTotalArmor();
+        updateBonuses();
         checkPendingParasites();
     }
     
@@ -483,7 +545,7 @@ public class NEquipory extends Equipory
             drawStatsPanel(g);
             return;
         }
-        Coord textCoord = new Coord(sz.x - UI.scale(85), UI.scale(3));
+        Coord textCoord = new Coord(baseSz.x - UI.scale(85), UI.scale(3));
         if (percExpText != null) {
             textCoord = textCoord.sub(percExpText.getWidth(), 0);
             g.image(eye, textCoord, UI.scale(20,20));

@@ -301,7 +301,11 @@ public class NConfig
         // Localization
         language,
         // Calculators window: cheese rack calculator rows and stage-hour overrides (JSON string)
-        cheeseRackCalculator
+        cheeseRackCalculator,
+        // Equipment window: collapsible "Equipment Bonuses" sidebar (default collapsed)
+        equipBonusesExpanded,
+        // Coloured durability bar on worn items (default on)
+        showDurabilityBars
     }
 
     public enum BBDisplayMode
@@ -367,6 +371,8 @@ public class NConfig
         conf.put(Key.show_drag_menu, true);
         conf.put(Key.discordWebhookUrl, "");
         conf.put(Key.cheeseRackCalculator, "");
+        conf.put(Key.equipBonusesExpanded, false);
+        conf.put(Key.showDurabilityBars, true);
         conf.put(Key.showGrid, false);
         conf.put(Key.showView, false);
         conf.put(Key.showTreeIcons, true);
