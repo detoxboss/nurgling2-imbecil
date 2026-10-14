@@ -6,6 +6,7 @@ import haven.res.ui.stackinv.ItemStack;
 import nurgling.iteminfo.NSearchable;
 import nurgling.styles.TooltipStyle;
 import nurgling.tools.NSearchItem;
+import nurgling.tools.TooltipRebuildGate;
 import nurgling.widgets.DropContainer;
 import org.json.*;
 
@@ -71,34 +72,25 @@ public class NWItem extends WItem
     }
 
     private PaddedTip nlongtip = null;
-    private List<ItemInfo> nttinfo = null;
-    private boolean nlastModshift = false;
-    private double nlastLongtipBuild = 0;
-    private static final double NLONGTIP_REBUILD_INTERVAL = 0.5;
+    private final TooltipRebuildGate nlongtipGate = new TooltipRebuildGate();
 
     @Override
     public Object tooltip(Coord c, Widget prev) {
         List<ItemInfo> info = item.info();
         if (info.size() < 1)
             return null;
-        // Reset tooltip cache if Shift state changed
-        if (ui.modshift != nlastModshift) {
+        // A changed Shift state or a replaced info list drops the cached tooltip (the gate tracks both);
+        // otherwise it is rebuilt only when the item asks for it, at most twice a second.
+        nlongtipGate.observe(ui.modshift, info);
+        if (!nlongtipGate.present())
             nlongtip = null;
-            nlastModshift = ui.modshift;
-        }
-        if (info != nttinfo) {
-            nlongtip = null;
-            nttinfo = info;
-        }
         double now = Utils.rtime();
-        boolean wantRebuild = (nlongtip == null) || ((NGItem) item).needlongtip();
-        boolean throttled = (nlongtip != null) && (now - nlastLongtipBuild < NLONGTIP_REBUILD_INTERVAL);
-        if (wantRebuild && !throttled) {
+        if (nlongtipGate.shouldRebuild(nlongtip == null || ((NGItem) item).needlongtip(), now)) {
             BufferedImage img = NTooltip.build(info);
             if (img != null) {
                 nlongtip = new PaddedTip(info, img);
                 ((NGItem) item).consumedLongtip();
-                nlastLongtipBuild = now;
+                nlongtipGate.built(now);
             }
         }
         return nlongtip;

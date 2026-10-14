@@ -24,8 +24,11 @@ public final class Fakes {
             return nm;
         }
 
+        /* the raster layout the game's own icons use, which PUtils.convolvedown requires */
+        private static final BufferedImage ICON = haven.TexI.mkbuf(new haven.Coord(16, 16));
+
         public BufferedImage icon() {
-            return null;
+            return ICON;
         }
 
         static String rich(double val, String body) {

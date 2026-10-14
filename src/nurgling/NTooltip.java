@@ -10,7 +10,11 @@ import haven.res.ui.tt.slot.Slotted;
 import haven.res.ui.tt.ingred.Ingredient;
 import nurgling.iteminfo.NCuriosity;
 import nurgling.iteminfo.NKilnInfo;
+import nurgling.i18n.L10n;
 import nurgling.iteminfo.NSmelterInfo;
+import nurgling.iteminfo.bonus.AttrBonus;
+import nurgling.iteminfo.bonus.AttrBonusCollector;
+import nurgling.iteminfo.bonus.GildingSummary;
 import nurgling.styles.TooltipStyle;
 
 import java.awt.*;
@@ -261,73 +265,25 @@ public class NTooltip {
         if (attrModObj == null) return stats;
 
         try {
-            // Get the 'tab' field (Collection of Entry)
-            Field tabField = attrModObj.getClass().getDeclaredField("tab");
-            tabField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            java.util.Collection<?> tabCollection = (java.util.Collection<?>) tabField.get(attrModObj);
-
-            if (tabCollection == null) return stats;
-
-            for (Object entry : tabCollection) {
-                try {
-                    // Get the 'attr' field from Entry
-                    Field attrField = entry.getClass().getField("attr");
-                    Object attr = attrField.get(entry);
-
-                    // Call attr.name()
-                    java.lang.reflect.Method nameMethod = attr.getClass().getMethod("name");
-                    String name = (String) nameMethod.invoke(attr);
-
-                    // Call attr.icon()
-                    java.lang.reflect.Method iconMethod = attr.getClass().getMethod("icon");
-                    BufferedImage icon = (BufferedImage) iconMethod.invoke(attr);
-
-                    // Check if it's a Mod entry (has 'mod' field) or Transfer entry
-                    String formattedValue = "";
-                    String entryClassName = entry.getClass().getSimpleName();
-
-                    if (entryClassName.equals("Mod") || entry.getClass().getName().contains("Mod")) {
-                        // It's a Mod entry - get mod value
-                        try {
-                            Field modField = entry.getClass().getField("mod");
-                            double modValue = modField.getDouble(entry);
-
-                            // Check if it's percentage or integer type
-                            boolean isPercent = isPercentageAttribute(attr.getClass());
-                            String sign = modValue >= 0 ? "+" : "";
-                            if (isPercent) {
-                                double percent = modValue * 100;
-                                if (percent == Math.floor(percent)) {
-                                    formattedValue = String.format("%s%.0f%%", sign, percent);
-                                } else {
-                                    formattedValue = String.format("%s%.1f%%", sign, percent);
-                                }
-                            } else {
-                                formattedValue = String.format("%s%d", sign, (int) modValue);
-                            }
-                        } catch (NoSuchFieldException e) {
-                            // Not a Mod with numeric value
-                        }
-                    } else if (entryClassName.equals("Transfer") || entry.getClass().getName().contains("Transfer")) {
-                        // It's a Transfer entry - use fmtvalue()
-                        try {
-                            java.lang.reflect.Method fmtMethod = entry.getClass().getMethod("fmtvalue");
-                            String richText = (String) fmtMethod.invoke(entry);
-                            formattedValue = parseRichTextValue(richText);
-                        } catch (Exception ignored) {}
-                    }
-
-                    if (icon != null && name != null && !formattedValue.isEmpty()) {
-                        stats.add(new GildingStatData(icon, name, formattedValue));
-                    }
-                } catch (Exception ignored) {}
+            for (AttrBonus bonus : AttrBonusCollector.fromAttrMod(attrModObj)) {
+                GildingStatData stat = toStatData(bonus);
+                if (stat != null) {
+                    stats.add(stat);
+                }
             }
-        } catch (Exception ignored) {}
+        } catch (Loading ignored) {
+            // Attribute resources still loading; the tooltip is rebuilt when the item info changes
+        }
 
         return stats;
     }
 
+    /** A bonus as a tooltip row, or null when it has no icon/name/value to show. */
+    private static GildingStatData toStatData(AttrBonus bonus) {
+        if (bonus.icon == null || bonus.name == null) return null;
+        String text = bonus.text();
+        return text.isEmpty() ? null : new GildingStatData(bonus.icon, bonus.name, text);
+    }
     /**
      * UNIFIED STAT EXTRACTION: Extract stats from a list of ItemInfo objects.
      * Finds all AttrMod instances and extracts their stats.
@@ -501,11 +457,20 @@ public class NTooltip {
      * Renders name + quality on one line, then other info, then resource path.
      */
     public static BufferedImage build(List<ItemInfo> info) {
+        return build(info, null);
+    }
+
+    /**
+     * @param expandedOverride forces the detail (true) or consolidated (false) gilding view; null follows
+     *                         the Shift state of the item's own UI. Used by tests, which have no UI.
+     */
+    static BufferedImage build(List<ItemInfo> info, Boolean expandedOverride) {
         if (info == null || info.isEmpty()) {
             return null;
         }
 
         ItemInfo.Owner owner = info.get(0).owner;
+        final boolean expandedView = (expandedOverride != null) ? expandedOverride : isExpandedView(owner);
 
         // Find Name, QBuff, NCuriosity, Contents, Wear, Gast, ISlots, Starred, Treats, and weapon stats
         String nameText = null;
@@ -691,6 +656,7 @@ public class NTooltip {
             gildingSubInfo = slotted.sub;  // Contains AttrMod entries with the stats
         } else if (islots != null) {
             // Standard ISlots path
+            islots.isShifted = expandedView;  // tells NGItem.needlongtip() which view this build shows
             gildingLeft = islots.left;
             int used = islots.s.size();
             gildingTotal = islots.left + used;  // total = remaining + used
@@ -1025,9 +991,16 @@ public class NTooltip {
                 gildingSectionsResult = renderBaseStatsSection(slottedStats);
             }
         } else if (gildingItems != null && !gildingItems.isEmpty()) {
+            // Installed gildings: one consolidated list normally, the per-gilding breakdown while Shift
+            // is held. The summary is built from the same typed extraction as the breakdown.
+            if (!expandedView && gildingLeft != null && gildingTotal != null) {
+                gildingSectionsResult = renderGildingSummary(info, gildingTotal - gildingLeft, gildingTotal);
+            }
             // For ISlots.SItem, extract fields directly
             // For reflection-based access, use reflection extractors
-            if (islots != null) {
+            if (gildingSectionsResult != null) {
+                // compact summary already rendered
+            } else if (islots != null) {
                 // ISlots.SItem path - cast to known type
                 @SuppressWarnings("unchecked")
                 java.util.Collection<ISlots.SItem> typedItems = (java.util.Collection<ISlots.SItem>) gildingItems;
@@ -2559,6 +2532,64 @@ public class NTooltip {
                 // Skip this ingredient on error
             }
         }
+    }
+
+    /**
+     * Whether the detail (per-gilding) view is wanted: Shift is held, or there is no live UI to ask
+     * (previews, recipes). Normal hover shows the consolidated summary instead.
+     */
+    static boolean isExpandedView(ItemInfo.Owner owner) {
+        if (!(owner instanceof NGItem)) {
+            return true;
+        }
+        UI ownerUi = ((NGItem) owner).ui;
+        return ownerUi == null || ownerUi.modshift;
+    }
+
+    /**
+     * Compact gilding view: "Gildings (3/4 used)", the combined bonus of every installed gilding, and a
+     * "Hold Shift" hint. Built from the same typed extraction the per-gilding breakdown uses, so the
+     * two views cannot disagree. Returns null when there is nothing to summarise; the caller then
+     * shows the breakdown so the gildings are never hidden.
+     */
+    private static LineResult renderGildingSummary(List<ItemInfo> info, int used, int total) {
+        java.util.List<GildingStatData> stats = new java.util.ArrayList<>();
+        try {
+            for (AttrBonus bonus : GildingSummary.of(info)) {
+                GildingStatData stat = toStatData(bonus);
+                if (stat != null) {
+                    stats.add(stat);
+                }
+            }
+        } catch (Loading ignored) {
+            return null;
+        }
+        if (stats.isEmpty()) {
+            return null;
+        }
+
+        int internalSpacing = UI.scale(TooltipStyle.INTERNAL_SPACING);
+        int bodyDescentVal = TooltipStyle.getFontDescent(TooltipStyle.FONT_SIZE_BODY);
+
+        // Header: "Gildings" + "(used/total used)" in the count colour of the name line
+        BufferedImage headerLabel = TooltipStyle.cropTopOnly(getBodyRegularFoundry().render(L10n.get("tooltip.gilding.header") + " ", Color.WHITE).img);
+        BufferedImage headerCount = TooltipStyle.cropTopOnly(getContentFoundry().render("(" + L10n.get("tooltip.gilding.used", used, total) + ")", TooltipStyle.COLOR_LPH).img);
+        LineResult header = new LineResult(ItemInfo.catimgsh(0, headerLabel, headerCount), 0, 0);
+
+        LineResult statLines = renderBaseStatsSection(stats);
+        int indent = UI.scale(20);
+        BufferedImage indented = TexI.mkbuf(new Coord(indent + statLines.image.getWidth(), statLines.image.getHeight()));
+        Graphics ig = indented.getGraphics();
+        ig.drawImage(statLines.image, indent, 0, null);
+        ig.dispose();
+
+        BufferedImage hintImg = TooltipStyle.cropTopOnly(getResourceFoundry().render(L10n.get("tooltip.gilding.shift_hint"), TooltipStyle.COLOR_RESOURCE_PATH).img);
+
+        int headerToStats = internalSpacing - bodyDescentVal - header.textBottomOffset - statLines.textTopOffset;
+        BufferedImage headerAndStats = ItemInfo.catimgs(headerToStats, header.image, indented);
+        int statsToHint = internalSpacing - bodyDescentVal - statLines.textBottomOffset;
+        BufferedImage all = ItemInfo.catimgs(statsToHint, headerAndStats, hintImg);
+        return new LineResult(all, 0, 0);
     }
 
     /**
