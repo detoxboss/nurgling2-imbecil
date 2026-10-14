@@ -141,6 +141,8 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
     private static Text.Foundry inspectLabelFoundry = null;
     private static Text.Foundry inspectValueFoundry = null;
     public AtomicBoolean isAreaSelectionMode = new AtomicBoolean(false);
+    /** An area or Base planner preset being placed, which takes the map's clicks and keys until it is done. */
+    public PresetPlacer presetPlacer = null;
     public AtomicBoolean isGobSelectionMode = new AtomicBoolean(false);
     public AtomicBoolean isChatAreaSharingMode = new AtomicBoolean(false); // For Alt+Ctrl+LMB chat sharing
     public NArea.Space areaSpace = null;
@@ -1241,7 +1243,16 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
 
     public String addArea(NArea.Space result)
     {
-        String key;
+        return addArea(result, null, NUtils.getGameUI().areas.currentPath).name;
+    }
+
+    /**
+     * Makes a new area over {@code result}, in folder {@code path}. A null name gets the usual
+     * "New Area" one; a given name is used as it is.
+     */
+    public NArea addArea(NArea.Space result, String name, String path)
+    {
+        NArea newArea;
         synchronized (glob.map.areas)
         {
             HashSet<String> names = new HashSet<String>();
@@ -1263,17 +1274,21 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
             {
                 id = dbId + 1;
             }
-            key = ("New Area" + String.valueOf(glob.map.areas.size()));
-            while(names.contains(key))
+            String key = name;
+            if(key == null)
             {
-                key = key+"(1)";
+                key = ("New Area" + String.valueOf(glob.map.areas.size()));
+                while(names.contains(key))
+                {
+                    key = key+"(1)";
+                }
             }
-            NArea newArea = new NArea(key);
+            newArea = new NArea(key);
             newArea.id = id;
             newArea.uuid = java.util.UUID.randomUUID().toString();
             newArea.space = result;
             newArea.grids_id.addAll(newArea.space.space.keySet());
-            newArea.path = NUtils.getGameUI().areas.currentPath;
+            newArea.path = path;
             // Brand new area: baseline is empty so every group is "dirty" on first save.
             newArea.baselineVersion = 0;
             newArea.baselineSnapshot = null;
@@ -1297,7 +1312,7 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
 
             createAreaLabel(id);
         }
-        return key;
+        return newArea;
     }
 
     boolean botsInit = false;
@@ -1535,8 +1550,16 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
      */
     @Override
     public void wdgmsg(String msg, Object... args) {
-        if("click".equals(msg) && ui != null && ui.gui != null && ui.gui.forageRecorder != null)
-            ui.gui.forageRecorder.noteMapClick(args);
+        if("place".equals(msg) && ui != null && ui.core != null)
+            ui.core.notePlace(args);
+        if("click".equals(msg) && ui != null) {
+            if(ui.core != null)
+                ui.core.noteMapClick(args);
+            if(ui.gui != null && ui.gui.forageRecorder != null)
+                ui.gui.forageRecorder.noteMapClick(args);
+            if(ui.gui != null && ui.gui.pileWatch != null)
+                ui.gui.pileWatch.noteMapClick(args);
+        }
         super.wdgmsg(msg, args);
     }
 
@@ -1560,6 +1583,11 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         // Block all clicks in DRAG mode to prevent character movement during UI adjustment
         if(ui.core.mode == NCore.Mode.DRAG) {
             return true;
+        }
+
+        /* Placing a preset: left places, right cancels; the camera button still works. */
+        if(presetPlacer != null && ev.b != 2) {
+            return presetPlacer.mmousedown(ev.c, ev.b);
         }
 
         /* Grab a movement waypoint drawn on the ground instead of walking there.
@@ -1589,6 +1617,13 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
             if (planner.isClearInAreaArmed() && ev.b == 1) {
                 if (selection == null) {
                     selection = new PlanningDeleteSelector();
+                }
+                return super.mousedown(ev);
+            }
+            // SAVE REGION armed: same one-shot rectangle, saved as a preset on release.
+            if (planner.isSavePresetRegionArmed() && ev.b == 1) {
+                if (selection == null) {
+                    selection = new PlanningPresetSelector();
                 }
                 return super.mousedown(ev);
             }
@@ -1889,6 +1924,9 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         }
         if(ev.code == 16) {
             shiftPressed = true;
+        }
+        if(presetPlacer != null && presetPlacer.keydown(ev.code)) {
+            return true;
         }
 
         // Check preset keybindings first
@@ -2283,6 +2321,52 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
     }
 
     /**
+     * One-shot rectangle selector armed by the Base planner "Save region" button. On release, asks
+     * for a name and saves the ghosts of every visible layer inside the rectangle as a preset.
+     */
+    public class PlanningPresetSelector extends Selector
+    {
+        public PlanningPresetSelector() { super(null); }
+
+        @Override
+        public void mmousemove(Coord mc) {
+            super.mmousemove(mc);
+            if (sc != null) {
+                Coord tc = getec(mc);
+                Coord c1 = new Coord(Math.min(tc.x, sc.x), Math.min(tc.y, sc.y));
+                Coord c2 = new Coord(Math.max(tc.x, sc.x), Math.max(tc.y, sc.y));
+                currentSelectionCoords = new Pair<>(c1, c2.add(1, 1));
+            }
+        }
+
+        @Override
+        public boolean mmouseup(Coord mc, int button) {
+            synchronized (NMapView.this) {
+                if (sc != null) {
+                    Coord ec = mc.div(MCache.tilesz2);
+                    Coord t1 = new Coord(Math.min(ec.x, sc.x), Math.min(ec.y, sc.y));
+                    Coord t2 = new Coord(Math.max(ec.x, sc.x), Math.max(ec.y, sc.y)).add(1, 1);
+                    NGameUI owner = (NMapView.this.ui != null) ? (NGameUI) NMapView.this.ui.gui : null;
+                    nurgling.widgets.NBasePlannerWidget planner = (owner != null) ? owner.basePlanner : null;
+                    if (planner != null) {
+                        planner.disarmSavePresetRegion();
+                        planner.savePresetRegion(t1.mul(MCache.tilesz), t2.mul(MCache.tilesz));
+                    }
+                    xl.mv = false;
+                    tt = null;
+                    currentSelectionCoords = null;
+                    glob.map.remove(ol);
+                    mgrab.remove();
+                    sc = null;
+                    destroy();
+                    selection = null;
+                }
+                return true;
+            }
+        }
+    }
+
+    /**
      * Send selected area to chat in @Area format
      * Format: @Area(grid:x,y;grid:x,y) - two corner points (upper-left and bottom-right)
      */
@@ -2511,19 +2595,6 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
      */
     public void clearLocallyDeletedAreas() {
         locallyDeletedAreas.clear();
-    }
-
-    public void disableArea(String name, String path, boolean val) {
-        for(NArea area : glob.map.areas.values())
-        {
-            if(area.name.equals(name) && area.path.equals(path))
-            {
-                area.hide = val;
-                area.markDirty(nurgling.areas.AreaFieldGroup.COSMETIC);
-                NConfig.needAreasUpdate();
-                return;
-            }
-        }
     }
 
     public void changeArea(String name)

@@ -798,6 +798,49 @@ confirm resetting one never clears the other.
 persistent per-object identity of its own — at which point this override should be diffed against
 upstream's approach rather than assumed to still be correct.
 
+## Gob identity: `NGob.hash` (stable) vs `NGob.storageHash()` (storage DB key)
+
+**Files:** `src/nurgling/NGob.java` (`hash`, `grid_id`, `gcoord`, `storageHash()`, `storageGridId()`,
+`storageCoord()`, `computePlace()`, the re-key block in `tick()`), `src/nurgling/NCore.java`
+(`moveStoredContainer`, `writeBulkStorage`), `src/monitoring/{ContainerWatcher,ItemWatcher,PileWatch}.java`,
+`src/nurgling/widgets/BulkStorageWindowExtension.java`, `src/nurgling/tools/Finder.java`
+(`findStorageGob`).
+
+**The rule (introduced upstream in the 2026-10-13 range, kept deliberately).** Two identities exist
+on purpose and must not be merged back into one:
+
+- **`NGob.hash`** — SHA-256 of resource name + grid id + in-grid coordinate, computed once and then
+  **fixed**. It is the stable identity for everything that is not the storage database: bots that find
+  a carried barrel by it (barrel workstation bots, `ReturnBarrelFromWorkArea`, `UseWorkStation`, …) and
+  — fork-owned — **per-instance Gob Configure** (`GobCustomize.instConf`, `GobConfigWindow.open`,
+  `ConfigureGobAction`). An instance override must follow the object, so it keys off `hash`.
+- **`NGob.storageHash()`** (with `storageGridId()` / `storageCoord()`) — the key the storage database
+  (`containers`, `storageitems`) files the gob under. It equals `hash` until a liftable storage gob
+  (a barrel or any `NContext.contcaps` entry) is carried and put down somewhere else; after a 500 ms
+  settle it is re-keyed to the new spot and `NCore.moveStoredContainer` moves the stored rows
+  (anything already stored under the new key belonged to a former occupant and is dropped).
+
+**Minimum hook that must survive:** `hash` must stay write-once. Storage and container-indexing paths
+(`ContainerWatcher`, `ItemWatcher`, `PileWatch`, `BulkStorageWindowExtension`, `NInventory`'s close
+path, `NGItem`'s container-hash lookup, `Inventory.create`'s cache invalidation, `NGlobalSearch`,
+`FetchStorageItemBot` via `Finder.findStorageGob`) use `storageHash()`. Fork code that needs "this
+physical object" — Gob Configure, anything persisted per instance — keeps using `hash`. **Do not
+globally replace `ngob.hash` with `storageHash()`** (it would make a configured barrel lose its
+settings when moved), and do not "fix" a remaining raw `hash` use in a bot as if it were an oversight.
+`computePlace()` resolves the grid through the gob's **own** `glob.map`, never `NUtils.getGameUI()`.
+
+**Storage rows (no schema change; existing `containers` / `storageitems` only).** A stockpile is one
+row per item (`quality` NULL, `coordinates` `#pile:<i>`); a barrel/cistern is one row
+(`coordinates` `#bulk:<amount> <unit>`, quality possibly NULL). `storageitems.quality` has always been
+nullable, so no migration and no repair of existing databases is needed.
+
+**Verify:** configure one barrel "this object", carry it elsewhere and put it down: the configuration
+is still on that barrel, and its Storage Items rows now sit under the new spot. Open a stockpile and a
+barrel and confirm their rows appear; shift-right-click a pile empty and confirm its rows go.
+
+**Superseded when:** never wholesale — it is upstream's design consumed correctly. Re-check only if
+upstream changes `storageHash()`'s semantics.
+
 ## Fork database extensions: additive, isolated, own ledger
 
 **Files:** `src/nurgling/db/migration/ForkMigrationManager.java` (fork-owned),
@@ -994,3 +1037,24 @@ supersession:
 load-bearing; upstream has not shipped a general multi-session architecture, only scattered
 improvements in specific call sites that happen to touch the same seam. Re-assess each "superseded
 when" condition independently, per its own entry, each sync — not as a batch.
+
+### Update (2026-10-13 sync): new upstream ambient lookups
+
+The 2026-10-13 range added **46** new `NUtils.getGameUI()` / `NUtils.getUI()` references. Five were in
+new upstream code where the owning session/widget was already directly available, and were changed
+in the merge: `PlannerPresetPlacer.place()` (`map.ui.core.planningLayer`),
+`NMapView.PlanningPresetSelector.mmouseup` (`NMapView.this.ui.gui`),
+`NStorageItemsWidget.loadItems` (`VillageStorage.snapshot(getparent(NGameUI.class))`, which matters
+because the village snapshot reads the owning session's ChunkNav graph and areas),
+`NInventory.searchFor` (this inventory's `ui.gui`), and `NAreaMoveDialog.refresh` (the areas widget's
+`ui.gui`; the dialog itself is not attached yet during its constructor). Upstream also moved *toward*
+ownership here: `PileWatch` is per session, `NCore`'s click/place tracking is per instance, and
+`NGob.computePlace()` uses the gob's own map.
+
+**Deliberately not changed, and not claimed to be ownership-proof:** the rest — `StashView`,
+`NAreasWidget`, the bot-thread convention in the new bots, `NAreaMoverProp`, `Finder.findStorageGob`,
+`PlanningLayerManager.activeGlob()`. Notably `NConfig.needAreasUpdate()` still obtains the current
+`NGameUI` **ambiently** (`NUtils.getGameUI()`); it is correct only because the Areas UI calls it
+synchronously from the session being edited. That is an unresolved part of the multi-session audit
+(`docs/fork-maintenance-backlog.md` #2), not a solved one. Persistence itself still goes through
+`NCore.tick()` → `config.writeAreas(null, ui.gui)` with the explicit session.

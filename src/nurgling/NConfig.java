@@ -79,6 +79,7 @@ public class NConfig
         blueprintplanterprop,
         autofloweractionprop,
         carrierprop,
+        areamoverprop,
         prepblockprop,
         prepboardprop,
         sheepsprop,
@@ -285,6 +286,8 @@ public class NConfig
         showStorageTrail,
         storageTrailColor,
         storageTrailMax,
+        // Storage Items window: only show containers in the village (ChunkNavGraph.pieceWithMostAreas)
+        storageOnlyVillage,
         recipeSearchAsItemSearch,
         // Map tools panel
         showTreeIcons,
@@ -746,6 +749,7 @@ public class NConfig
         // Ground trail to containers matching the item search
         conf.put(Key.showStorageTrail, true);
         conf.put(Key.storageTrailMax, 3);
+        conf.put(Key.storageOnlyVillage, true);
         conf.put(Key.recipeSearchAsItemSearch, false);
     }
 
@@ -1097,6 +1101,13 @@ public class NConfig
     }
 
     /**
+     * Gets the dynamic path for the Storage Items window's stash tab layout
+     */
+    public String getStorageTabsPath() {
+        return getProfileAwarePath("storage_tabs.nurgling.json");
+    }
+
+    /**
      * Gets the dynamic path for planning layer ghosts configuration file
      */
     public String getPlanningLayerPath() {
@@ -1290,6 +1301,9 @@ public class NConfig
                                 break;
                             case "NCarrierProp":
                                 res.add(new NCarrierProp(obj));
+                                break;
+                            case "NAreaMoverProp":
+                                res.add(new NAreaMoverProp(obj));
                                 break;
                             case "QuickActionPreset":
                                 res.add(new QuickActionPreset(obj));

@@ -104,11 +104,43 @@ their normal jar layout (LWJGL as one fat jar per component; JOGL and Steamworks
 per-platform native jars that their own loaders auto-select at runtime), and `ant bin`'s filesets pull
 in the complete set for each. No per-OS build or archive split is needed.
 
+### Release asset assertions
+
+Added in `959c733c209b657a1ede036dae76d835b1fabe2b` ("ci: verify Vulkan and Craft Atlas release
+assets"; part of PR #18, released as `v1.1.0`). A silently dropped runtime asset does not fail
+`ant bin` — the feature just breaks at runtime — so the workflow asserts each one. Nothing here is a
+substitute for launching the packaged client (see "Manual verification").
+
+- **Build job, "Verify bin/ output"** — each must exist as a file under `bin/`:
+  - `bin/recipes.bin` — the Craft Atlas offline recipe database shipped beside the jar.
+  - The **seven Vulkan jars**: `lwjgl-vulkan-3.4.1.jar`, `lwjgl-shaderc-3.4.1.jar`,
+    `lwjgl-shaderc-3.4.1-natives-windows.jar`, `lwjgl-shaderc-3.4.1-natives-linux.jar`,
+    `lwjgl-vma-3.4.1.jar`, `lwjgl-vma-3.4.1-natives-windows.jar`,
+    `lwjgl-vma-3.4.1-natives-linux.jar`.
+- **Build job, "Verify startup resource integrity"** — each entry must exist inside `bin/hafen.jar`
+  with an uncompressed size greater than 18 bytes (the same `check_entry` rule as the login-screen
+  resources above):
+  - `nurgling/craft/recipes.bin` — the **embedded Craft Atlas recipes** (`WikiRecipes` falls back to
+    this classpath copy when no `recipes.bin` sits beside the jar).
+  - `nurgling/resources/item-icons.bin` — the **item-icons database**.
+  - `nurgling/render/assets/fire-volume.bin.gz` — the **Vulkan fire-volume asset**.
+  - `org/scilab/forge/jlatexmath/TeXFormula.class` — **JLaTeXMath**, unpacked into `hafen.jar` by
+    `build.xml` and used by `nurgling.craft.FormulaImages`.
+- **Packaging job** — after assembling the portable folder, `recipes.bin` and the same seven Vulkan
+  jars must be present at the top level of the package (proving they survived the artifact
+  round-trip), alongside `hafen.jar`, the launchers, `README.md` and the three license files.
+
+Adding a new required runtime asset means adding it to the matching list above *and* to
+`create-release.yml`. Resources that live only under `src/` (for example presets and JSON data) ship
+inside `hafen.jar` and are not individually asserted unless added to the startup-resource check.
+
 ## Release archive contents
 
 ```
 nurgling-bufu-<version>/
   hafen.jar, hafen-res.jar, builtin-res.jar, nurgling-res.jar
+  recipes.bin              (Craft Atlas offline recipes)
+  lwjgl-vulkan-*.jar, lwjgl-shaderc-*.jar (+ windows/linux natives), lwjgl-vma-*.jar (+ windows/linux natives)   (Vulkan renderer)
   jogl-all.jar, gluegen-rt.jar, jogl-all-natives-*.jar        (win/linux/macos)
   lwjgl-fat.jar, lwjgl-awt.jar, lwjgl-opengl-fat.jar
   steamworks4j.jar, steamworks4j-natives-*.jar                (win/linux/macos)

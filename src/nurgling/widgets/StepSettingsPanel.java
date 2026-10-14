@@ -3,12 +3,15 @@ package nurgling.widgets;
 import haven.*;
 import nurgling.NUtils;
 import nurgling.areas.NArea;
+import nurgling.actions.bots.H4DMarketScanner;
 import nurgling.actions.bots.SetSpeedBot;
 import nurgling.actions.bots.WaitBot;
+import nurgling.actions.bots.areamover.AreaMoverBot;
 import nurgling.actions.bots.registry.BotDescriptor;
 import nurgling.actions.bots.registry.BotRegistry;
 import nurgling.conf.NForagerProp;
 import nurgling.equipment.EquipmentPreset;
+import nurgling.i18n.L10n;
 import nurgling.scenarios.BotStep;
 import nurgling.scenarios.CraftPreset;
 import nurgling.scenarios.CraftPresetManager;
@@ -104,7 +107,7 @@ public class StepSettingsPanel extends Widget {
             add(areaDropdown, new Coord(UI.scale(8), y));
             y += UI.scale(40);
         }
-        if (desc.id.equals("h4d_market_scan")) {
+        if (desc.id.equals(H4DMarketScanner.BOT_ID)) {
             hasAnySetting = true;
             add(new Label("Market NArea:"), new Coord(UI.scale(8), y));
             y += UI.scale(24);
@@ -709,9 +712,46 @@ public class StepSettingsPanel extends Widget {
             add(targetEntry, new Coord(UI.scale(8), y));
             y += UI.scale(30);
         }
+        if (desc.id.equals("area_mover")) {
+            hasAnySetting = true;
+            List<AreaPicker.Entry> areaList = AreaPicker.savedAreas();
+            if (areaList.isEmpty()) {
+                add(new Label(L10n.get("areamover.no_areas")), new Coord(UI.scale(8), y));
+            } else {
+                add(new Label(L10n.get("areamover.from")), new Coord(UI.scale(8), y));
+                y += UI.scale(24);
+                Widget fromPicker = add(areaMoverPicker(step, areaList, AreaMoverBot.FROM_AREA), new Coord(UI.scale(8), y));
+                y += fromPicker.sz.y + UI.scale(12);
+                add(new Label(L10n.get("areamover.to")), new Coord(UI.scale(8), y));
+                y += UI.scale(24);
+                Widget toPicker = add(areaMoverPicker(step, areaList, AreaMoverBot.TO_AREA), new Coord(UI.scale(8), y));
+                y += toPicker.sz.y + UI.scale(12);
+
+                // Unset (a freshly added step) means on, matching AreaMoverBot's default.
+                Object pilesSetting = step.getSetting(AreaMoverBot.CREATE_PILES);
+                boolean createPiles = !(pilesSetting instanceof Boolean) || (Boolean) pilesSetting;
+                step.setSetting(AreaMoverBot.CREATE_PILES, createPiles);
+                CheckBox pilesBox = new CheckBox(L10n.get("areamover.create_piles")) {
+                    @Override
+                    public void set(boolean a) {
+                        super.set(a);
+                        step.setSetting(AreaMoverBot.CREATE_PILES, a);
+                    }
+                };
+                pilesBox.a = createPiles;
+                add(pilesBox, new Coord(UI.scale(8), y));
+            }
+        }
         if (!hasAnySetting) {
             add(new Label("No settings for this step."), new Coord(UI.scale(8), y));
         }
+    }
+
+    /** Searchable saved-area picker for one of the Area Mover's area settings. */
+    private AreaPicker areaMoverPicker(BotStep step, List<AreaPicker.Entry> areaList, String key) {
+        Object current = step.getSetting(key);
+        int selected = (current instanceof Number) ? ((Number) current).intValue() : areaList.get(0).id;
+        return new AreaPicker(UI.scale(160), areaList, selected, id -> step.setSetting(key, id));
     }
 
     private void clearChildren(Widget parent) {

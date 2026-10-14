@@ -10,6 +10,8 @@ import nurgling.db.dao.StorageItemDao;
 import nurgling.db.service.StorageItemService;
 import nurgling.i18n.L10n;
 import nurgling.sessions.BotExecutor;
+import nurgling.widgets.storage.StashView;
+import nurgling.widgets.storage.VillageStorage;
 
 import java.awt.Color;
 import java.sql.SQLException;
@@ -19,11 +21,14 @@ import java.util.stream.Collectors;
 
 /**
  * Widget for displaying all storage items from the database.
- * Features:
+ * Two views: tabs of item slots by category ({@link StashView}, the default) and this list.
+ * List features:
  * - Sorting by clicking on column headers (Name, Quality, Count)
  * - Grouping modes: None, Quality, Q1, Q5, Q10 (like NInventory)
  * - Min quality filter
  * - Pagination for large item sets
+ * - Only items in your village (see {@link nurgling.navigation.ChunkNavGraph#pieceWithMostAreas}), so storage
+ *   seen in another village or at a bot's spot stays out
  */
 public class NStorageItemsWidget extends Window {
 
@@ -72,42 +77,80 @@ public class NStorageItemsWidget extends Window {
     private Double minQualityFilter = null;
     private Grouping currentGrouping = Grouping.Q;
     private boolean isLoading = false;
+    private CheckBox onlyVillageBox;
+    private Label hiddenLabel;
+    /** Hides rows whose container isn't in the village, or has no location at all. */
+    private boolean onlyVillage = true;
+    /** Recorded chunks of the village, worked out on each load; empty when there's nothing to go by. */
+    private volatile Set<Long> villageChunks = Collections.emptySet();
     
     // Clickable column headers
     private Label nameHeaderLabel;
     private Label qualityHeaderLabel;
     private Label countHeaderLabel;
 
+    // Tab view and the list-only widgets it replaces
+    private StashView stashView;
+    private Button modeButton;
+    private Button prevPageButton;
+    private Button nextPageButton;
+    private boolean tabsMode = true;
+    /** The search was filled in by clicking a slot, so going back to the tabs clears it. */
+    private boolean searchFromSlot = false;
+    private Runnable pendingMenu;
+
     /**
      * Grouped item representation for display
      */
     public static class GroupedItem {
         public final String name;
-        public final double quality; // -1 for type-only grouping (will show range)
-        public final double minQuality;
+        public final double quality; // -1 for type-only grouping (will show range), 0 for unknown
+        public final double minQuality; // over the items whose quality is known
         public final double maxQuality;
+        public final boolean hasUnknownQuality; // stockpile items show no quality
+        public final String bulkUnit; // "l", "seeds"... for barrel/cistern groups, null for items
+        public final double bulkAmount;
         public final int count;
         public final List<StorageItemDao.StorageItemData> items;
 
         public GroupedItem(String name, double quality, int count, List<StorageItemDao.StorageItemData> items) {
             this.name = name;
             this.quality = quality;
-            this.minQuality = items.stream().mapToDouble(StorageItemDao.StorageItemData::getQuality).min().orElse(0);
-            this.maxQuality = items.stream().mapToDouble(StorageItemDao.StorageItemData::getQuality).max().orElse(0);
+            this.minQuality = items.stream().filter(StorageItemDao.StorageItemData::hasQuality)
+                    .mapToDouble(StorageItemDao.StorageItemData::getQuality).min().orElse(0);
+            this.maxQuality = items.stream().filter(StorageItemDao.StorageItemData::hasQuality)
+                    .mapToDouble(StorageItemDao.StorageItemData::getQuality).max().orElse(0);
+            this.hasUnknownQuality = items.stream().anyMatch(i -> !i.hasQuality());
+            this.bulkUnit = items.isEmpty() ? null : items.get(0).getBulkUnit();
+            this.bulkAmount = items.stream().mapToDouble(StorageItemDao.StorageItemData::getBulkAmount).sum();
             this.count = count;
             this.items = items;
         }
 
+        /** Whether a stored item belongs to this group. */
+        public boolean matches(StorageItemDao.StorageItemData data) {
+            if (!data.getName().equals(name) || data.isBulk() != (bulkUnit != null))
+                return false;
+            if (!data.hasQuality())
+                return hasUnknownQuality;
+            return data.getQuality() >= minQuality && data.getQuality() <= maxQuality;
+        }
+
         public String getQualityDisplay() {
-            if (quality >= 0) {
+            if (quality > 0) {
                 return Utils.odformat2(quality, 2);
+            } else if (quality == 0 || maxQuality <= 0) {
+                return "?";
             } else {
                 // Range display for type-only grouping
-                if (minQuality == maxQuality) {
-                    return Utils.odformat2(minQuality, 2);
-                }
-                return Utils.odformat2(minQuality, 2) + "-" + Utils.odformat2(maxQuality, 2);
+                String range = (minQuality == maxQuality) ? Utils.odformat2(minQuality, 2)
+                        : Utils.odformat2(minQuality, 2) + "-" + Utils.odformat2(maxQuality, 2);
+                return hasUnknownQuality ? range + ", ?" : range;
             }
+        }
+
+        public String getCountDisplay() {
+            return (bulkUnit != null) ? Utils.odformat2(bulkAmount, 2) + " " + bulkUnit : String.valueOf(count);
         }
     }
 
@@ -124,7 +167,10 @@ public class NStorageItemsWidget extends Window {
             public boolean keydown(KeyDownEvent e) {
                 boolean res = super.keydown(e);
                 searchText = text().toLowerCase();
+                searchFromSlot = false;
                 applyFiltersAndSort();
+                if (stashView != null)
+                    stashView.setSearch(searchText);
                 return res;
             }
         }, new Coord(UI.scale(60), y));
@@ -168,6 +214,8 @@ public class NStorageItemsWidget extends Window {
                 super.changed();
                 parseQualityFilter();
                 applyFiltersAndSort();
+                if (stashView != null)
+                    stashView.setMinQ(minQualityFilter);
             }
         }, new Coord(qualityX + UI.scale(28), y));
         qualityFilterEntry.settip(L10n.get("storage.quality_filter_tip"));
@@ -180,7 +228,29 @@ public class NStorageItemsWidget extends Window {
             }
         }, new Coord(UI.scale(WINDOW_WIDTH - 90), y));
 
+        modeButton = add(new Button(UI.scale(80), L10n.get("storage.view_list")) {
+            @Override
+            public void click() {
+                setTabsMode(!tabsMode);
+            }
+        }, new Coord(UI.scale(370), y));
+
         y += UI.scale(30);
+
+        onlyVillage = VillageStorage.onlyVillage();
+        onlyVillageBox = add(new CheckBox(L10n.get("storage.only_village")) {
+            @Override
+            public void changed(boolean val) {
+                onlyVillage = val;
+                NConfig.set(NConfig.Key.storageOnlyVillage, val);
+                applyAreaFilter();
+            }
+        }, new Coord(margin, y));
+        onlyVillageBox.a = onlyVillage;
+        onlyVillageBox.settip(L10n.get("storage.only_village_tip"));
+        hiddenLabel = add(new Label(""), onlyVillageBox.pos("ur").adds(UI.scale(10), 0));
+
+        y += UI.scale(22);
 
         // Column headers (clickable for sorting)
         int headerY = y;
@@ -222,13 +292,13 @@ public class NStorageItemsWidget extends Window {
         y += UI.scale(20);
 
         // Items list
-        itemsList = add(new StorageItemsList(UI.scale(new Coord(WINDOW_WIDTH - 20, WINDOW_HEIGHT - 120))),
+        itemsList = add(new StorageItemsList(UI.scale(new Coord(WINDOW_WIDTH - 20, WINDOW_HEIGHT - 142))),
                 new Coord(UI.scale(5), y));
 
         // Pagination controls at bottom
         int bottomY = UI.scale(WINDOW_HEIGHT - 45);
 
-        prev = add(new Button(UI.scale(50), "<<") {
+        prevPageButton = add(new Button(UI.scale(50), "<<") {
             @Override
             public void click() {
                 if (currentPage > 0) {
@@ -240,7 +310,7 @@ public class NStorageItemsWidget extends Window {
 
         pageLabel = add(new Label(""), new Coord(UI.scale(WINDOW_WIDTH / 2 - 20), bottomY + UI.scale(5)));
 
-        add(new Button(UI.scale(50), ">>") {
+        nextPageButton = add(new Button(UI.scale(50), ">>") {
             @Override
             public void click() {
                 int maxPage = getMaxPage();
@@ -253,7 +323,52 @@ public class NStorageItemsWidget extends Window {
 
         totalLabel = add(new Label(""), new Coord(UI.scale(10), bottomY + UI.scale(5)));
 
+        // The tab view starts below the toolbar's tallest control and fills the rest of the window
+        int stashY = Math.max(onlyVillageBox.c.y + onlyVillageBox.sz.y,
+                Math.max(modeButton.c.y + modeButton.sz.y, searchField.c.y + searchField.sz.y)) + UI.scale(6);
+        stashView = add(new StashView(new Coord(UI.scale(WINDOW_WIDTH - 10), UI.scale(WINDOW_HEIGHT - 5) - stashY), this::openInList),
+                new Coord(UI.scale(5), stashY));
+        stashView.setSearch(searchText);
+        stashView.setMinQ(minQualityFilter);
+        setTabsMode(true);
+
         pack();
+    }
+
+    @Override
+    public void tick(double dt) {
+        super.tick(dt);
+        if (pendingMenu != null) {
+            Runnable r = pendingMenu;
+            pendingMenu = null;
+            r.run();
+        }
+    }
+
+    private void setTabsMode(boolean tabs) {
+        tabsMode = tabs;
+        if (tabs && searchFromSlot) {
+            searchFromSlot = false;
+            searchField.settext("");
+            searchText = "";
+            applyFiltersAndSort();
+            stashView.setSearch(searchText);
+        }
+        stashView.show(tabs);
+        for (Widget w : new Widget[] {groupingDropbox, nameHeaderLabel, qualityHeaderLabel, countHeaderLabel,
+                itemsList, prevPageButton, nextPageButton, pageLabel, totalLabel})
+            w.show(!tabs);
+        modeButton.change(L10n.get(tabs ? "storage.view_list" : "storage.view_tabs"));
+    }
+
+    /** A slot was clicked in the tab view: show that item's quality groups in the list. */
+    private void openInList(String name) {
+        searchField.settext(name);
+        searchText = name.toLowerCase();
+        searchFromSlot = true;
+        stashView.setSearch(searchText);
+        applyFiltersAndSort();
+        setTabsMode(false);
     }
     
     private void toggleSort(SortColumn column) {
@@ -332,15 +447,15 @@ public class NStorageItemsWidget extends Window {
         }
 
         isLoading = true;
+        // Read on the UI thread; the village is worked out with the items, off it
+        // This window's own session: its ChunkNav data and areas decide which storage is the village's
+        VillageStorage storage = VillageStorage.snapshot(getparent(NGameUI.class));
         StorageItemService storageService = new StorageItemService(ui.core.databaseManager);
 
         storageService.loadAllStorageItemsAsync()
             .thenAccept(items -> {
-                // Filter out items with negative quality (shouldn't be in DB, but just in case)
-                List<StorageItemDao.StorageItemData> validItems = items.stream()
-                    .filter(item -> item.getQuality() >= 0)
-                    .collect(Collectors.toList());
-                processLoadedItems(validItems);
+                villageChunks = storage.village();
+                processLoadedItems(VillageStorage.valid(items));
                 isLoading = false;
             })
             .exceptionally(e -> {
@@ -351,11 +466,24 @@ public class NStorageItemsWidget extends Window {
     }
 
     private void processLoadedItems(List<StorageItemDao.StorageItemData> items) {
-        this.rawItems = items;
-        processItems();
+        this.loadedItems = items;
+        applyAreaFilter();
     }
 
+    /** Everything the database returned; rawItems is what the filter lets through. */
+    private List<StorageItemDao.StorageItemData> loadedItems = new ArrayList<>();
     private List<StorageItemDao.StorageItemData> rawItems = new ArrayList<>();
+
+    private void applyAreaFilter() {
+        List<StorageItemDao.StorageItemData> visible = onlyVillage ? VillageStorage.inVillage(loadedItems, villageChunks) : loadedItems;
+        int hiddenCount = loadedItems.size() - visible.size();
+        if (hiddenLabel != null)
+            hiddenLabel.settext(hiddenCount > 0 ? L10n.get("storage.hidden_items", hiddenCount) : "");
+        this.rawItems = visible;
+        if (stashView != null)
+            stashView.setItems(visible);
+        processItems();
+    }
 
     private void processItems() {
         if (rawItems == null || rawItems.isEmpty()) {
@@ -364,36 +492,31 @@ public class NStorageItemsWidget extends Window {
             return;
         }
 
-        Map<String, List<StorageItemDao.StorageItemData>> grouped;
+        java.util.function.Function<StorageItemDao.StorageItemData, String> key;
 
         switch (currentGrouping) {
-            case NONE:
-                // Group only by name
-                grouped = rawItems.stream()
-                        .collect(Collectors.groupingBy(StorageItemDao.StorageItemData::getName));
-                break;
             case Q:
                 // Group by name + exact quality (rounded to 2 decimals)
-                grouped = rawItems.stream()
-                        .collect(Collectors.groupingBy(item ->
-                                item.getName() + "|" + String.format("%.2f", item.getQuality())));
+                key = item -> item.getName() + "|" + String.format("%.2f", item.getQuality());
                 break;
             case Q5:
                 // Group by name + quality rounded to 5
-                grouped = rawItems.stream()
-                        .collect(Collectors.groupingBy(item ->
-                                item.getName() + "|" + ((int) Math.floor(item.getQuality() / 5) * 5)));
+                key = item -> item.getName() + "|" + ((int) Math.floor(item.getQuality() / 5) * 5);
                 break;
             case Q10:
                 // Group by name + quality rounded to 10
-                grouped = rawItems.stream()
-                        .collect(Collectors.groupingBy(item ->
-                                item.getName() + "|" + ((int) Math.floor(item.getQuality() / 10) * 10)));
+                key = item -> item.getName() + "|" + ((int) Math.floor(item.getQuality() / 10) * 10);
                 break;
+            case NONE:
             default:
-                grouped = rawItems.stream()
-                        .collect(Collectors.groupingBy(StorageItemDao.StorageItemData::getName));
+                // Group only by name
+                key = StorageItemDao.StorageItemData::getName;
         }
+
+        // Keep barrel/cistern amounts apart from countable items of the same name
+        java.util.function.Function<StorageItemDao.StorageItemData, String> baseKey = key;
+        Map<String, List<StorageItemDao.StorageItemData>> grouped = rawItems.stream()
+                .collect(Collectors.groupingBy(item -> (item.isBulk() ? "#" + item.getBulkUnit() + "|" : "") + baseKey.apply(item)));
 
         List<GroupedItem> result = new ArrayList<>();
 
@@ -500,7 +623,7 @@ public class NStorageItemsWidget extends Window {
 
             add(new Label(truncateName(item.name, 38)), new Coord(COL_NAME, 0));
             add(new Label(item.getQualityDisplay()), new Coord(COL_QUALITY, 0));
-            add(new Label(String.valueOf(item.count)), new Coord(COL_COUNT, 0));
+            add(new Label(item.getCountDisplay()), new Coord(COL_COUNT, 0));
         }
 
         private String truncateName(String name, int maxLen) {
@@ -521,7 +644,8 @@ public class NStorageItemsWidget extends Window {
                 return true;
             } else if (ev.b == 3) {
                 // Right click - show flower menu
-                showTakeMenu(ev.c);
+                // Next tick: the window raises itself after this click and would cover the menu
+                pendingMenu = () -> showTakeMenu(ev.c);
                 return true;
             }
             return super.mousedown(ev);
@@ -531,7 +655,7 @@ public class NStorageItemsWidget extends Window {
             StringBuilder sb = new StringBuilder();
             sb.append(item.name).append("\n");
             sb.append(L10n.get("storage.quality")).append(": ").append(item.getQualityDisplay()).append("\n");
-            sb.append(L10n.get("storage.count")).append(": ").append(item.count);
+            sb.append(L10n.get("storage.count")).append(": ").append(item.getCountDisplay());
             NUtils.getGameUI().msg(sb.toString());
         }
         
@@ -573,31 +697,41 @@ public class NStorageItemsWidget extends Window {
         }
         
         private void showQuantitySelector() {
-            if (item.count <= 1) {
-                // Only one item, fetch directly
-                startFetchBot(1);
-            } else {
-                // Show quantity selection dialog
-                NQuantitySelector selector = new NQuantitySelector(
-                    L10n.get("storage.select_quantity"),
-                    item.count,
-                    (selectedCount) -> startFetchBot(selectedCount)
-                );
-                NUtils.getGameUI().add(selector, NUtils.getGameUI().sz.div(2).sub(selector.sz.div(2)));
-            }
+            requestTake(item, rawItems);
         }
-        
-        private void startFetchBot(int count) {
-            // Get all raw items for this group
-            List<StorageItemDao.StorageItemData> matchingItems = rawItems.stream()
-                .filter(i -> i.getName().equals(item.name) &&
-                            i.getQuality() >= item.minQuality &&
-                            i.getQuality() <= item.maxQuality)
-                .collect(Collectors.toList());
+    }
 
-            FetchStorageItemBot bot = new FetchStorageItemBot(item, count, matchingItems);
-            BotExecutor.runAsync("FetchStorageItemBot", bot);
+    /**
+     * Asks how many of a group to take, then sends the fetch bot.
+     * @param candidates stored rows to fetch from; only those the group matches are used
+     */
+    public static void requestTake(GroupedItem item, List<StorageItemDao.StorageItemData> candidates) {
+        if (item.bulkUnit != null) {
+            // A liquid needs a container in hand; the fetch bot only carries items
+            NUtils.getGameUI().msg(L10n.get("storage.fetch_bulk_unsupported"), Color.YELLOW);
+            return;
         }
+        if (item.count <= 1) {
+            // Only one item, fetch directly
+            startFetchBot(item, 1, candidates);
+        } else {
+            // Show quantity selection dialog
+            NQuantitySelector selector = new NQuantitySelector(
+                L10n.get("storage.select_quantity"),
+                item.count,
+                (selectedCount) -> startFetchBot(item, selectedCount, candidates)
+            );
+            NUtils.getGameUI().add(selector, NUtils.getGameUI().sz.div(2).sub(selector.sz.div(2)));
+        }
+    }
+
+    private static void startFetchBot(GroupedItem item, int count, List<StorageItemDao.StorageItemData> candidates) {
+        List<StorageItemDao.StorageItemData> matchingItems = candidates.stream()
+            .filter(item::matches)
+            .collect(Collectors.toList());
+
+        FetchStorageItemBot bot = new FetchStorageItemBot(item, count, matchingItems);
+        BotExecutor.runAsync("FetchStorageItemBot", bot);
     }
 
     /**

@@ -7,7 +7,9 @@ import nurgling.actions.bots.CarrotFarmerQ;
 import nurgling.actions.bots.silk.RefillSilkwormFeedingCupboards;
 import nurgling.actions.bots.silk.SilkProductionBot;
 import nurgling.actions.bots.cheeseconveyor.CheeseConveyorBot;
+import nurgling.actions.bots.areamover.AreaMoverBot;
 import nurgling.actions.bots.CollectSwillInArea;
+import nurgling.actions.bots.swillpiles.SwillPilesToTroughsBot;
 import nurgling.actions.bots.farmers.WheatFarmer;
 import nurgling.actions.bots.farmers.YellowOnionFarmer;
 import nurgling.actions.bots.farmers.WhiteOnionFarmer;
@@ -122,6 +124,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("bark", BotDescriptor.BotType.RESOURCES, "bot.bark.title", "bot.bark.desc", false, true, CollectBark.class, "bark", false));
         bots.add(new BotDescriptor("bough", BotDescriptor.BotType.RESOURCES, "bot.bough.title", "bot.bough.desc", false, true, CollectBough.class, "bough", false));
         bots.add(new BotDescriptor("leaf", BotDescriptor.BotType.RESOURCES, "bot.leaf.title", "bot.leaf.desc", false, true, CollectLeaf.class, "leaf", false));
+        bots.add(new BotDescriptor("leaf_zone", BotDescriptor.BotType.RESOURCES, "bot.leaf_zone.title", "bot.leaf_zone.desc", true, true, CollectLeafZone.class, "leaf_zone", false));
         bots.add(new BotDescriptor("fisher", BotDescriptor.BotType.RESOURCES, "bot.fisher.title", "bot.fisher.desc", false, true, Fishing.class, "fisher", true));
         bots.add(new BotDescriptor("plower", BotDescriptor.BotType.RESOURCES, "bot.plower.title", "bot.plower.desc", false, true, Plower.class, "plower", true));
         bots.add(new BotDescriptor("plant_trees", BotDescriptor.BotType.RESOURCES, "bot.plant_trees.title", "bot.plant_trees.desc", false, true, PlantTrees.class, "treePlanter", false));
@@ -155,6 +158,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("steel", BotDescriptor.BotType.PRODUCTIONS, "Steel Action", "Makes steel.", true, true, SteelAction.class, "steel", false));
         bots.add(new BotDescriptor("fineryforge", BotDescriptor.BotType.PRODUCTIONS, "Forging ", "Forging.", true, true, FFAction.class, "fineryforge", false));
         bots.add(new BotDescriptor("irrlight", BotDescriptor.BotType.PRODUCTIONS, "Irrlight Farmer", "Cycles a metal bar into nuggets and back at a lit crucible to call Irrlights, and catches every one that spawns.", false, true, IrrlightBot.class, "irrlight", false));
+        bots.add(new BotDescriptor("smokering", BotDescriptor.BotType.PRODUCTIONS, "Smokering Farmer", "Smokes Pipestuff from the equipped Bull Pipe and catches every Smokering and Smokeship that appears; refills from a Pipestuff barrel and stops below 50% HP.", false, true, SmokeringBot.class, "smokering", false));
 
         // Silk
         bots.add(new BotDescriptor("mulberry_leaf_refiller", BotDescriptor.BotType.PRODUCTIONS, "Refill silkworm cupboards with mulberry leafs", "Refill silkworm cupboards with mulberry leafs.", true, true, RefillSilkwormFeedingCupboards.class, "mulberry_leaf", false));
@@ -259,6 +263,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("unbox", BotDescriptor.BotType.UTILS, "Free Containers", "Frees containers in area.", false, true, FreeContainersInArea.class, "unbox", false));
         bots.add(new BotDescriptor("unbox_zone", BotDescriptor.BotType.UTILS, "Free Containers in Unbox Zone", "Automatically navigates to unbox zone and frees containers.", true, true, FreeContainersInUnboxZone.class, "unbox_zone", false));
         bots.add(new BotDescriptor("sort_containers", BotDescriptor.BotType.UTILS, "Sort Containers in Area", "Sorts all items across containers in a selected area.", false, true, SortContainersInArea.class, "sort_containers", false));
+        bots.add(new BotDescriptor("area_mover", BotDescriptor.BotType.UTILS, "bot.area_mover.title", "bot.area_mover.desc", true, true, AreaMoverBot.class, "area_mover", false));
         bots.add(new BotDescriptor("water_cheker", BotDescriptor.BotType.UTILS, "Check Water", "Checks water.", false, true, CheckWater.class, "water_cheker", false));
         bots.add(new BotDescriptor("pave_areas", BotDescriptor.BotType.UTILS, "Pave Areas", "Paves every area with the Paving specialisation, fetching its configured stone from that stone's Take area.", false, true, PaveAreas.class, "paver", false));
         bots.add(new BotDescriptor("clay_cheker", BotDescriptor.BotType.UTILS, "Check Clay", "Checks clay.", false, true, CheckClay.class, "clay_cheker", true));
@@ -290,6 +295,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("studytable_nearest", BotDescriptor.BotType.UTILS, "bot.studytable_nearest.title", "bot.studytable_nearest.desc", false, true, StudyDeskFiller.class, "studytable_nearest", false, Map.of("fillAll", false)));
         bots.add(new BotDescriptor("swill_collector", BotDescriptor.BotType.UTILS, "Swill Collector", "Collects swill items from area and feeds to troughs/cisterns.", false, true, CollectSwillToTrough.class, "swillcollector", false));
         bots.add(new BotDescriptor("swill_to_trough", BotDescriptor.BotType.UTILS, "Swill To Trough", "Collects swill from area to selected trough (click to select).", false, true, CollectSwillInArea.class, "swillzone", false));
+        bots.add(new BotDescriptor("swill_piles_to_troughs", BotDescriptor.BotType.UTILS, "bot.swill_piles.title", "bot.swill_piles.desc", true, true, SwillPilesToTroughsBot.class, "swill_piles", false));
         bots.add(new BotDescriptor("qzone", BotDescriptor.BotType.UTILS, "Quality in Zone", "Scan the quality of all typical objects in the area.", false, true, InspectQualityBot.class, "qzone", false));
         bots.add(new BotDescriptor("autoflaction", BotDescriptor.BotType.UTILS, "Auto Flower Action", "Perform the specified flower pop-up menu action for all objects in the area.", false, true, AutoFlowerActionBot.class, "autoflaction", false));
         bots.add(new BotDescriptor("dropsoil", BotDescriptor.BotType.UTILS, "Drop Soil", "Drops soil from stockpile until there is 10 soil left in the stockpile..", false, true, SoilStockpileDropper.class, "dropsoil", false));

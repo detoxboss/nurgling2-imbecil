@@ -79,7 +79,6 @@ public class NInventory extends Inventory
         "Cupboard",
         "Chest",
         "Crate",
-        "Barrel",
         "Basket",
         "Coffer",
         "Large Chest",
@@ -1037,6 +1036,22 @@ public class NInventory extends Inventory
             parent.pack();
             positionTitleBarButtons();
         }
+    }
+
+    /** Opens the search panel, if closed, and searches for the given text. */
+    public void searchFor(String text) {
+        if (searchwdg == null || searchwdg.searchF == null)
+            return;
+        if (!searchVisible) {
+            if (searchBtn instanceof NHeaderToggle)
+                ((NHeaderToggle) searchBtn).a = true;
+            toggleSearch(true);
+        }
+        searchwdg.searchF.settext(text);
+        /* This inventory's own session, not whichever one is in the foreground. */
+        NGameUI owner = (ui != null && ui.gui instanceof NGameUI) ? (NGameUI) ui.gui : null;
+        if (owner != null && owner.itemsForSearch != null)
+            owner.itemsForSearch.install(text);
     }
 
     private void focusSearch() {
@@ -2204,8 +2219,8 @@ public class NInventory extends Inventory
         isClosing = true;
         
         // Only process if this is an indexable container
-        if (isIndexable() && parentGob != null && parentGob.ngob != null && parentGob.ngob.hash != null) {
-            String containerHash = parentGob.ngob.hash;
+        if (isIndexable() && parentGob != null && parentGob.ngob != null && parentGob.ngob.storageHash() != null) {
+            String containerHash = parentGob.ngob.storageHash();
             
             // Clear pending cache removals - container closed, so items weren't consumed
             pendingCacheRemovals.clear();
