@@ -6,6 +6,8 @@ import static haven.CharWnd.iconfilter;
 import static haven.PUtils.convolvedown;
 import haven.resutil.*;
 import nurgling.*;
+import nurgling.iteminfo.food.FoodModifierReader;
+import nurgling.iteminfo.food.FoodModifiers;
 import nurgling.styles.TooltipStyle;
 import nurgling.tools.NSearchItem;
 import nurgling.widgets.*;
@@ -24,8 +26,7 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
 
     public static boolean show;
 
-    static double coefSubscribe = 1.5;
-    static double coefVerif = 1.2;
+    // Account bonuses (1.5 subscribed, 1.2 verified) now live in FoodModifiers.
     static double coefVar = 0.3999;
     String name;
     String s_end;
@@ -43,6 +44,9 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         needToolTip = false;
     }
     double delta = 0;
+    // What the last tooltip build showed for the hunger side, so a change can trigger a rebuild
+    double shownHungerMultiplier = 1;
+    boolean shownDeepWorm = false;
     HashMap<String, Double> searchImage = new HashMap<>();
 
     double energy;
@@ -66,18 +70,32 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
     }
 
     /** Render label text (Open Sans Regular, white) */
-    private static BufferedImage label(String text) {
+    static BufferedImage label(String text) {
         return getLabelFoundry().render(text, Color.WHITE).img;
     }
 
     /** Render label text with custom color (Open Sans Regular, colored) */
-    private static BufferedImage labelColored(String text, Color color) {
+    static BufferedImage labelColored(String text, Color color) {
         return getLabelFoundry().render(text, color).img;
     }
 
     /** Render value text (Open Sans Semibold, colored) */
-    private static BufferedImage value(String text, Color color) {
+    static BufferedImage value(String text, Color color) {
         return getValueFoundry().render(text, color).img;
+    }
+
+    /**
+     * The game UI of the session this food belongs to. Recipes (info with no item owner) have no
+     * session of their own and use the active one. With several sessions open, an item must never read
+     * another session's character, satiation or table, so an item that has no UI yet gets null, not a
+     * guess.
+     */
+    NGameUI gui() {
+        if (owner instanceof NGItem) {
+            UI itemUi = ((NGItem) owner).ui;
+            return (itemUi instanceof NUI) ? ((NUI) itemUi).gui : null;
+        }
+        return NUtils.getGameUI();
     }
 
     /**
@@ -241,33 +259,44 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         }
     }
 
+    /**
+     * The modifiers that apply to this food right now, read from this item's own session. This is the
+     * single source for the FEP prediction: {@link #calcExpectedFep()} and the tooltip's extra rows
+     * both use it, so the numbers cannot disagree.
+     */
+    FoodModifiers modifiers()
+    {
+        return FoodModifierReader.read(gui(), (owner instanceof NGItem) ? (NGItem) owner : null, efficiency, types);
+    }
+
+    /**
+     * Live expected FEP yield: the listed FEP times {@link FoodModifiers#fepMultiplier()}, i.e. the
+     * account/realm bonus, hunger-bar efficacy, table bonus and satiation (plus salt satiation for salted
+     * food). 0 when the character's data is not available.
+     */
     double calcExpectedFep()
     {
-        if (NUtils.getGameUI().chrwdg != null && NUtils.getUI().sessInfo != null && NUtils.getGameUI().chrwdg.battr != null)
-        {
-            boolean isSubscribed = NUtils.getUI().sessInfo.isSubscribed;
-            boolean isVerified = NUtils.getUI().sessInfo.isVerified;
-            return (((isSubscribed) ? coefSubscribe : (isVerified) ? coefVerif : 1) * fepSum * NUtils.getGameUI().chrwdg.battr.glut.gmod * NUtils.getGameUI().getTableMod() + fepSum * NUtils.getGameUI().chrwdg.battr.glut.gmod * NUtils.getGameUI().getTableMod() * NUtils.getGameUI().getRealmMod()) * efficiency / 100;
-        }
-        return 0;
+        FoodModifiers mods = modifiers();
+        return mods.available() ? mods.predictedFep(fepSum) : 0;
     }
 
     double calcNeededFep()
     {
-        if (nurgling.NUtils.getGameUI().chrwdg != null && NUtils.getGameUI().chrwdg.battr!=null)
+        NGameUI gui = gui();
+        if (gui != null && gui.chrwdg != null && gui.chrwdg.battr!=null)
         {
             double cur_fep = 0;
-            for (BAttrWnd.FoodMeter.El el : NUtils.getGameUI().chrwdg.battr.feps.els)
+            for (BAttrWnd.FoodMeter.El el : gui.chrwdg.battr.feps.els)
             {
                 cur_fep += el.a;
             }
             if (isVarity)
             {
-                return (NUtils.getGameUI().chrwdg.battr.feps.cap - Math.sqrt(coefVar * NUtils.getGameUI().getMaxBase() * NUtils.getGameUI().chrwdg.battr.glut.gmod / (NUtils.getGameUI().getCharInfo().varity.size() + 1)) - cur_fep);
+                return (gui.chrwdg.battr.feps.cap - Math.sqrt(coefVar * gui.getMaxBase() * gui.chrwdg.battr.glut.gmod / (gui.getCharInfo().varity.size() + 1)) - cur_fep);
             }
             else
             {
-                return NUtils.getGameUI().chrwdg.battr.feps.cap - cur_fep;
+                return gui.chrwdg.battr.feps.cap - cur_fep;
             }
         }
         return 0;
@@ -275,10 +304,11 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
 
     public boolean check()
     {
-        if (NUtils.getGameUI().chrwdg != null && NUtils.getGameUI().chrwdg.battr!=null)
+        NGameUI gui = gui();
+        if (gui != null && gui.chrwdg != null && gui.chrwdg.battr!=null)
         {
 
-            NCharacterInfo ci = NUtils.getGameUI().getCharInfo();
+            NCharacterInfo ci = gui.getCharInfo();
             if (ci != null)
             {
                 if (name == null)
@@ -292,12 +322,12 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
                     return true;
                 }
             }
-            if (!NUtils.getGameUI().chrwdg.battr.cons.els.isEmpty())
+            if (!gui.chrwdg.battr.cons.els.isEmpty())
             {
                 for (int type : types)
                 {
-                    if(NUtils.getGameUI().chrwdg.battr.cons.els.size()>type) {
-                        BAttrWnd.Constipations.El c = NUtils.getGameUI().chrwdg.battr.cons.els.get(type);
+                    if(gui.chrwdg.battr.cons.els.size()>type) {
+                        BAttrWnd.Constipations.El c = gui.chrwdg.battr.cons.els.get(type);
                         if (efficiency != ((c != null) ? Math.min(100, c.a * 100) : 100)) {
                             needToolTip = true;
                             return true;
@@ -305,9 +335,13 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
                     }
                 }
             }
-            double newExpected = calcExpectedFep();
+            FoodModifiers mods = modifiers();
+            double newExpected = mods.available() ? mods.predictedFep(fepSum) : 0;
             double newNeeded = calcNeededFep();
-            if (Math.abs(expeted_fep - newExpected) > FEP_EPSILON || Math.abs(needed - newNeeded) > FEP_EPSILON)
+            // The tooltip also shows the hunger side and the Deep Worm warning, which the FEP numbers
+            // above do not reflect.
+            boolean otherChanged = mods.available() && (mods.hungerMultiplier() != shownHungerMultiplier || mods.deepWorm() != shownDeepWorm);
+            if (Math.abs(expeted_fep - newExpected) > FEP_EPSILON || Math.abs(needed - newNeeded) > FEP_EPSILON || otherChanged)
             {
                 expeted_fep = newExpected;
                 needed = newNeeded;
@@ -348,19 +382,20 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
     @Override
     public boolean search()
     {
-        if(name!=null) {
+        NGameUI gui = gui();
+        if(name!=null && gui!=null) {
             calcData();
-            NSearchItem si = NUtils.getGameUI().itemsForSearch;
+            NSearchItem si = gui.itemsForSearch;
             if(!si.food.isEmpty()) {
-                for (NSearchItem.Stat fep : NUtils.getGameUI().itemsForSearch.food) {
+                for (NSearchItem.Stat fep : si.food) {
                     if (searchImage.get(fep.v) == null || (fep.a!=0 && !(fep.isMore == (searchImage.get(fep.v) > fep.a))))
                         return false;
                 }
                 if (si.fgs)
                     return (delta > 0);
-                if(!NUtils.getGameUI().itemsForSearch.name.isEmpty())
+                if(!si.name.isEmpty())
                 {
-                    return name.toLowerCase().contains(NUtils.getGameUI().itemsForSearch.name.toLowerCase());
+                    return name.toLowerCase().contains(si.name.toLowerCase());
                 }
                 return true;
             }
@@ -461,19 +496,20 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
     }
     @Override
     public void layout(Layout l) {
-        if (owner instanceof GItem && NUtils.getGameUI() != null) {
+        NGameUI gui = gui();
+        if (owner instanceof GItem && gui != null) {
             name = ((NGItem) owner).name();
             if (name == null)
                 return;
 
-            NCharacterInfo ci = NUtils.getGameUI().getCharInfo();
+            NCharacterInfo ci = gui.getCharInfo();
             if (ci != null) {
                 isVarity = !ci.varity.contains(name);
             }
-            if (NUtils.getGameUI().chrwdg != null && NUtils.getGameUI().chrwdg.battr != null) {
+            if (gui.chrwdg != null && gui.chrwdg.battr != null) {
                 for (int type : types) {
-                    if (NUtils.getGameUI().chrwdg.battr.cons.els.size() > type) {
-                        BAttrWnd.Constipations.El c = NUtils.getGameUI().chrwdg.battr.cons.els.get(type);
+                    if (gui.chrwdg.battr.cons.els.size() > type) {
+                        BAttrWnd.Constipations.El c = gui.chrwdg.battr.cons.els.get(type);
                         if (c != null) {
                             efficiency = c.a * 100;
                         }
@@ -482,6 +518,14 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
             }
             calcData();
         }
+
+        // Holding Shift shows the listed (unmodified) values instead of this character's modified ones.
+        // Recipes have no item and so no modifiers.
+        final boolean unmodified = FoodDetailsLayout.shiftHeld(owner);
+        final FoodModifiers mods = (owner instanceof GItem) ? modifiers() : FoodModifiers.unavailable();
+        shownHungerMultiplier = mods.available() ? mods.hungerMultiplier() : 1;
+        shownDeepWorm = mods.available() && mods.deepWorm();
+        final double hungerPct = glut * 100 * ((!unmodified && mods.available()) ? mods.hungerMultiplier() : 1.0);
 
         // Get font descent for baseline-relative spacing (like NCuriosity)
         int descent = TooltipStyle.getFontDescent(TooltipStyle.FONT_SIZE_BODY);
@@ -492,7 +536,7 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         // Line 1: Energy + Hunger
         BufferedImage energyLine = TooltipStyle.cropTopOnly(catimgsh(0,
             label("Energy: "), value(Utils.odformat2(end * 100, 2) + "%", TooltipStyle.COLOR_FOOD_ENERGY),
-            label("  Hunger: "), value(Utils.odformat2(glut * 100, 2) + "%", TooltipStyle.COLOR_FOOD_HUNGER)));
+            label("  Hunger: "), value(Utils.odformat2(hungerPct, 2) + "%", TooltipStyle.COLOR_FOOD_HUNGER)));
 
         // If there's already content in the layout (e.g., curio info), add section spacing before food info
         int yPos = l.cmp.sz.y;
@@ -657,8 +701,9 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         }
 
         // ===== GROUP 3: Expected FEP + Expected total (10px gap before, 7px between) =====
-        // Skip expected FEP for recipes (owner is GItem for real items, not for recipes)
-        if (owner instanceof GItem) {
+        // Skip expected FEP for recipes (owner is GItem for real items, not for recipes), and while Shift
+        // shows the unmodified values.
+        if (owner instanceof GItem && !unmodified) {
             double error = expeted_fep * 0.005;
             String deltaStr = (delta >= 0 ? "+" : "") + String.format("%.2f", delta) + " \u00B1 " + String.format("%.2f", error);
             BufferedImage expectedLine = TooltipStyle.cropTopOnly(catimgsh(0,
@@ -670,15 +715,21 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
             prevTextBottomOffset = 0;  // Reset for text-only line
 
             // Expected total (7px after expected FEP)
-            if (NUtils.getGameUI() != null && NUtils.getGameUI().chrwdg != null && NUtils.getGameUI().chrwdg.battr != null) {
-                double cur_fep = 0;
-                for (BAttrWnd.FoodMeter.El el : NUtils.getGameUI().chrwdg.battr.feps.els) {
-                    cur_fep += el.a;
-                }
+            if (gui != null && gui.chrwdg != null && gui.chrwdg.battr != null) {
+                double cur_fep = FoodModifierReader.currentFep(gui);
                 BufferedImage totalLine = TooltipStyle.cropTopOnly(catimgsh(0,
                     label("Expected total: "), value(String.format("%.2f", expeted_fep + cur_fep), TooltipStyle.COLOR_FOOD_FEP_SUM)));
                 l.cmp.add(totalLine, Coord.of(0, l.cmp.sz.y + lineSpacing));
                 // prevTextBottomOffset stays 0 for text-only line
+            }
+        }
+
+        // ===== GROUP 3b: weighted totals, predicted FEP/hunger, FEP bar after eating, modifier breakdown
+        // (or, with Shift held, the unmodified weighted totals) =====
+        if (owner instanceof GItem) {
+            if (FoodDetailsLayout.layout(this, l, mods, unmodified, groupSpacing - prevTextBottomOffset, lineSpacing,
+                    FoodModifierReader.currentFep(gui), FoodModifierReader.fepCap(gui))) {
+                prevTextBottomOffset = 0;  // text-only rows
             }
         }
 
@@ -784,9 +835,10 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
     @Override
     public boolean tick(double dt)
     {
-        if(NUtils.getGameUI()==null)
+        NGameUI gui = gui();
+        if(gui==null)
             return false;
-        NCharacterInfo ci = NUtils.getGameUI().getCharInfo();
+        NCharacterInfo ci = gui.getCharInfo();
         if (ci != null)
         {
             name = ((NGItem) owner).name();
