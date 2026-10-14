@@ -214,6 +214,40 @@ itself still succeeds. Confirm `NCore.autoSaveTableware` stays null at runtime (
 "protect eating, never block replacing" semantics — not merely if upstream adds any generic tableware
 auto-save behavior of its own.
 
+## Equipment bonuses, compact gilding tooltip, food predictions, durability bars
+
+**Files:** `src/nurgling/NTooltip.java`, `NWItem.java`, `widgets/NEquipory.java`,
+`iteminfo/NFoodInfo.java`, new `iteminfo/bonus/**`, `iteminfo/food/**`, `iteminfo/FoodDetailsLayout.java`,
+`widgets/EquipBonusPanel.java`, `tools/{TooltipRebuildGate,ItemDurability,EquipStats}.java`,
+`widgets/options/QoL.java`, `NConfig.java` (`equipBonusesExpanded`, `showDurabilityBars`), the `test`
+classpath in `build.xml`. No `src/haven/**` file is involved.
+
+**Fork behavior:** Hurricane-inspired features built on Nurgling's own classes — the full description,
+implementation map and verification status are in
+[`equipment-tooltip-enhancements.md`](equipment-tooltip-enhancements.md); only the sync hooks are listed here.
+
+**Minimum hooks that must survive a merge:**
+* `NTooltip`: `build(info, expandedOverride)`/`isExpandedView`/`renderGildingSummary` (compact view unless
+  Shift), and `extractStatsFromAttrMod` delegating to `AttrBonusCollector` (one extraction for summary and
+  breakdown). The `islots.isShifted = expandedView` assignment.
+* `NWItem`: the tooltip cache goes through `TooltipRebuildGate`; `drawmain` draws the durability bar.
+* `NFoodInfo`: `gui()` (the owning item's session UI — never reintroduce `NUtils.getGameUI()` for item
+  data), `modifiers()` and `calcExpectedFep()` delegating to `FoodModifiers` (the optimizer's value must
+  stay equal to the tooltip's "Expected FEP"), the Shift/`unmodified` handling and the `FoodDetailsLayout`
+  call in `layout()`. `NFoodInfo`'s `label`/`value`/`labelColored` are package-private, not private, for
+  `FoodDetailsLayout`. If upstream retunes the subscribed/verified coefficients they now live in
+  `FoodModifiers`, not `NFoodInfo`.
+* `NEquipory`: `baseSz` (legacy stat text is positioned from it, not `sz`), the sidebar toggle/panel and
+  `updateBonuses()`, `updateSubtlety()`.
+* `build.xml` `test` target: the optional `lib/ext/builtin-res.jar`, `hafen-res.jar`,
+  `build/nurgling-res.jar` classpath entries (rendering tests skip themselves without them).
+
+**Verify:** `ant jar && ant test`; then in a client: hover a gilded item with and without Shift, hover a
+food with and without Shift, open Equipment and toggle the bonuses tab, check a worn tool shows its bar.
+
+**Superseded when:** upstream ships an equivalent equipment-wide bonus total, compact gilding view or food
+modifier breakdown — then drop the matching piece and keep the rest.
+
 ## Fork configuration keys
 
 **File:** `src/nurgling/NConfig.java` (`Key` enum and its defaults block)

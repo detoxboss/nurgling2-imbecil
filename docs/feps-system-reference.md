@@ -90,9 +90,7 @@ instance per `GItem`) exposes, once resolved via
   subscription/table/realm/satiation.
 - `expectedFep()` — public accessor (added for the optimizer) wrapping the
   package-private `calcExpectedFep()`: the *actual* expected FEP this item will grant
-  right now, factoring subscription (`coefSubscribe=1.5`) / verification
-  (`coefVerif=1.2`) bonus, `glut.gmod`, `getTableMod()`, `getRealmMod()`, and the
-  satiation-category `efficiency` (0-100%, derived from `battr.cons`).
+  right now. It is `fepSum * FoodModifiers.fepMultiplier()` — see "Modifier model" below.
 - `neededFepForBar()` — public accessor wrapping `calcNeededFep()`: FEP still needed
   to fill the current bar, already variety-adjusted per the formula above.
 - `attrFepBreakdown()` — public accessor: `Map<String,Double>` of short attribute code
@@ -104,6 +102,32 @@ instance per `GItem`) exposes, once resolved via
 These values must be **re-read fresh before each simulated/actual bite** — satiation
 efficiency and the variety set both shift as you eat, so a value computed at the start
 of a session goes stale after the first item.
+
+### 5. Modifier model — `FoodModifiers`
+
+`nurgling.iteminfo.food.FoodModifiers` is the one place the prediction arithmetic lives (pure, unit-tested;
+`FoodModifierReader` gathers the live inputs from the **item's own session**, never the ambient one):
+
+```
+fepMultiplier = (account + realm) * foodEfficacy(glut.gmod) * tableBonus * satiation * salt
+expected FEP  = fepSum * fepMultiplier        # NFoodInfo.calcExpectedFep()
+hunger shown  = listed hunger * tableHungerModifier
+```
+
+- `account` is `1.5` subscribed, `1.2` verified, else `1`; `realm` is **added** to it, not multiplied (this is
+  the pre-existing formula `(a*F*g*t + F*g*t*realm) * satiation`, kept bit-for-bit and tested against a copy).
+- `satiation` is the pre-existing `efficiency/100` (the food types' entry in `battr.cons`; in that list `a`
+  is already the multiplier — `a == 1.0` entries are removed, `a > 1.0` is drawn as buffed).
+- `salt` is `1` unless the item carries the `Salted` tip **and** `cons` has a `salt` entry **and** that entry
+  is not already the satiation resolved from the food's own types (no double application).
+  This is the one change to `calcExpectedFep()`: salted foods now include it. *Unverified in-game.*
+- Hunger scales only with the table's "Hunger modifier" label. Satiation scaling hunger (Hurricane's rule) is
+  **not** applied (`SATIATION_SCALES_HUNGER`), because no source here supports it.
+- The (+2 weighted) total uses the same multiplier on `FoodInfo.sev`.
+- Hurricane's `1 - el.a` satiation convention was deliberately **not** adopted (see the `a == 1.0` note).
+
+Tooltip presentation (Shift = unmodified values, weighted totals, FEP bar after eating, Deep Worm warning) is
+in [`equipment-tooltip-enhancements.md`](equipment-tooltip-enhancements.md).
 
 ## Corrections vs. the wiki / third-party (AI-generated) descriptions
 
