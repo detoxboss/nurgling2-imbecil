@@ -48,6 +48,16 @@ also introduced a *new* ambient-lookup regression in `NMiniMap.drawTimers()` tha
 corrected during the merge (see the ledger's `NMiniMap` entry). The audit this item asks for remains
 open.
 
+Update (2026-10-13 sync): the range added **46** more ambient `NUtils.getGameUI()`/`getUI()` references.
+The five in new upstream code where the owner was directly available were fixed in the merge (listed in
+the ledger's closing note); the rest were left. **`NConfig.needAreasUpdate()` still resolves the
+current `NGameUI` ambiently** and is correct only because the Areas UI calls it synchronously from the
+session being edited — upstream's new folder move/merge/undo and area-preset code route through it
+unchanged. It is *not* ownership-proof and this sync did not redesign it; it belongs to this audit.
+Other still-ambient surfaces worth auditing: `StashView`, `NAreasWidget`, `PlanningLayerManager.activeGlob()`,
+`StashLayout.load()` (`NConfig.getGlobalInstance()`, so the profile folder is whichever config is
+"current"), and the bot-thread lookups in the new bots.
+
 ## 3. `FreeContainersInUnboxZone` / Unboxing From Area — full ChunkNav-era rewrite
 
 **Where:** `src/nurgling/actions/bots/FreeContainersInUnboxZone.java`.
@@ -91,6 +101,27 @@ awareness, no sum-need→bulk-take→distribute idiom, no `FindNISBox`-style cle
 pile, and the commented-out `RoutePointNavigator`/`closestRoutePoint` remnant are all still present
 verbatim in the merged file. This is a rewrite, not a small patch — treat it as its own reviewed piece
 of work when picked up, not a drive-by fix folded into an unrelated sync.
+
+**Reusable components added by the 2026-10-13 sync (Area Mover) — NOT a fix, item stays OPEN.**
+`src/nurgling/actions/bots/areamover/` (package-private; extract rather than copy-paste a third time —
+`swillpiles/SwillScan` is already a copy of `AreaScan`) contains pieces worth studying or lifting:
+
+- `AreaScan.reach(area, ensurePresence)` — navigate with one retry and **never let a failed navigation
+  reach a scan** (an unloaded area looks exactly like an empty one); `walkToCenter` re-probe before
+  declaring a large area exhausted.
+- `LoadFromArea` — a `stuck` set plus an `exhausted` flag as explicit termination state, per-visit
+  pile re-resolution via `Finder.findGob(id)`, and `StackSupporter.getOptimalItemCapacity(...)` sizing
+  the take by the real item footprint and stack depth — i.e. it answers this item's "no stack-depth
+  awareness" complaint.
+- `UnloadToArea` — probes what each pile holds before putting anything in (the model attribute `31`
+  marks a full pile) so a pile of another item never blocks the run.
+- `Cargo` — tracks only what this run carries, so items the player already held are left alone.
+
+What it does **not** provide: PUT-preference routing through `NContext.getSpecStorages`, the
+sum-need→bulk-take→distribute idiom, or `FindNISBox`-style clean give-up on a destroyed pile (it still
+uses `TakeItemsFromPile` and the same hand-rolled `Finder.findGob(id) == null` check). It is not wired
+into `FreeContainersInUnboxZone`, which is unchanged. Do not describe this item as fixed or
+superseded.
 
 ## 4. `OpenTargetContainer` nullable-`gob` NPE
 

@@ -1461,6 +1461,14 @@ public class VSpec {
         vinegar.add(new JSONObject("{\"static\":\"gfx/invobjs/vinegar\",\"name\":\"Vinegar\"}"));
         categories.put("Vinegar", vinegar);
 
+        ArrayList<JSONObject> wine = new ArrayList<>();
+        wine.add(new JSONObject("{\"static\":\"gfx/invobjs/wine\",\"name\":\"Wine\"}"));
+        categories.put("Wine", wine);
+
+        ArrayList<JSONObject> batter = new ArrayList<>();
+        batter.add(new JSONObject("{\"static\":\"gfx/invobjs/batter\",\"name\":\"Batter\"}"));
+        categories.put("Batter", batter);
+
         ArrayList<JSONObject> mushrooms = new ArrayList<>();
         mushrooms.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/baybolete\",\"name\":\"Bay Bolete\"}"));
         mushrooms.add(new JSONObject("{\"static\":\"gfx/invobjs/herbs/bloatedbolete\",\"name\":\"Bloated Bolete\"}"));
@@ -3302,6 +3310,8 @@ public class VSpec {
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/reedship\",\"name\":\"Reed Ship\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/frogspawn\",\"name\":\"Frogspawn\"}"));
         NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/foetus\",\"name\":\"Beast Unborn\"}"));
+        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/smokering\",\"name\":\"Smokering\"}"));
+        NoneStackableCurio.add(new JSONObject("{\"static\":\"gfx/invobjs/smokeship\",\"name\":\"Smokeship\"}"));
         categories.put("Curiosities", NoneStackableCurio);
 
         ArrayList<JSONObject> NaturalResources = new ArrayList<>();
@@ -3356,6 +3366,7 @@ public class VSpec {
         ArrayList<JSONObject> pipeweed = new ArrayList<>();
         pipeweed.add(new JSONObject("{\"static\":\"gfx/invobjs/tobacco-fresh\",\"name\":\"Fresh Leaf of Pipeweed\"}"));
         pipeweed.add(new JSONObject("{\"static\":\"gfx/invobjs/tobacco-cured\",\"name\":\"Cured Pipeweed\"}"));
+        pipeweed.add(new JSONObject("{\"static\":\"gfx/invobjs/tobacco-ground\",\"name\":\"Pipestuff\"}"));
         categories.put("Pipeweed", pipeweed);
     }
 
