@@ -83,6 +83,9 @@ final class FoodDetailsLayout {
         if(mods.deepWorm())
             rows.add(NFoodInfo.labelColored(L10n.get("food.details.deepworm"), TooltipStyle.COLOR_NEGATIVE_STAT));
 
+        if(!mods.hungerKnown())
+            rows.add(NFoodInfo.labelColored(L10n.get("food.details.hunger_unknown"), TooltipStyle.COLOR_NEGATIVE_STAT));
+
         double hungerPct = mods.predictedHunger(food.glut * 100.0);
         if(weighted > 0)
             rows.add(weightedRow(mods.predictedFep(weighted), hungerPct));
@@ -111,6 +114,11 @@ final class FoodDetailsLayout {
                      NFoodInfo.labelColored(" " + L10n.get("food.details.fep"), TooltipStyle.COLOR_PERCENTAGE));
             for(FoodModifiers.Factor f : factors)
                 rows.add(NFoodInfo.labelColored(factorText(f), TooltipStyle.COLOR_PERCENTAGE));
+        }
+        if(mods.hungerKnown() && mods.hungerMultiplier() != 1.0) {
+            /* the hunger side of the same factors: satiation, salt and the table's hunger modifier */
+            rows.add(NFoodInfo.label(L10n.get("food.details.hunger") + " "),
+                     NFoodInfo.value("×" + Utils.odformat2(mods.hungerMultiplier(), 2), TooltipStyle.COLOR_FOOD_HUNGER));
         }
         rows.add(NFoodInfo.labelColored(L10n.get("food.details.hint_shift"), TooltipStyle.COLOR_RESOURCE_PATH));
         return rows.any;

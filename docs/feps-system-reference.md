@@ -111,11 +111,13 @@ of a session goes stale after the first item.
 ```
 fepMultiplier = (account + realm) * foodEfficacy(glut.gmod) * tableBonus * satiation * salt
 expected FEP  = fepSum * fepMultiplier        # NFoodInfo.calcExpectedFep()
-hunger shown  = listed hunger * tableHungerModifier
+hunger filled = listed hunger * combinedSatiation * salt * tableHungerModifier
 ```
 
 Each rule below is tagged **proven** (the client source decides it), **supported** (an outside source or another
-client agrees, not the server) or **unverified**.
+client agrees, not the server) or **unverified**. The server is private: nothing here is a reading of its code, and
+neither Nurgling nor Hurricane is treated as authoritative; each rule keeps whichever behaviour has the strongest
+evidence.
 
 - `account` is `1.5` subscribed, `1.2` verified, else `1`; `realm` is **added** to it, not multiplied (the
   pre-existing formula `(a*F*g*t + F*g*t*realm) * satiation`, tested against a copy). *Supported* (the fork's own
@@ -132,9 +134,15 @@ client agrees, not the server) or **unverified**.
 - `salt` is `1` unless the item carries the `Salted` tip **and** `cons` has a `salt` entry **and** that entry
   is not already one of the food's own types (no double application). **Supported** (Hurricane), **unverified**
   in game.
-- Hunger scales only with the table's "Hunger modifier" label. Satiation scaling hunger is **supported**
-  (Hurricane's code and tooltip text, the Ring of Brodgar "Food Satiations" page) but **not applied**
-  (`SATIATION_SCALES_HUNGER`): it would change a displayed number nobody has measured here.
+- **Hunger** = listed hunger x the same combined satiation x the same salt factor x the table's "Hunger modifier".
+  **Supported**, adopted as the default: Hurricane implements it (`FoodInfo.java:101,107,159`) and says so in its
+  character-sheet tooltip (`BAttrWnd.java:506`), the Ring of Brodgar "Food Satiations" page gives
+  `HungerGained = FoodHungerValue * SatiationModifier`, and no source contradicts it. **Not measured** in this
+  client. The hunger-bar efficacy (`gmod`), the account bonus, the realm bonus and the table's FEP bonus are
+  FEP-only: Hurricane does not apply them to hunger either, and there is no evidence for it. Satiation uses this
+  fork's native `el.a` (the multiplier), never Hurricane's inverted `1 - el.a`. Salt is applied once: not at all
+  if the salt entry is already one of the food's own types. If the table's hunger label cannot be read, hunger
+  is unknown (shown as listed, with a note) while the FEP prediction stays available.
 - The (+2 weighted) total uses the same multiplier on `FoodInfo.sev`, and is shown only when `sev` is plausible
   (between the FEP sum and twice it). The constructor-position mapping of `sev` is **unverified**.
 - `realm`: read from the `RealmBuff` widgets through `RealmBuff.info()`. (The old reader used the shadowed
@@ -147,6 +155,31 @@ client agrees, not the server) or **unverified**.
   uses the bare cap — pre-existing, and not changed because the effect of the earlier variety credits on the
   target has not been verified.
 
+#### Checking the hunger prediction in game (no server source needed)
+
+The hunger model is a prediction, not a proven reading of the server. This procedure measures it on one food.
+
+1. Pick a single item (not a stack) whose types currently have a clearly reduced satiation entry, away from a
+   feast table (so the table's hunger modifier is 1). Do not eat or drink anything else during the test, and
+   take both readings within a few seconds, because hunger also falls slowly with time.
+2. **Before:** hover the hunger meter on the character sheet and write down the hunger value in permille (the
+   tooltip reads `<label>: N.N‰`). Hover the food (without Shift) and write down: the "Hunger" figure in the
+   Energy line (the tooltip uses percent, so predicted ‰ = percent x 10), the `Modifiers` rows (satiation x,
+   salt x, table), and the `Hunger x` row. Then hold Shift and write down the listed (unmodified) hunger.
+3. Eat the item (right-click, Eat).
+4. **After:** read the hunger meter tooltip again. `delta = after - before` in permille.
+5. Compare. Predicted hunger is listed x (satiation x salt x table); the model says `delta` equals it, and
+   `delta / listed` equals the `Hunger x` figure. Rounding in the tooltips is about 0.1 permille, so allow about
+   that much, more for a small food.
+   * `delta` close to the predicted figure: the model holds for this food.
+   * `delta` close to the **listed** (Shift) figure although `Hunger x` is clearly below 1: satiation does
+     not scale hunger. Revert it by making `FoodModifiers.hungerMultiplier()` return only the table
+     modifier (and update the docs).
+   * Something else: record the numbers (food, both satiation entries, salt yes/no, before/after) before
+     changing anything.
+6. Repeat once for each of: a food with a single reduced type, a food with two reduced types (tests the
+   product), and a salted food (tests the salt factor). A fresh, unsatiated food only checks that nothing is
+   scaled wrongly (`Hunger x` = 1).
 Tooltip presentation (Shift = unmodified values, weighted totals, FEP bar after eating, Deep Worm warning) is
 in [`equipment-tooltip-enhancements.md`](equipment-tooltip-enhancements.md).
 ## Corrections vs. the wiki / third-party (AI-generated) descriptions

@@ -7,7 +7,6 @@ import static haven.Inventory.sqsz;
 import java.awt.image.BufferedImage;
 import java.util.*;
 import java.awt.Color;
-import haven.res.ui.tt.q.qbuff.QBuff;
 
 /* >wdg: haven.res.ui.barterbox.Shopbox */
 @haven.FromResource(name = "ui/barterbox", version = 76)
@@ -113,8 +112,9 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 		    sg.aimage(itemnum.get(), sqsz, 1, 1);
 		if(num != null)
 		    g.aimage(num.tex(), itemc.add(invsq.sz()).add(UI.scale(5, 0)), 0.0, 1.0);
-		if(quality != null)
-		    g.aimage(quality.tex(), itemc.add(invsq.sz()).add(UI.scale(5, -18)), 0.0, 1.0);
+		Text ql = quality();
+		if(ql != null)
+		    g.aimage(ql.tex(), itemc.add(invsq.sz()).add(UI.scale(5, -18)), 0.0, 1.0);
 	    }
 	}
 
@@ -141,29 +141,28 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 
     private List<ItemInfo> cinfo;
     public List<ItemInfo> info() {
-	if(cinfo == null) {
+	if(cinfo == null)
 	    cinfo = ItemInfo.buildinfo(this, info);
-	    QBuff qb = findQuality(cinfo);
-	    quality = (qb == null) ? null : Text.render("Quality: " + (int)qb.q);
-	}
 	return(cinfo);
     }
 
-    /* nurgling: the item's own quality, or that of what it contains (a filled container) */
-    private static QBuff findQuality(List<ItemInfo> infos) {
-	for(ItemInfo ii : infos) {
-	    if(ii instanceof ItemInfo.Contents) {
-		for(ItemInfo sub : ((ItemInfo.Contents)ii).sub) {
-		    if(sub instanceof QBuff)
-			return((QBuff)sub);
-		}
-	    }
+    /* nurgling: the label for the offered item's quality. Cached per built info list, so it is rebuilt
+     * only when the server sends new item information; while that information is still loading (or
+     * has none) no label is shown, never the previous item's. */
+    private List<ItemInfo> qinfo;
+    private Text quality() {
+	List<ItemInfo> ci;
+	try {
+	    ci = info();
+	} catch(Loading l) {
+	    return(null);
 	}
-	for(ItemInfo ii : infos) {
-	    if(ii instanceof QBuff)
-		return((QBuff)ii);
+	if(ci != qinfo) {
+	    Double q = nurgling.iteminfo.OfferQuality.of(ci);
+	    quality = (q == null) ? null : Text.render(nurgling.iteminfo.OfferQuality.label(q));
+	    qinfo = ci;
 	}
-	return(null);
+	return(quality);
     }
 
     public class IconTip implements Indir<Tex>, ItemInfo.InfoTip {
@@ -303,6 +302,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 	if(name == "res") {
 	    this.res = null;
 	    this.spr = null;
+	    this.qinfo = null;
+	    this.quality = null;
 	    if(args.length > 0) {
 		ResData res = new ResData(ui.sess.getresv(args[0]), Message.nil);
 		if(args.length > 1)
@@ -313,6 +314,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 	} else if(name == "tt") {
 	    info = args;
 	    cinfo = null;
+	    qinfo = null;
+	    quality = null;
 	    longtip = null;
 	} else if(name == "n") {
 	    int num = Utils.iv(args[0]);

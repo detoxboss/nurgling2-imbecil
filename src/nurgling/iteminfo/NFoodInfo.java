@@ -528,7 +528,9 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         final boolean unmodified = FoodDetailsLayout.shiftHeld(owner);
         final FoodModifiers mods = (owner instanceof GItem) ? modifiers() : FoodModifiers.unavailable();
         shownModifiers = mods.signature();
-        final double hungerPct = glut * 100 * ((!unmodified && mods.available() && mods.hungerKnown()) ? mods.hungerMultiplier() : 1.0);
+        // The hunger shown is the same figure FoodDetailsLayout uses for the per-hunger rows (FoodModifiers.predictedHunger);
+        // with Shift, or while it cannot be predicted, the listed value.
+        final double hungerPct = (!unmodified && mods.available() && mods.hungerKnown()) ? mods.predictedHunger(glut * 100) : glut * 100;
 
         // Get font descent for baseline-relative spacing (like NCuriosity)
         int descent = TooltipStyle.getFontDescent(TooltipStyle.FONT_SIZE_BODY);

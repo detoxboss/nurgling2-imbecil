@@ -236,15 +236,21 @@ implementation map and verification status are in
   are disposed; `destroy()` clears it); `drawmain` draws the durability bar.
 * `haven/ItemInfo.buildinfo`: the three-line `NSpiceMarks.of(owner, ret)` block, inside the existing
   `owner instanceof NGItem` block. Without it the seasoning marks silently stop appearing.
-* `res/ui/barterbox/Shopbox` (`@FromResource` v76, unchanged): `quality` field, its draw line and
-  `findQuality`. If the server ships a newer version this local class stops being used and the label goes;
-  nothing else depends on it.
+* `res/ui/barterbox/Shopbox` (`@FromResource` v76, unchanged): the private `quality`/`qinfo` fields, the
+  `quality()` method with its call in `draw`, and the two invalidation lines in `uimsg` (`res`, `tt`); the rule is in
+  `nurgling.iteminfo.OfferQuality`. **Version dependency:** the label exists only while the local class is the
+  active one, i.e. while the annotation equals the server's `ui/barterbox` version. After a server bump the
+  server's class is used, the label silently disappears and the other Nurgling classes that read `Shopbox`
+  fields (`TransferToBarter`, `FindBarterStand`, `TakeItems2`, ...) are subject to the usual re-fetch procedure in
+  `resource-upgrade-strategy.md`; re-apply these lines after re-fetching, and never bump the annotation by hand.
 * `NFoodInfo`: `gui()` (the owning item's session UI — never reintroduce `NUtils.getGameUI()` for item
   data), `modifiers()` and `calcExpectedFep()` delegating to `FoodModifiers` (the optimizer's value must
   stay equal to the tooltip's "Expected FEP"), the Shift/`unmodified` handling and the `FoodDetailsLayout`
   call in `layout()`. `NFoodInfo`'s `label`/`value`/`labelColored` are package-private, not private, for
   `FoodDetailsLayout`. If upstream retunes the subscribed/verified coefficients they now live in
-  `FoodModifiers`, not `NFoodInfo`. `FoodModifierReader` must keep telling *loading* and *unreadable* apart
+  `FoodModifiers`, not `NFoodInfo`. Predicted hunger (`FoodModifiers.hungerMultiplier`) is satiation x salt x table
+  hunger modifier, and `NFoodInfo.layout` and `FoodDetailsLayout` both take it from `predictedHunger`.
+  `FoodModifierReader` must keep telling *loading* and *unreadable* apart
   from *absent* (a neutral factor), and `NGameUI.getRealmMod()` delegates to its realm reader.
 * `NEquipory`: `baseSz` (legacy stat text is positioned from it, not `sz`), the sidebar toggle/panel and
   `updateBonuses()` (retry only while `Result.retry()`), `updateSubtlety()`, `updateTotalArmor()` going through

@@ -127,11 +127,21 @@ class FoodDetailsLayoutTest {
     @Test
     void unreadableHungerLabelAddsANoteButKeepsThePrediction() {
         NFoodInfo f = food(15);
-        FoodModifiers unknown = FoodModifiers.of(Account.SUBSCRIBED, 0.1, 0.9, 1.25, 0.8, 0.9, Double.NaN, false);
-        int known = height(f, mods(false), false);
-        int noHunger = height(f, unknown, false);
+        /* nothing else modifies anything, so the only difference is the note */
+        FoodModifiers known = FoodModifiers.of(Account.NONE, 0, 1, 1, 1, null, 1.0, false);
+        FoodModifiers unknown = FoodModifiers.of(Account.NONE, 0, 1, 1, 1, null, Double.NaN, false);
         assertDoesNotThrow(() -> height(f, unknown, false));
-        assertTrue(noHunger > 0);
-        assertTrue(noHunger != known, "the note changes the block");
+        assertTrue(height(f, unknown, false) > height(f, known, false), "the note is an extra row");
+    }
+
+    @Test
+    void aHungerFigureRowAppearsOnlyWhenHungerIsActuallyScaled() {
+        NFoodInfo f = food(15);
+        FoodModifiers none = FoodModifiers.of(Account.NONE, 0, 1, 1, 1, null, 1.0, false);
+        FoodModifiers satiated = FoodModifiers.of(Account.NONE, 0, 1, 1, 0.8, null, 1.0, false);
+        /* satiation adds both its factor row and the hunger row */
+        assertTrue(height(f, satiated, false) > height(f, none, false));
+        /* the Shift view shows listed values whatever the modifiers are */
+        assertEquals(height(f, none, true), height(f, satiated, true));
     }
 }

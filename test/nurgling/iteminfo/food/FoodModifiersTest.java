@@ -70,15 +70,88 @@ class FoodModifiersTest {
     }
 
     @Test
-    void hungerOnlyFollowsTheTableModifier() {
+    void hungerFollowsSatiationSaltAndTheTableModifierOnly() {
+        /* account, realm, hunger-bar efficacy and the table's FEP bonus must not touch hunger */
         FoodModifiers m = mods(Account.SUBSCRIBED, 0.2, 0.7, 1.4, 0.6, 0.9, 0.35);
-        assertEquals(0.35, m.hungerMultiplier(), EPS);
-        assertEquals(10 * 0.35, m.predictedHunger(10), EPS);
-        assertFalse(FoodModifiers.SATIATION_SCALES_HUNGER);
-        FoodModifiers none = mods(Account.SUBSCRIBED, 0.2, 0.7, 1.4, 0.6, 0.9, 1.0);
-        assertEquals(10, none.predictedHunger(10), EPS, "satiation, salt and gmod must not scale hunger");
+        assertEquals(0.6 * 0.9 * 0.35, m.hungerMultiplier(), EPS);
+        assertEquals(10 * 0.6 * 0.9 * 0.35, m.predictedHunger(10), EPS);
+        FoodModifiers fepOnly = mods(Account.SUBSCRIBED, 0.2, 0.7, 1.4, 1.0, null, 1.0);
+        assertEquals(1.0, fepOnly.hungerMultiplier(), EPS, "account, realm, efficacy and table FEP bonus are FEP-only");
+        assertEquals(10, fepOnly.predictedHunger(10), EPS);
     }
 
+    @Test
+    void singleTypeSatiationScalesHunger() {
+        FoodModifiers m = mods(Account.NONE, 0, 1, 1, 0.64, null, 1);
+        assertEquals(6.4, m.predictedHunger(10), EPS);
+        assertEquals(64.0, m.predictedFep(100), EPS, "and FEP by the same entry");
+    }
+
+    @Test
+    void multiTypeSatiationScalesHungerByTheProduct() {
+        double sat = FoodModifiers.combineSatiation(0.5, 0.8);
+        FoodModifiers m = mods(Account.NONE, 0, 1, 1, sat, null, 1);
+        assertEquals(10 * 0.4, m.predictedHunger(10), EPS);
+        assertEquals(m.hungerMultiplier(), m.fepMultiplier(), EPS, "with nothing else active both sides agree");
+    }
+
+    @Test
+    void saltedFoodScalesHungerBySaltToo() {
+        FoodModifiers m = mods(Account.NONE, 0, 1, 1, 0.8, 0.5, 1);
+        assertEquals(10 * 0.8 * 0.5, m.predictedHunger(10), EPS);
+        /* an item whose own types already include salt carries salt inside the satiation factor, once */
+        FoodModifiers already = mods(Account.NONE, 0, 1, 1, 0.8 * 0.5, null, 1);
+        assertEquals(m.predictedHunger(10), already.predictedHunger(10), EPS);
+    }
+
+    @Test
+    void feastTableScalesHungerByItsHungerModifierAndFepByItsBonus() {
+        FoodModifiers m = mods(Account.VERIFIED, 0, 0.9, 1.25, 0.8, null, 0.35);
+        assertEquals(10 * 0.8 * 0.35, m.predictedHunger(10), EPS);
+        assertEquals(100 * 1.2 * 0.9 * 1.25 * 0.8, m.predictedFep(100), EPS);
+    }
+
+    @Test
+    void combinedModifiersGiveTheSameHungerEverywhereItIsShown() {
+        FoodModifiers m = mods(Account.SUBSCRIBED, 0.1, 0.9, 1.25, FoodModifiers.combineSatiation(0.5, 0.8), 0.9, 0.35);
+        double listedPct = 4.0;
+        double hunger = m.predictedHunger(listedPct);
+        assertEquals(listedPct * 0.4 * 0.9 * 0.35, hunger, EPS);
+        /* the per-hunger rows divide by exactly that figure */
+        double fep = m.predictedFep(12);
+        assertEquals(fep / hunger, FoodModifiers.perHunger(fep, hunger), EPS);
+        double weighted = m.predictedFep(15);
+        assertEquals(weighted / hunger, FoodModifiers.perHunger(weighted, hunger), EPS);
+    }
+
+    @Test
+    void noModifiersLeavesHungerAsListed() {
+        FoodModifiers m = mods(Account.NONE, 0, 1, 1, 1, null, 1);
+        assertEquals(7.5, m.predictedHunger(7.5), EPS);
+    }
+
+    @Test
+    void missingDataGivesNoHungerPrediction() {
+        assertFalse(FoodModifiers.pending().available());
+        assertFalse(FoodModifiers.unsupported().available());
+        assertFalse(FoodModifiers.unavailable().available());
+        assertTrue(FoodModifiers.pending().factors().isEmpty());
+        /* an unreadable table label makes hunger unknown, never "as listed" */
+        FoodModifiers unknown = mods(Account.NONE, 0, 1, 1, 0.8, null, Double.NaN);
+        assertFalse(unknown.hungerKnown());
+        assertTrue(Double.isNaN(unknown.predictedHunger(10)));
+        assertEquals(80.0, unknown.predictedFep(100), EPS);
+    }
+
+    @Test
+    void satiationAndSaltAreHungerFactorsAndTheOthersAreNot() {
+        FoodModifiers m = mods(Account.SUBSCRIBED, 0.1, 0.9, 1.25, 0.8, 0.9, 0.5);
+        for(FoodModifiers.Factor f : m.factors()) {
+            boolean expectHunger = f.kind == Kind.SATIATION || f.kind == Kind.SALT || f.kind == Kind.TABLE_HUNGER;
+            assertEquals(expectHunger, f.hunger(), f.kind.toString());
+            assertEquals(f.kind != Kind.TABLE_HUNGER, f.fep(), f.kind.toString());
+        }
+    }
     @Test
     void saltSatiationOnlyAppliesWhenPresent() {
         FoodModifiers plain = mods(Account.NONE, 0, 1, 1, 0.8, null, 1);
@@ -96,9 +169,11 @@ class FoodModifiersTest {
         assertEquals(5, fs.size(), "account, realm, efficacy, satiation, table hunger");
         assertEquals(Kind.ACCOUNT, fs.get(0).kind);
         assertTrue(fs.get(1).additive);
+        assertEquals(Kind.SATIATION, fs.get(3).kind);
         assertEquals(Kind.TABLE_HUNGER, fs.get(4).kind);
-        assertTrue(fs.get(4).hunger());
-        for(int i = 0; i < 4; i++)
+        assertTrue(fs.get(3).hunger() && fs.get(3).fep(), "satiation scales both");
+        assertTrue(fs.get(4).hunger() && !fs.get(4).fep(), "the table's hunger modifier scales hunger only");
+        for(int i = 0; i < 3; i++)
             assertFalse(fs.get(i).hunger());
         assertTrue(mods(Account.NONE, 0, 1, 1, 1, null, 1).factors().isEmpty());
     }
@@ -248,5 +323,20 @@ class FoodModifiersTest {
         assertTrue(unknown.factors().stream().noneMatch(f -> f.kind == Kind.TABLE_HUNGER));
         assertNotEquals(known.signature(), unknown.signature());
         assertTrue(Double.isNaN(FoodModifiers.perHunger(5, unknown.predictedHunger(10))));
+    }
+
+    @Test
+    void aTypeListedTwiceCountsOnce() {
+        double[] entries = {0.9, 0.5, 1.2};
+        assertEquals(0.5, FoodModifierReader.satiation(entries, new int[] {1, 1}), EPS);
+        assertEquals(0.5 * 0.9, FoodModifierReader.satiation(entries, new int[] {1, 0, 1, 0}), EPS);
+    }
+
+    @Test
+    void neutralEntriesMissingFromTheListChangeNothing() {
+        /* the server's list omits entries that are back to 1.0, so a type may point past its end */
+        double[] entries = {0.5};
+        assertEquals(0.5, FoodModifierReader.satiation(entries, new int[] {0, 3}), EPS);
+        assertEquals(1.0, FoodModifierReader.satiation(new double[0], new int[] {0, 1, 2}), EPS);
     }
 }

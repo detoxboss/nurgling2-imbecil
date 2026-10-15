@@ -72,18 +72,22 @@ public final class FoodModifierReader {
     /**
      * The satiation multiplier for a food: the product of the entries its types point to. A type with no
      * entry (the server drops entries that are back to 1.0, and an index past the end can only be such an
-     * entry) does not reduce anything.
+     * entry) does not reduce anything. A type listed twice counts once.
      *
      * @param entries each satiation entry's multiplier ({@code El.a}; 1 is no effect, above 1 is a bonus)
      */
     static double satiation(double[] entries, int[] types) {
         if(types == null)
             return 1.0;
+        /* each type counts once, however often its index is listed */
+        boolean[] seen = new boolean[entries.length];
         double[] hit = new double[types.length];
         int n = 0;
         for(int type : types) {
-            if(type >= 0 && type < entries.length)
+            if(type >= 0 && type < entries.length && !seen[type]) {
+                seen[type] = true;
                 hit[n++] = entries[type];
+            }
         }
         return FoodModifiers.combineSatiation(java.util.Arrays.copyOf(hit, n));
     }

@@ -16,23 +16,22 @@ import java.util.Objects;
  * one extra, 1 unless the item is salted and the character has a salt satiation entry. The account bonus
  * and the realm bonus are <em>added</em>, not multiplied, which is why they are one factor here.
  * <p>
- * <b>Hunger side.</b> Only the table's own "Hunger modifier" is applied. Whether satiation also scales
- * the hunger a food fills has not been verified in-game, so it is deliberately not applied; see
- * {@link #SATIATION_SCALES_HUNGER}.
+ * <b>Hunger side.</b> {@code multiplier = satiation * salt * tableHungerModifier}: the same satiation and
+ * salt factors as the FEP side, and the table's own "Hunger modifier". The hunger bar's food efficacy, the
+ * account bonus, the realm bonus and the table's FEP bonus are <em>not</em> applied to hunger; nothing
+ * supports that.
+ * <p>
+ * <b>Evidence level.</b> The server is private, so both sides are client-side predictions, not readings of
+ * server code. That satiation reduces hunger as well as FEP is documented by the Ring of Brodgar
+ * "Food Satiations" page ({@code HungerGained = FoodHungerValue * SatiationModifier}) and implemented by
+ * Hurricane (which also says so in its character-sheet tooltip); no source contradicts it. It has not been
+ * measured in this client; see {@code docs/feps-system-reference.md} for how to check it.
  * <p>
  * <b>Never invented.</b> The result has a {@link Status}: only {@code AVAILABLE} carries numbers. When
  * an input is still loading ({@code PENDING}) or cannot be understood ({@code UNSUPPORTED}) callers must
  * not show a prediction as if it were complete.
  */
 public final class FoodModifiers {
-    /**
-     * Hurricane scales displayed hunger by satiation as well, and the Ring of Brodgar wiki's "Food
-     * Satiations" page gives {@code HungerGained = FoodHungerValue * SatiationModifier}. The fork's own
-     * FEP formula has never done so and nothing in the client source decides it, so this stays off until
-     * it is confirmed against the live game (compare a food's listed hunger with the hunger bar's change).
-     */
-    public static final boolean SATIATION_SCALES_HUNGER = false;
-
     public static final double SUBSCRIBED_BONUS = 1.5;
     public static final double VERIFIED_BONUS = 1.2;
 
@@ -54,7 +53,10 @@ public final class FoodModifiers {
         ACCOUNT, REALM, FOOD_EFFICACY, TABLE_FEP, SATIATION, SALT, TABLE_HUNGER
     }
 
-    /** One contributing multiplier. {@code additive} is true for the realm bonus, which adds to the account bonus. */
+    /**
+     * One contributing multiplier. {@code additive} is true for the realm bonus, which adds to the account
+     * bonus. {@link #fep()} and {@link #hunger()} say which side(s) of the prediction it scales.
+     */
     public static final class Factor {
         public final Kind kind;
         public final double value;
@@ -66,9 +68,14 @@ public final class FoodModifiers {
             this.additive = additive;
         }
 
-        /** True for the one factor that scales hunger rather than FEP. */
+        /** Whether this factor scales the FEP prediction. */
+        public boolean fep() {
+            return kind != Kind.TABLE_HUNGER;
+        }
+
+        /** Whether this factor scales the hunger prediction (satiation, salt and the table's hunger modifier). */
         public boolean hunger() {
-            return kind == Kind.TABLE_HUNGER;
+            return kind == Kind.SATIATION || kind == Kind.SALT || kind == Kind.TABLE_HUNGER;
         }
     }
 
@@ -175,11 +182,12 @@ public final class FoodModifiers {
     }
 
     /**
-     * Multiplier from the listed hunger to the hunger the meal actually fills; NaN when the table's
-     * hunger label could not be read (see {@link #hungerKnown()}).
+     * Multiplier from the listed hunger to the hunger the meal actually fills: satiation, salt satiation
+     * and the table's hunger modifier. NaN when the table's hunger label could not be read (see
+     * {@link #hungerKnown()}).
      */
     public double hungerMultiplier() {
-        return tableHunger;
+        return satiation * ((salt == null) ? 1.0 : salt) * tableHunger;
     }
 
     /**
@@ -194,6 +202,7 @@ public final class FoodModifiers {
         return listedFep * fepMultiplier();
     }
 
+    /** The listed hunger as it will actually fill: {@code listed * hungerMultiplier()}. One definition for every row that shows hunger. */
     public double predictedHunger(double listedHunger) {
         return listedHunger * hungerMultiplier();
     }

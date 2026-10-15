@@ -105,6 +105,13 @@ this page covers the tooltip/equipment features and where they live.
     per-hunger values show "-". The FEP prediction does not use that label, so it stays available, which is
     what keeps the food optimizer working at such a table.
   * *Unavailable*: no session or no character sheet yet → nothing is shown, as before.
+* **Hunger.** The hunger shown (Energy line) and every per-hunger row use one figure,
+  `FoodModifiers.predictedHunger`: listed hunger x combined satiation x salt x the table's hunger modifier. The
+  hunger-bar efficacy, account bonus, realm bonus and the table's FEP bonus are FEP-only. This is a well-supported
+  client-side prediction (Hurricane, its tooltip text, the Ring of Brodgar "Food Satiations" page; no contradicting
+  source), not a proven reading of private server code, and it has not been measured in this client; the procedure
+  to do so is in [`feps-system-reference.md`](feps-system-reference.md). The first two lines of the base layout
+  ("FEP Sum", "FEP/Hunger") stay the *listed* figures, as before. With Shift everything is the listed value.
 * **Satiation of foods with several types.** Every type's entry applies and they multiply
   (`FoodModifiers.combineSatiation`). Before this, `efficiency` kept only the *last* matching type, so the
   result depended on type order; it also made `check()` ask for a tooltip rebuild every tick for such
@@ -163,6 +170,21 @@ this page covers the tooltip/equipment features and where they live.
 `Shopbox` shows "Quality: N" beside the offered item (its own quality, or its contents' for a filled
 container), where Hurricane puts it. The tooltip was the only place it appeared before.
 
+The rule lives in `nurgling.iteminfo.OfferQuality` (unit-tested); `Shopbox` keeps a private `Text quality`, a
+`qinfo` cache key and a small `quality()` that draw calls. The label is cached against the identity of the built
+info list, so it is rebuilt only when the server sends new item information, is hidden while that information
+is `Loading` (never the previous item's), and is cleared on both `tt` and `res`. It does not need a hover:
+`draw` already builds the info for the item-count overlay. `Shopbox` is also read directly by seven other
+Nurgling classes (`TransferToBarter`, `FindBarterStand`, `TakeItems2`, ...), so the local class is already a hard
+dependency; the label adds no new edge. **If the server ships a newer `ui/barterbox`** the `@FromResource` version
+(76) stops matching, the server's class is loaded instead, and the label disappears; nothing crashes, but the
+bots then also see the server's class (a pre-existing property). Do not edit the version annotation without
+re-fetching the resource (`resource-upgrade-strategy.md`).
+
+The seasoning marks needed a hook in `ItemInfo.buildinfo`; `GItem.info()` offers no Nurgling-owned seam
+(`NGItem` would have to re-implement it), and `buildinfo` already contains the four other Nurgling additions in the
+same `owner instanceof NGItem` block, so the three lines add no new conflict surface.
+
 ## Subtlety
 
 `EquipStats.subtlety` = Intelligence × Stealth using the same *computed* values as Detection; shown only when
@@ -193,7 +215,7 @@ and `NEquipory` (quick-slot toggle) predate this work and were not touched.
 
 ## Tests
 
-`ant test` (160 tests, see the verification table): `EquipmentBonusesTest` (including the unsupported/pending
+`ant test` (175 tests, see the verification table): `EquipmentBonusesTest` (including the unsupported/pending
 cases), `ResourceClassStructureTest` (real classes), `NTooltipGildingTest` (real headless `NTooltip.build`),
 `TooltipRebuildGateTest`, `DisposableSlotTest`, `FoodModifiersTest`, `FoodDetailsLayoutTest`,
 `ItemDurabilityTest`, `EquipStatsTest` (including armor de-duplication), `SpiceMarksTest`. The rendering
@@ -216,15 +238,18 @@ those tests skip themselves).
 | Stealth icon in the stat block, both themes | **not run in-game** |
 | Barter quality label position | **not run in-game** |
 | Multi-session behaviour | **not run in-game** (code path reviewed only) |
-| `FoodInfo.sev` is the weighted total; satiation scales hunger; salt rule | **unverified** (need live data) |
+| Satiation (and salt) scale hunger | **community-documented + Hurricane**, adopted, **not measured in game** |
+| `FoodInfo.sev` is the weighted total; salt rule; index alignment | **unverified** (need live data) |
 
 ## Known limitations and open questions
 
-* **Satiation scaling hunger.** Hurricane scales shown hunger by satiation, its character-sheet tooltip says
-  satiation affects "FEPs and Hunger", and the Ring of Brodgar "Food Satiations" page gives
-  `HungerGained = FoodHungerValue × SatiationModifier`. Nothing in the client source decides it, so only the
-  table's "Hunger modifier" scales hunger (`FoodModifiers.SATIATION_SCALES_HUNGER = false`). To check: note a
-  food's listed hunger and the hunger bar before and after eating it at a known satiation, and compare.
+* **Satiation scaling hunger** is adopted (Hurricane, its character-sheet tooltip saying satiation affects "FEPs and
+  Hunger", and the Ring of Brodgar page `HungerGained = FoodHungerValue × SatiationModifier`; nothing contradicts
+  it) but **not measured** here, and the server is private. If a measurement shows the listed hunger is what
+  fills, make `FoodModifiers.hungerMultiplier()` return only the table modifier. The empty-list case is
+  unverifiable: before the first satiation message arrives the list is empty and is read as "no reduction",
+  so a prediction made that early is briefly too high; the next satiation update changes the signature and
+  refreshes the tooltip.
 * **Hurricane's satiation convention is the same mechanic.** Hurricane's `El.a` stores `1 - a`
   (`BAttrWnd.java:144`), which is why its code reads `1 - el.a`. This fork's `el.a` is the game's own value
   (the list drops `a == 1.0` and paints `a > 1.0` as buffed), so `a` is already the multiplier.
