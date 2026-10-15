@@ -5,6 +5,7 @@ import haven.res.lib.itemtex.*;
 import haven.res.ui.stackinv.ItemStack;
 import nurgling.iteminfo.NSearchable;
 import nurgling.styles.TooltipStyle;
+import nurgling.tools.DisposableSlot;
 import nurgling.tools.ItemDurability;
 import nurgling.tools.NSearchItem;
 import nurgling.tools.TooltipRebuildGate;
@@ -42,7 +43,7 @@ public class NWItem extends WItem
     /**
      * Custom tooltip class that wraps the image with padding
      */
-    public class PaddedTip implements Indir<Tex>, ItemInfo.InfoTip {
+    public class PaddedTip implements Indir<Tex>, ItemInfo.InfoTip, Disposable {
         private final List<ItemInfo> info;
         private final TexI tex;
 
@@ -58,6 +59,7 @@ public class NWItem extends WItem
         public GItem item() { return item; }
         public List<ItemInfo> info() { return info; }
         public Tex get() { return tex; }
+        public void dispose() { tex.dispose(); }
 
         private BufferedImage addPadding(BufferedImage img) {
             int padding = getTooltipPadding();
@@ -117,7 +119,8 @@ public class NWItem extends WItem
         g.chcolor();
     }
 
-    private PaddedTip nlongtip = null;
+    // The cached tooltip; the slot frees a texture as soon as it is replaced or dropped
+    private final DisposableSlot<PaddedTip> nlongtipSlot = new DisposableSlot<>();
     private final TooltipRebuildGate nlongtipGate = new TooltipRebuildGate();
 
     @Override
@@ -129,17 +132,24 @@ public class NWItem extends WItem
         // otherwise it is rebuilt only when the item asks for it, at most twice a second.
         nlongtipGate.observe(ui.modshift, info);
         if (!nlongtipGate.present())
-            nlongtip = null;
+            nlongtipSlot.clear();
         double now = Utils.rtime();
-        if (nlongtipGate.shouldRebuild(nlongtip == null || ((NGItem) item).needlongtip(), now)) {
+        if (nlongtipGate.shouldRebuild(nlongtipSlot.get() == null || ((NGItem) item).needlongtip(), now)) {
             BufferedImage img = NTooltip.build(info);
             if (img != null) {
-                nlongtip = new PaddedTip(info, img);
+                nlongtipSlot.replace(new PaddedTip(info, img));
                 ((NGItem) item).consumedLongtip();
                 nlongtipGate.built(now);
             }
         }
-        return nlongtip;
+        return nlongtipSlot.get();
+    }
+
+    @Override
+    public void destroy()
+    {
+        nlongtipSlot.clear();
+        super.destroy();
     }
 
     @Override
