@@ -95,8 +95,10 @@ public class EquipBonusPanel extends Widget {
             nrows.add(new Row(icon, nameFnd().render(b.name, UITheme.TEXT).tex(), valueFnd().render(b.text(), vc).tex()));
         }
         String msg = null;
-        if(!res.complete())
+        if(res.pending > 0)
             msg = L10n.get("equipment.bonuses.loading");
+        else if(res.unsupported > 0)
+            msg = L10n.get("equipment.bonuses.unsupported");
         else if(res.totals.isEmpty())
             msg = L10n.get("equipment.bonuses.empty");
         Tex ostatus = status;

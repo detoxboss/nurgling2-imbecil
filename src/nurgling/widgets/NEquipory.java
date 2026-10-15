@@ -122,7 +122,7 @@ public class NEquipory extends Equipory
         bonusPanel.setResult(res);
         bonusSig = sig;
         bonusDirty = false;
-        bonusRetryAt = res.complete() ? 0 : now + 0.5;
+        bonusRetryAt = res.retry() ? now + 0.5 : 0;
     }
 
     // Custom offset for STORE_HAT slot to avoid overlapping HEAD slot's button
@@ -406,29 +406,32 @@ public class NEquipory extends Equipory
     }
 
     public void updateTotalArmor() {
-        int hardArmor = 0;
-        int softArmor = 0;
-
+        java.util.List<EquipStats.Armored> worn = new ArrayList<>();
         for (Slots slot : Slots.values()) {
             WItem item = quickslots[slot.idx];
             if (item != null) {
                 NGItem gitem = (NGItem) item.item;
                 Wear wear = gitem.getInfo(Wear.class);
-                if(wear!=null) {
-                    if(wear.d!=wear.m) {
-                        hardArmor += gitem.hardArmor;
-                        softArmor += gitem.softArmor;
-                    }
+                if (wear != null) {
+                    worn.add(new EquipStats.Armored() {
+                        public Object id() {return gitem;}
+                        public boolean intact() {return wear.d != wear.m;}
+                        public int hard() {return gitem.hardArmor;}
+                        public int soft() {return gitem.softArmor;}
+                    });
                 }
             }
         }
+        // An item in several slots is one item: counted once (see EquipStats.armor)
+        int[] armor = EquipStats.armor(worn);
+        int hardArmor = armor[0];
+        int softArmor = armor[1];
         if(hardArmor!=this.hardArmor || softArmor!=this.softArmor) {
             this.hardArmor = hardArmor;
             this.softArmor = softArmor;
             hardSoft = fnd.render(String.format("%d/%d",hardArmor,softArmor)).img;
         }
     }
-
 
     @Override
     public void addchild (

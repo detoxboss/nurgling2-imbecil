@@ -264,4 +264,82 @@ class EquipmentBonusesTest {
         assertEquals(AttrBonus.Kind.PERMILLE, b.kind);
         assertEquals("+15%", b.text(), "markup from Attribute.format is stripped, its number kept");
     }
+
+    // ---- recognised but unreadable data must not look like a complete total ----
+
+    @Test
+    void gildingListWithoutItsCollectionIsUnsupportedNotEmpty() {
+        Worn ring = new Worn().with(mods(STR, 4), new nurgling.iteminfo.bonus.fakes.slots_nofield.ISlots());
+        EquipmentBonuses.Result r = EquipmentBonuses.compute(Collections.singletonList(ring));
+        assertFalse(r.complete());
+        assertEquals(1, r.unsupported);
+        assertEquals(0, r.pending);
+        assertFalse(r.retry(), "waiting cannot fix a changed structure");
+        assertEquals(4.0, find(r, "Strength").value, "what could be read is still listed");
+    }
+
+    @Test
+    void gildingsWithoutTheirInfoAreUnsupported() {
+        nurgling.iteminfo.bonus.fakes.slots_badslot.ISlots slots = new nurgling.iteminfo.bonus.fakes.slots_badslot.ISlots();
+        slots.s.add(new nurgling.iteminfo.bonus.fakes.slots_badslot.ISlots.SItem("Strange"));
+        EquipmentBonuses.Result r = EquipmentBonuses.compute(Collections.singletonList(new Worn().with(slots)));
+        assertEquals(1, r.unsupported);
+        assertFalse(r.complete());
+    }
+
+    @Test
+    void unknownGildingClassIsUnsupported() {
+        Worn item = new Worn().with(new nurgling.iteminfo.bonus.fakes.slots_renamed.Gildings());
+        assertEquals(1, EquipmentBonuses.compute(Collections.singletonList(item)).unsupported);
+    }
+
+    @Test
+    void attrModWithoutItsTableIsUnsupported() {
+        Worn item = new Worn().with(new nurgling.iteminfo.bonus.fakes.attrmod_broken.AttrMod());
+        EquipmentBonuses.Result r = EquipmentBonuses.compute(Collections.singletonList(item));
+        assertEquals(1, r.unsupported);
+        assertTrue(r.totals.isEmpty());
+    }
+
+    @Test
+    void entryThatIsNeitherNumericNorTextIsUnsupported() {
+        Entry hollow = new Entry(STR) {
+            public String fmtvalue() {return "";}
+        };
+        Worn item = new Worn().with(new AttrMod(null, Collections.<Entry>singletonList(hollow)));
+        assertEquals(1, EquipmentBonuses.compute(Collections.singletonList(item)).unsupported);
+    }
+
+    @Test
+    void unsupportedAndPendingAreCountedSeparatelyPerItem() {
+        Worn loading = new Worn().with(mods(STR, 1));
+        loading.loading = true;
+        Worn odd = new Worn().with(new nurgling.iteminfo.bonus.fakes.slots_nofield.ISlots());
+        Worn fine = new Worn().with(mods(STR, 2));
+        EquipmentBonuses.Result r = EquipmentBonuses.compute(Arrays.asList(loading, odd, fine));
+        assertEquals(1, r.pending);
+        assertEquals(1, r.unsupported);
+        assertTrue(r.retry());
+        assertFalse(r.complete());
+    }
+
+    @Test
+    void readableItemsAreCompleteAsBefore() {
+        Worn a = new Worn().with(mods(STR, 2), gildings(mods(MELEE, 1)));
+        EquipmentBonuses.Result r = EquipmentBonuses.compute(Collections.singletonList(a));
+        assertTrue(r.complete());
+        assertEquals(0, r.unsupported);
+        assertFalse(r.retry());
+    }
+
+    @Test
+    void reportNamesWhatWasNotUnderstood() {
+        AttrBonusCollector.Report report = new AttrBonusCollector.Report();
+        AttrBonusCollector.gildings(Collections.<ItemInfo>singletonList(new nurgling.iteminfo.bonus.fakes.slots_nofield.ISlots()), report);
+        assertTrue(report.unsupported());
+        assertTrue(report.reasons().stream().anyMatch(s -> s.contains("ISlots")), report.reasons().toString());
+        AttrBonusCollector.Report clean = new AttrBonusCollector.Report();
+        AttrBonusCollector.direct(Collections.<ItemInfo>singletonList(mods(STR, 1)), clean);
+        assertFalse(clean.unsupported());
+    }
 }

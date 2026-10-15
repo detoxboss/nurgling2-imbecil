@@ -15,8 +15,10 @@ import java.util.List;
  * <p>
  * Items are de-duplicated by identity, so a two-handed weapon or any other item that occupies
  * several slots is counted once. An item whose tooltip data has not arrived (or is still
- * {@link Loading}) is reported as pending rather than treated as contributing nothing; callers must
- * not present a result with {@link Result#pending} &gt; 0 as final.
+ * {@link Loading}) is reported as pending rather than treated as contributing nothing. An item whose
+ * tooltip info is recognised but cannot be read completely (the server changed the structure of a
+ * class this reader relies on) is reported as unsupported. Callers must not present a result that is
+ * not {@link Result#complete()} as an authoritative total.
  */
 public final class EquipmentBonuses {
     private EquipmentBonuses() {}
@@ -40,23 +42,33 @@ public final class EquipmentBonuses {
         /** Net totals in display order; attributes that sum to zero are omitted. */
         public final List<AttrBonus> totals;
         public final int items;
+        /** Items whose data has not arrived yet; waiting will fix this. */
         public final int pending;
+        /** Items whose data arrived but is not understood; waiting will not fix this. */
+        public final int unsupported;
 
-        Result(List<AttrBonus> totals, int items, int pending) {
+        Result(List<AttrBonus> totals, int items, int pending, int unsupported) {
             this.totals = totals;
             this.items = items;
             this.pending = pending;
+            this.unsupported = unsupported;
         }
 
+        /** True only when every worn item was read completely. */
         public boolean complete() {
-            return pending == 0;
+            return pending == 0 && unsupported == 0;
+        }
+
+        /** Whether computing again later can change the outcome. */
+        public boolean retry() {
+            return pending > 0;
         }
     }
 
     public static Result compute(Collection<? extends Source> sources) {
         IdentityHashMap<Object, Boolean> seen = new IdentityHashMap<>();
         List<AttrBonus> all = new ArrayList<>();
-        int items = 0, pending = 0;
+        int items = 0, pending = 0, unsupported = 0;
         for(Source s : sources) {
             if(s == null || seen.put(s.id(), Boolean.TRUE) != null)
                 continue;
@@ -67,8 +79,12 @@ public final class EquipmentBonuses {
             }
             try {
                 List<? extends ItemInfo> info = s.info();
-                all.addAll(AttrBonusCollector.direct(info));
-                all.addAll(AttrBonusCollector.gildings(info));
+                AttrBonusCollector.Report report = new AttrBonusCollector.Report();
+                List<AttrBonus> own = AttrBonusCollector.direct(info, report);
+                own.addAll(AttrBonusCollector.gildings(info, report));
+                all.addAll(own);
+                if(report.unsupported())
+                    unsupported++;
             } catch(Loading l) {
                 pending++;
             }
@@ -79,7 +95,7 @@ public final class EquipmentBonuses {
                 totals.add(b);
         }
         totals.sort(AttrOrder.COMPARATOR);
-        return new Result(totals, items, pending);
+        return new Result(totals, items, pending, unsupported);
     }
 
     /**
