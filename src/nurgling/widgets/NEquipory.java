@@ -42,6 +42,8 @@ public class NEquipory extends Equipory
     int subtlety = -1;
     BufferedImage subtletyText = null;
     private BufferedImage subtletyLabel = null;
+    // The character sheet's own Stealth icon (Subtlety is Intelligence x Stealth); null until it exists
+    private Tex subtletyIcon = null;
     // Where the stat rows were last drawn, for the hover tooltip
     private Coord statsPos = null, statsSz = null;
 
@@ -376,6 +378,7 @@ public class NEquipory extends Equipory
      */
     private void updateSubtlety(GameUI gui) {
         Integer intelligence = null, stealth = null;
+        Tex stealthIcon = null;
         if (gui.chrwdg.battr != null) {
             for (BAttrWnd.Attr attr : gui.chrwdg.battr.attrs) {
                 if (attr.nm.equals("int")) {
@@ -388,6 +391,7 @@ public class NEquipory extends Equipory
             for (SAttrWnd.SAttr attr : gui.chrwdg.sattr.attrs) {
                 if (attr.nm.equals("stealth")) {
                     stealth = attr.attr.comp;
+                    stealthIcon = attr.img;
                     break;
                 }
             }
@@ -396,8 +400,10 @@ public class NEquipory extends Equipory
         if (product == null) {
             subtlety = -1;
             subtletyText = null;
+            subtletyIcon = null;
             return;
         }
+        subtletyIcon = stealthIcon;
         int value = product;
         if (value != subtlety || subtletyText == null) {
             subtlety = value;
@@ -615,7 +621,10 @@ public class NEquipory extends Equipory
             // Not an extra row when the others are missing: it then takes the first position
             textCoord = (rows == 0) ? textCoord : textCoord.add(UI.scale(0, 18));
             if (rows == 0) first = textCoord;
-            g.image(subtletyLabel(), textCoord.add(UI.scale(1, 4)));
+            if (subtletyIcon != null)
+                g.image(subtletyIcon, textCoord, UI.scale(20, 20));
+            else
+                g.image(subtletyLabel(), textCoord.add(UI.scale(1, 4)));
             g.image(subtletyText, textCoord.add(UI.scale(21, -1)));
             textW = Math.max(textW, subtletyText.getWidth());
             rows++;
@@ -686,8 +695,12 @@ public class NEquipory extends Equipory
             y += rowH;
         }
         if(subtletyText != null) {
-            BufferedImage label = subtletyLabel();
-            g.image(label, new Coord(panelPos.x + pad + (icon - label.getWidth()) / 2, y + (rowH - label.getHeight()) / 2));
+            if (subtletyIcon != null) {
+                g.image(subtletyIcon, new Coord(panelPos.x + pad, y + (rowH - icon) / 2), new Coord(icon, icon));
+            } else {
+                BufferedImage label = subtletyLabel();
+                g.image(label, new Coord(panelPos.x + pad + (icon - label.getWidth()) / 2, y + (rowH - label.getHeight()) / 2));
+            }
             g.image(subtletyText, new Coord(right - pad - subtletyText.getWidth(), y + (rowH - subtletyText.getHeight()) / 2));
         }
     }
