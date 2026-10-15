@@ -123,4 +123,15 @@ class FoodDetailsLayoutTest {
         assertEquals(24, food(24).weightedTotal());
         assertTrue(height(food(0.04), mods(false), false) < height(food(15), mods(false), false));
     }
+
+    @Test
+    void unreadableHungerLabelAddsANoteButKeepsThePrediction() {
+        NFoodInfo f = food(15);
+        FoodModifiers unknown = FoodModifiers.of(Account.SUBSCRIBED, 0.1, 0.9, 1.25, 0.8, 0.9, Double.NaN, false);
+        int known = height(f, mods(false), false);
+        int noHunger = height(f, unknown, false);
+        assertDoesNotThrow(() -> height(f, unknown, false));
+        assertTrue(noHunger > 0);
+        assertTrue(noHunger != known, "the note changes the block");
+    }
 }

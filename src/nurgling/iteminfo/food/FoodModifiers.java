@@ -125,7 +125,7 @@ public final class FoodModifiers {
      * @param satiation    the food's satiation efficiency as a multiplier (1 = none applied); for a food
      *                     with several types, the result of {@link #combineSatiation}
      * @param salt         salt satiation multiplier when the item is salted and the character has one, else null
-     * @param tableHunger  the table's hunger modifier as a multiplier, 1 when not at a table
+     * @param tableHunger  the table's hunger modifier as a multiplier, 1 when not at a table, NaN if its label was unreadable
      */
     public static FoodModifiers of(Account account, double realm, double foodEfficacy, double tableFep,
                                    double satiation, Double salt, double tableHunger, boolean deepWorm) {
@@ -174,9 +174,20 @@ public final class FoodModifiers {
         return (accountBonus() + realm) * foodEfficacy * tableFep * satiation * ((salt == null) ? 1.0 : salt);
     }
 
-    /** Multiplier from the listed hunger to the hunger the meal actually fills. */
+    /**
+     * Multiplier from the listed hunger to the hunger the meal actually fills; NaN when the table's
+     * hunger label could not be read (see {@link #hungerKnown()}).
+     */
     public double hungerMultiplier() {
         return tableHunger;
+    }
+
+    /**
+     * False when a table is open but its hunger label could not be read. The FEP prediction does not
+     * depend on that label and stays valid; only hunger-based figures are unknown.
+     */
+    public boolean hungerKnown() {
+        return !Double.isNaN(tableHunger);
     }
 
     public double predictedFep(double listedFep) {
@@ -227,7 +238,7 @@ public final class FoodModifiers {
             ret.add(new Factor(Kind.SATIATION, satiation, false));
         if(salt != null && salt != 1.0)
             ret.add(new Factor(Kind.SALT, salt, false));
-        if(tableHunger != 1.0)
+        if(tableHunger != 1.0 && !Double.isNaN(tableHunger))
             ret.add(new Factor(Kind.TABLE_HUNGER, tableHunger, false));
         return ret;
     }

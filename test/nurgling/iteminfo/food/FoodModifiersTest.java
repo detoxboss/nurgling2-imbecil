@@ -234,4 +234,19 @@ class FoodModifiersTest {
         assertEquals(100.0, FoodModifiers.barFillPercent(60, 30, 90), EPS);
         assertEquals(90.0, FoodModifiers.barFillPercent(60, 30, 100), EPS);
     }
+
+    @Test
+    void anUnreadableHungerLabelOnlyMakesHungerUnknownNotTheFepPrediction() {
+        /* the food optimizer relies on the FEP prediction, which does not depend on the hunger label */
+        FoodModifiers known = mods(Account.VERIFIED, 0, 0.9, 1.25, 0.8, null, 0.5);
+        FoodModifiers unknown = mods(Account.VERIFIED, 0, 0.9, 1.25, 0.8, null, Double.NaN);
+        assertTrue(unknown.available());
+        assertFalse(unknown.hungerKnown());
+        assertTrue(known.hungerKnown());
+        assertEquals(known.predictedFep(10), unknown.predictedFep(10), EPS);
+        assertTrue(Double.isNaN(unknown.predictedHunger(10)));
+        assertTrue(unknown.factors().stream().noneMatch(f -> f.kind == Kind.TABLE_HUNGER));
+        assertNotEquals(known.signature(), unknown.signature());
+        assertTrue(Double.isNaN(FoodModifiers.perHunger(5, unknown.predictedHunger(10))));
+    }
 }

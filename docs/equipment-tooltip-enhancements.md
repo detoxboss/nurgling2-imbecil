@@ -97,9 +97,13 @@ this page covers the tooltip/equipment features and where they live.
   *unsupported*, *unavailable*. Only *available* produces numbers, "Expected FEP" included.
   * *Pending*: a satiation entry's resource (needed to find the salt entry) or a realm buff's tooltip has
     not loaded yet, or a wound resource is still loading → "Modifiers still loading, no prediction yet".
-  * *Unsupported*: a table label ("Food event bonus", "Hunger modifier") or a realm buff line is present
-    but has no readable percentage → "Unrecognised modifier data, no prediction". A table with no such label
-    is simply a table without that modifier. A hunger modifier of 0% or less is treated as unreadable.
+  * *Unsupported*: the table's "Food event bonus" label or a realm buff line is present but has no readable
+    percentage → "Unrecognised modifier data, no prediction". A table with no such label is simply a table
+    without that modifier.
+  * *Hunger side only*: an unreadable "Hunger modifier" label (including 0% or less, which would mean a meal
+    that fills no hunger) makes only the hunger figures unknown — hunger is shown as listed with a note, and
+    per-hunger values show "-". The FEP prediction does not use that label, so it stays available, which is
+    what keeps the food optimizer working at such a table.
   * *Unavailable*: no session or no character sheet yet → nothing is shown, as before.
 * **Satiation of foods with several types.** Every type's entry applies and they multiply
   (`FoodModifiers.combineSatiation`). Before this, `efficiency` kept only the *last* matching type, so the
@@ -189,7 +193,7 @@ and `NEquipory` (quick-slot toggle) predate this work and were not touched.
 
 ## Tests
 
-`ant test` (158 tests, see the verification table): `EquipmentBonusesTest` (including the unsupported/pending
+`ant test` (160 tests, see the verification table): `EquipmentBonusesTest` (including the unsupported/pending
 cases), `ResourceClassStructureTest` (real classes), `NTooltipGildingTest` (real headless `NTooltip.build`),
 `TooltipRebuildGateTest`, `DisposableSlotTest`, `FoodModifiersTest`, `FoodDetailsLayoutTest`,
 `ItemDurabilityTest`, `EquipStatsTest` (including armor de-duplication), `SpiceMarksTest`. The rendering

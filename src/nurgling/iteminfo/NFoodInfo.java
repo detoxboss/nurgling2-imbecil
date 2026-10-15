@@ -528,7 +528,7 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         final boolean unmodified = FoodDetailsLayout.shiftHeld(owner);
         final FoodModifiers mods = (owner instanceof GItem) ? modifiers() : FoodModifiers.unavailable();
         shownModifiers = mods.signature();
-        final double hungerPct = glut * 100 * ((!unmodified && mods.available()) ? mods.hungerMultiplier() : 1.0);
+        final double hungerPct = glut * 100 * ((!unmodified && mods.available() && mods.hungerKnown()) ? mods.hungerMultiplier() : 1.0);
 
         // Get font descent for baseline-relative spacing (like NCuriosity)
         int descent = TooltipStyle.getFontDescent(TooltipStyle.FONT_SIZE_BODY);

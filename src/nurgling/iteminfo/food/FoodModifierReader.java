@@ -125,7 +125,7 @@ public final class FoodModifierReader {
         return false;
     }
 
-    /** {food event multiplier, hunger multiplier} of the open feast table; {1, 1} when none is open. */
+    /** {food event multiplier, hunger multiplier} of the open feast table; {1, 1} when none is open; the hunger entry is NaN if its label cannot be read. */
     private static double[] table(NGameUI gui) {
         double fep = 1.0, hunger = 1.0;
         Window table = gui.getWindowWithButton("Table", "Feast!");
@@ -139,9 +139,9 @@ public final class FoodModifierReader {
                     if(Double.isNaN(fep))
                         throw new Unsupported("table label: " + text);
                 } else if(TableLabels.isHungerModifier(text)) {
+                    /* only the hunger side depends on this label: unreadable means NaN (unknown), and the
+                       FEP prediction, which the food optimizer relies on, stays available */
                     hunger = TableLabels.hungerMultiplier(text);
-                    if(Double.isNaN(hunger))
-                        throw new Unsupported("table label: " + text);
                 }
             }
         }
