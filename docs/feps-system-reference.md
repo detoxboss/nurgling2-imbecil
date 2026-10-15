@@ -22,7 +22,7 @@ wiki.
 | Base attributes | `haven.Glob.CAttr` via `Glob.getcattr(String nm)` | Keyed by short codes: `str, agi, int, con, prc, csm, dex, wil, psy`. `.base` = unmodified value, `.comp` = buffed/computed value. |
 | FEP bar cap | `gui.chrwdg.battr.feps.cap` (`haven.BAttrWnd.FoodMeter`) | Equals highest current **base** attribute (wiki-documented rule) — but the effective needed amount is reduced by the live variety bonus, see below. Always read live; never hardcode. |
 | FEP pool | `gui.chrwdg.battr.feps.els` (`List<BAttrWnd.FoodMeter.El>`) | One entry per attribute-event type accumulated so far this bar; `el.a` = amount, `el.ev()` = event resource. Sum of `el.a` = current pool total. |
-| Satiation / gluttony | `gui.chrwdg.battr.cons` (`haven.BAttrWnd.Constipations`) and `gui.chrwdg.battr.glut` (`GlutMeter`, has `.gmod`) | Per-food-category diminishing-returns multiplier. Already folded into `NFoodInfo.calcExpectedFep()`'s `efficiency` term — don't re-model it separately. |
+| Satiation / gluttony | `gui.chrwdg.battr.cons` (`haven.BAttrWnd.Constipations`) and `gui.chrwdg.battr.glut` (`GlutMeter`, has `.gmod`) | Per-food-category diminishing-returns multiplier. Already folded into `NFoodInfo.calcExpectedFep()` as the `FoodModifiers` satiation factor (section 5) — don't re-model it separately. |
 | Variety tracking | `nurgling.widgets.NCharacterInfo.varity` (`Set<String>`) | Client-side tracked set of food *names* that have counted toward the current bar's variety bonus. Auto-clears when the bar visibly resets (an attribute was gained) — see `NCharacterInfo.tick()`. |
 | Per-item FEP tooltip data | `nurgling.iteminfo.NFoodInfo`, resolved via `ItemInfo.find(NFoodInfo.class, gItem.info())` | See below. |
 | Table bonus | `NGameUI.getTableMod()` (`src/nurgling/NGameUI.java:403`) | Reads the table window's "Food event bonus" label live. `NFoodInfo.calcExpectedFep()` already calls this per item. |
@@ -114,21 +114,41 @@ expected FEP  = fepSum * fepMultiplier        # NFoodInfo.calcExpectedFep()
 hunger shown  = listed hunger * tableHungerModifier
 ```
 
-- `account` is `1.5` subscribed, `1.2` verified, else `1`; `realm` is **added** to it, not multiplied (this is
-  the pre-existing formula `(a*F*g*t + F*g*t*realm) * satiation`, kept bit-for-bit and tested against a copy).
-- `satiation` is the pre-existing `efficiency/100` (the food types' entry in `battr.cons`; in that list `a`
-  is already the multiplier — `a == 1.0` entries are removed, `a > 1.0` is drawn as buffed).
+Each rule below is tagged **proven** (the client source decides it), **supported** (an outside source or another
+client agrees, not the server) or **unverified**.
+
+- `account` is `1.5` subscribed, `1.2` verified, else `1`; `realm` is **added** to it, not multiplied (the
+  pre-existing formula `(a*F*g*t + F*g*t*realm) * satiation`, tested against a copy). *Supported* (the fork's own
+  working value). Hurricane additionally has 1.3 for subscribed-only; not adopted, see
+  `equipment-tooltip-enhancements.md`.
+- `satiation` is the product of the satiation entries of **all** of the food's types
+  (`FoodModifiers.combineSatiation`). In `battr.cons`, `a` is already the multiplier (`a == 1.0` entries are
+  removed, `a > 1.0` is drawn as buffed). **Proven:** every type counts (the game's satiation list highlights
+  them all) and a single type is exactly its entry. **Supported:** that they multiply (Hurricane). Before the
+  follow-up the code kept only the last type's entry, an order-dependent result that matched no mechanic.
+  Hurricane's `1 - el.a` is the same mechanic: its `El` stores `1 - a`.
+- A food type is mapped to its satiation entry by **index** (as the game's own highlight does). **Unverified**
+  that the server's list order survives removals; out-of-range indices contribute nothing.
 - `salt` is `1` unless the item carries the `Salted` tip **and** `cons` has a `salt` entry **and** that entry
-  is not already the satiation resolved from the food's own types (no double application).
-  This is the one change to `calcExpectedFep()`: salted foods now include it. *Unverified in-game.*
-- Hunger scales only with the table's "Hunger modifier" label. Satiation scaling hunger (Hurricane's rule) is
-  **not** applied (`SATIATION_SCALES_HUNGER`), because no source here supports it.
-- The (+2 weighted) total uses the same multiplier on `FoodInfo.sev`.
-- Hurricane's `1 - el.a` satiation convention was deliberately **not** adopted (see the `a == 1.0` note).
+  is not already one of the food's own types (no double application). **Supported** (Hurricane), **unverified**
+  in game.
+- Hunger scales only with the table's "Hunger modifier" label. Satiation scaling hunger is **supported**
+  (Hurricane's code and tooltip text, the Ring of Brodgar "Food Satiations" page) but **not applied**
+  (`SATIATION_SCALES_HUNGER`): it would change a displayed number nobody has measured here.
+- The (+2 weighted) total uses the same multiplier on `FoodInfo.sev`, and is shown only when `sev` is plausible
+  (between the FEP sum and twice it). The constructor-position mapping of `sev` is **unverified**.
+- `realm`: read from the `RealmBuff` widgets through `RealmBuff.info()`. (The old reader used the shadowed
+  `Buff.info` field and always got 0.) The server no longer lists `ui/rbuff`, so this may be dead in the
+  current world.
+- **Incomplete inputs** never become neutral factors: a still-loading input is *pending*, an unreadable one
+  *unsupported*, and either suppresses the prediction (see `equipment-tooltip-enhancements.md`).
+- "FEP bar after eating" divides by the variety-adjusted target (`cap - sqrt(0.3999 * maxBase * gmod / (N+1))`,
+  the same figure `calcNeededFep` uses), not by the cap. For a food already eaten this bar, `calcNeededFep`
+  uses the bare cap — pre-existing, and not changed because the effect of the earlier variety credits on the
+  target has not been verified.
 
 Tooltip presentation (Shift = unmodified values, weighted totals, FEP bar after eating, Deep Worm warning) is
 in [`equipment-tooltip-enhancements.md`](equipment-tooltip-enhancements.md).
-
 ## Corrections vs. the wiki / third-party (AI-generated) descriptions
 
 Encountered a third-party AI-generated explanation of this system alongside the wiki

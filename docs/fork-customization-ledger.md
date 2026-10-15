@@ -214,13 +214,15 @@ itself still succeeds. Confirm `NCore.autoSaveTableware` stays null at runtime (
 "protect eating, never block replacing" semantics — not merely if upstream adds any generic tableware
 auto-save behavior of its own.
 
-## Equipment bonuses, compact gilding tooltip, food predictions, durability bars
+## Equipment bonuses, compact gilding tooltip, food predictions, durability bars, seasoning marks
 
 **Files:** `src/nurgling/NTooltip.java`, `NWItem.java`, `widgets/NEquipory.java`,
 `iteminfo/NFoodInfo.java`, new `iteminfo/bonus/**`, `iteminfo/food/**`, `iteminfo/FoodDetailsLayout.java`,
-`widgets/EquipBonusPanel.java`, `tools/{TooltipRebuildGate,ItemDurability,EquipStats}.java`,
-`widgets/options/QoL.java`, `NConfig.java` (`equipBonusesExpanded`, `showDurabilityBars`), the `test`
-classpath in `build.xml`. No `src/haven/**` file is involved.
+`widgets/EquipBonusPanel.java`, `tools/{TooltipRebuildGate,ItemDurability,EquipStats,DisposableSlot}.java`,
+`iteminfo/NSpiceMarks.java`, `iteminfo/marks/**`, `widgets/options/QoL.java`, `NConfig.java`
+(`equipBonusesExpanded`, `showDurabilityBars`, `showSpiceMarks`), the `test` classpath in `build.xml`.
+Two small `src/haven/**` touch points, both in files that already carry nurgling code: `ItemInfo.buildinfo`
+(attaches `NSpiceMarks`) and the server-distributed `res/ui/barterbox/Shopbox` (quality label).
 
 **Fork behavior:** Hurricane-inspired features built on Nurgling's own classes — the full description,
 implementation map and verification status are in
@@ -230,20 +232,29 @@ implementation map and verification status are in
 * `NTooltip`: `build(info, expandedOverride)`/`isExpandedView`/`renderGildingSummary` (compact view unless
   Shift), and `extractStatsFromAttrMod` delegating to `AttrBonusCollector` (one extraction for summary and
   breakdown). The `islots.isShifted = expandedView` assignment.
-* `NWItem`: the tooltip cache goes through `TooltipRebuildGate`; `drawmain` draws the durability bar.
+* `NWItem`: the tooltip cache goes through `TooltipRebuildGate` and `DisposableSlot` (replaced tooltip textures
+  are disposed; `destroy()` clears it); `drawmain` draws the durability bar.
+* `haven/ItemInfo.buildinfo`: the three-line `NSpiceMarks.of(owner, ret)` block, inside the existing
+  `owner instanceof NGItem` block. Without it the seasoning marks silently stop appearing.
+* `res/ui/barterbox/Shopbox` (`@FromResource` v76, unchanged): `quality` field, its draw line and
+  `findQuality`. If the server ships a newer version this local class stops being used and the label goes;
+  nothing else depends on it.
 * `NFoodInfo`: `gui()` (the owning item's session UI — never reintroduce `NUtils.getGameUI()` for item
   data), `modifiers()` and `calcExpectedFep()` delegating to `FoodModifiers` (the optimizer's value must
   stay equal to the tooltip's "Expected FEP"), the Shift/`unmodified` handling and the `FoodDetailsLayout`
   call in `layout()`. `NFoodInfo`'s `label`/`value`/`labelColored` are package-private, not private, for
   `FoodDetailsLayout`. If upstream retunes the subscribed/verified coefficients they now live in
-  `FoodModifiers`, not `NFoodInfo`.
+  `FoodModifiers`, not `NFoodInfo`. `FoodModifierReader` must keep telling *loading* and *unreadable* apart
+  from *absent* (a neutral factor), and `NGameUI.getRealmMod()` delegates to its realm reader.
 * `NEquipory`: `baseSz` (legacy stat text is positioned from it, not `sz`), the sidebar toggle/panel and
-  `updateBonuses()`, `updateSubtlety()`.
+  `updateBonuses()` (retry only while `Result.retry()`), `updateSubtlety()`, `updateTotalArmor()` going through
+  `EquipStats.armor` (one count per worn item).
 * `build.xml` `test` target: the optional `lib/ext/builtin-res.jar`, `hafen-res.jar`,
   `build/nurgling-res.jar` classpath entries (rendering tests skip themselves without them).
 
 **Verify:** `ant jar && ant test`; then in a client: hover a gilded item with and without Shift, hover a
-food with and without Shift, open Equipment and toggle the bonuses tab, check a worn tool shows its bar.
+food with and without Shift, open Equipment and toggle the bonuses tab, check a worn tool shows its bar, hover
+a salted/peppered food for its marks, and open a barter stand.
 
 **Superseded when:** upstream ships an equivalent equipment-wide bonus total, compact gilding view or food
 modifier breakdown — then drop the matching piece and keep the rest.

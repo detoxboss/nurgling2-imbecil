@@ -174,6 +174,8 @@ These files have essential nurgling customizations that must be preserved during
 
 **src/haven/ItemInfo.java**
 - Purpose: Extended item information
+- Hook: `buildinfo` attaches `NSpiceMarks` (seasoning icons) next to the `WellMined` hook, inside the `owner instanceof NGItem` block
+- Ledger: `fork-customization-ledger.md` ("Equipment bonuses, ..., seasoning marks")
 
 **src/haven/WItem.java**
 - Purpose: Widget item extensions
