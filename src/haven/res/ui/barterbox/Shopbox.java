@@ -7,6 +7,7 @@ import static haven.Inventory.sqsz;
 import java.awt.image.BufferedImage;
 import java.util.*;
 import java.awt.Color;
+import haven.res.ui.tt.q.qbuff.QBuff;
 
 /* >wdg: haven.res.ui.barterbox.Shopbox */
 @haven.FromResource(name = "ui/barterbox", version = 76)
@@ -35,6 +36,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
     private Button spipe, bpipe, bbtn, cbtn;
     private TextEntry pnume, pqe, cnte;
     public final boolean admin;
+    /* nurgling: the offered item's quality, shown beside it (the tooltip is the only other place it appears) */
+    private Text quality;
 
     public static Widget mkwidget(UI ui, Object... args) {
 	boolean adm = (Integer)args[0] != 0;
@@ -110,6 +113,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 		    sg.aimage(itemnum.get(), sqsz, 1, 1);
 		if(num != null)
 		    g.aimage(num.tex(), itemc.add(invsq.sz()).add(UI.scale(5, 0)), 0.0, 1.0);
+		if(quality != null)
+		    g.aimage(quality.tex(), itemc.add(invsq.sz()).add(UI.scale(5, -18)), 0.0, 1.0);
 	    }
 	}
 
@@ -136,9 +141,29 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 
     private List<ItemInfo> cinfo;
     public List<ItemInfo> info() {
-	if(cinfo == null)
+	if(cinfo == null) {
 	    cinfo = ItemInfo.buildinfo(this, info);
+	    QBuff qb = findQuality(cinfo);
+	    quality = (qb == null) ? null : Text.render("Quality: " + (int)qb.q);
+	}
 	return(cinfo);
+    }
+
+    /* nurgling: the item's own quality, or that of what it contains (a filled container) */
+    private static QBuff findQuality(List<ItemInfo> infos) {
+	for(ItemInfo ii : infos) {
+	    if(ii instanceof ItemInfo.Contents) {
+		for(ItemInfo sub : ((ItemInfo.Contents)ii).sub) {
+		    if(sub instanceof QBuff)
+			return((QBuff)sub);
+		}
+	    }
+	}
+	for(ItemInfo ii : infos) {
+	    if(ii instanceof QBuff)
+		return((QBuff)ii);
+	}
+	return(null);
     }
 
     public class IconTip implements Indir<Tex>, ItemInfo.InfoTip {

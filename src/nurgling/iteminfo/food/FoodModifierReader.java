@@ -119,7 +119,7 @@ public final class FoodModifierReader {
     private static boolean isSalted(NGItem item) {
         List<ItemInfo> info = item.info();
         for(ItemInfo ii : info) {
-            if(ii instanceof ItemInfo.AdHoc && "Salted".equals(((ItemInfo.AdHoc)ii).str.text))
+            if(ii instanceof ItemInfo.AdHoc && nurgling.iteminfo.marks.SpiceMarks.Kind.SALT.text.equals(((ItemInfo.AdHoc)ii).str.text))
                 return true;
         }
         return false;

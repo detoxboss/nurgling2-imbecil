@@ -305,7 +305,9 @@ public class NConfig
         // Equipment window: collapsible "Equipment Bonuses" sidebar (default collapsed)
         equipBonusesExpanded,
         // Coloured durability bar on worn items (default on)
-        showDurabilityBars
+        showDurabilityBars,
+        // Salt / pepper / truffle icons on seasoned items (default on)
+        showSpiceMarks
     }
 
     public enum BBDisplayMode
@@ -373,6 +375,7 @@ public class NConfig
         conf.put(Key.cheeseRackCalculator, "");
         conf.put(Key.equipBonusesExpanded, false);
         conf.put(Key.showDurabilityBars, true);
+        conf.put(Key.showSpiceMarks, true);
         conf.put(Key.showGrid, false);
         conf.put(Key.showView, false);
         conf.put(Key.showTreeIcons, true);
