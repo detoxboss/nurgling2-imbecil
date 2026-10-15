@@ -33,7 +33,6 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
     String s_glut;
     String s_end_glut;
     public double fepSum = 0;
-    double efficiency = 100;
     boolean isVarity;
     double expeted_fep;
     double needed;
@@ -44,9 +43,9 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         needToolTip = false;
     }
     double delta = 0;
-    // What the last tooltip build showed for the hunger side, so a change can trigger a rebuild
-    double shownHungerMultiplier = 1;
-    boolean shownDeepWorm = false;
+    // Identity of the modifiers the last tooltip build showed (every factor, status and the Deep Worm
+    // flag), so any displayed change triggers a rebuild even if the predicted FEP happens not to move
+    int shownModifiers = 0;
     HashMap<String, Double> searchImage = new HashMap<>();
 
     double energy;
@@ -266,7 +265,34 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
      */
     FoodModifiers modifiers()
     {
-        return FoodModifierReader.read(gui(), (owner instanceof NGItem) ? (NGItem) owner : null, efficiency, types);
+        return FoodModifierReader.read(gui(), (owner instanceof NGItem) ? (NGItem) owner : null, types);
+    }
+
+    /**
+     * The FEP at which the bar completes if this food is eaten: the cap, less the variety bonus the
+     * food would add (the same figure {@link #calcNeededFep()} uses). NaN when the bar is unknown.
+     */
+    double barTarget()
+    {
+        NGameUI gui = gui();
+        double cur = FoodModifierReader.currentFep(gui);
+        if (Double.isNaN(cur))
+            return Double.NaN;
+        return cur + calcNeededFep();
+    }
+
+    /**
+     * The weighted total the server sent, or 0 when it is missing or implausible. It is the sum of the
+     * food's events with the "+2" ones counted double, so it can only lie between the plain sum and twice
+     * that; anything else means the number is not the weighted total (the two optional numbers of the
+     * food tooltip message are read by position, see the docs) and showing it would be wrong.
+     */
+    double weightedTotal()
+    {
+        final double slack = 0.01;
+        if (sev > 0 && sev >= fepSum * (1 - slack) && sev <= fepSum * 2 * (1 + slack))
+            return sev;
+        return 0;
     }
 
     /**
@@ -322,26 +348,14 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
                     return true;
                 }
             }
-            if (!gui.chrwdg.battr.cons.els.isEmpty())
-            {
-                for (int type : types)
-                {
-                    if(gui.chrwdg.battr.cons.els.size()>type) {
-                        BAttrWnd.Constipations.El c = gui.chrwdg.battr.cons.els.get(type);
-                        if (efficiency != ((c != null) ? Math.min(100, c.a * 100) : 100)) {
-                            needToolTip = true;
-                            return true;
-                        }
-                    }
-                }
-            }
             FoodModifiers mods = modifiers();
             double newExpected = mods.available() ? mods.predictedFep(fepSum) : 0;
             double newNeeded = calcNeededFep();
-            // The tooltip also shows the hunger side and the Deep Worm warning, which the FEP numbers
-            // above do not reflect.
-            boolean otherChanged = mods.available() && (mods.hungerMultiplier() != shownHungerMultiplier || mods.deepWorm() != shownDeepWorm);
-            if (Math.abs(expeted_fep - newExpected) > FEP_EPSILON || Math.abs(needed - newNeeded) > FEP_EPSILON || otherChanged)
+            // Compared by identity of every displayed factor, not by the predicted FEP alone: two
+            // factors can move in opposite directions and leave the prediction unchanged while the
+            // breakdown, the hunger side or the Deep Worm warning on screen is now stale.
+            boolean modifiersChanged = mods.signature() != shownModifiers;
+            if (Math.abs(expeted_fep - newExpected) > FEP_EPSILON || Math.abs(needed - newNeeded) > FEP_EPSILON || modifiersChanged)
             {
                 expeted_fep = newExpected;
                 needed = newNeeded;
@@ -506,16 +520,6 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
             if (ci != null) {
                 isVarity = !ci.varity.contains(name);
             }
-            if (gui.chrwdg != null && gui.chrwdg.battr != null) {
-                for (int type : types) {
-                    if (gui.chrwdg.battr.cons.els.size() > type) {
-                        BAttrWnd.Constipations.El c = gui.chrwdg.battr.cons.els.get(type);
-                        if (c != null) {
-                            efficiency = c.a * 100;
-                        }
-                    }
-                }
-            }
             calcData();
         }
 
@@ -523,8 +527,7 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         // Recipes have no item and so no modifiers.
         final boolean unmodified = FoodDetailsLayout.shiftHeld(owner);
         final FoodModifiers mods = (owner instanceof GItem) ? modifiers() : FoodModifiers.unavailable();
-        shownHungerMultiplier = mods.available() ? mods.hungerMultiplier() : 1;
-        shownDeepWorm = mods.available() && mods.deepWorm();
+        shownModifiers = mods.signature();
         final double hungerPct = glut * 100 * ((!unmodified && mods.available()) ? mods.hungerMultiplier() : 1.0);
 
         // Get font descent for baseline-relative spacing (like NCuriosity)
@@ -701,9 +704,10 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         }
 
         // ===== GROUP 3: Expected FEP + Expected total (10px gap before, 7px between) =====
-        // Skip expected FEP for recipes (owner is GItem for real items, not for recipes), and while Shift
-        // shows the unmodified values.
-        if (owner instanceof GItem && !unmodified) {
+        // Skip expected FEP for recipes (owner is GItem for real items, not for recipes), while Shift
+        // shows the unmodified values, and while the modifiers are incomplete (a prediction from partial
+        // data would look final).
+        if (owner instanceof GItem && !unmodified && mods.available()) {
             double error = expeted_fep * 0.005;
             String deltaStr = (delta >= 0 ? "+" : "") + String.format("%.2f", delta) + " \u00B1 " + String.format("%.2f", error);
             BufferedImage expectedLine = TooltipStyle.cropTopOnly(catimgsh(0,
@@ -728,14 +732,17 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
         // (or, with Shift held, the unmodified weighted totals) =====
         if (owner instanceof GItem) {
             if (FoodDetailsLayout.layout(this, l, mods, unmodified, groupSpacing - prevTextBottomOffset, lineSpacing,
-                    FoodModifierReader.currentFep(gui), FoodModifierReader.fepCap(gui))) {
+                    FoodModifierReader.currentFep(gui), barTarget(), FoodModifierReader.fepCap(gui))) {
                 prevTextBottomOffset = 0;  // text-only rows
             }
         }
 
         // ===== GROUP 4: Food types with icons (10px gap before, 7px between each type) =====
         // Find FoodTypes ItemInfo and extract types using reflection
-        if (owner instanceof GItem && NUtils.getUI() != null) {
+        // The item's own session supplies the data tables; another active session's tables or none must
+        // never be used for this item.
+        final NUI itemUi = (gui != null && gui.ui instanceof NUI) ? (NUI) gui.ui : null;
+        if (owner instanceof GItem && itemUi != null) {
 
             Resource[] foodTypeResources = null;
 
@@ -785,13 +792,13 @@ public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSea
                     elements.add(LineElement.text(TooltipStyle.cropTopOnly(value(foodTypeName, TooltipStyle.COLOR_FOOD_TYPE))));
 
                     // Add drinks with vessel icons (if dataTables available)
-                    if (NUtils.getUI().dataTables != null) {
-                        List<String> drinks = NUtils.getUI().dataTables.data_drinks.get(foodTypeName);
+                    if (itemUi.dataTables != null) {
+                        List<String> drinks = itemUi.dataTables.data_drinks.get(foodTypeName);
                         if (drinks != null && !drinks.isEmpty()) {
                             for (String drink : drinks) {
-                                String vessel = NUtils.getUI().dataTables.data_vessel.getOrDefault(drink, "");
+                                String vessel = itemUi.dataTables.data_vessel.getOrDefault(drink, "");
                                 if (vessel == null) vessel = "Any";
-                                String vesselRes = NUtils.getUI().dataTables.vessel_res.get(vessel);
+                                String vesselRes = itemUi.dataTables.vessel_res.get(vessel);
                                 if (vesselRes != null) {
                                     BufferedImage vesselIcon = convolvedown(Resource.loadsimg(vesselRes), UI.scale(new Coord(TooltipStyle.ICON_SIZE, TooltipStyle.ICON_SIZE)), iconfilter);
                                     elements.add(LineElement.icon(vesselIcon));

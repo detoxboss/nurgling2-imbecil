@@ -40,7 +40,7 @@ class FoodDetailsLayoutTest {
 
     private static int height(NFoodInfo f, FoodModifiers m, boolean unmodified) {
         ItemInfo.Layout l = new ItemInfo.Layout(null);
-        boolean added = FoodDetailsLayout.layout(f, l, m, unmodified, 4, 3, 20, 100);
+        boolean added = FoodDetailsLayout.layout(f, l, m, unmodified, 4, 3, 20, 90, 100);
         return added ? l.cmp.sz.y : 0;
     }
 
@@ -99,5 +99,28 @@ class FoodDetailsLayoutTest {
     @Test
     void shiftIsNeverHeldForRecipes() {
         assertFalse(FoodDetailsLayout.shiftHeld(null));
+    }
+
+    @Test
+    void incompleteDataExplainsItselfInsteadOfShowingAPrediction() {
+        NFoodInfo f = food(15);
+        int pending = height(f, FoodModifiers.pending(), false);
+        int unsupported = height(f, FoodModifiers.unsupported(), false);
+        assertTrue(pending > 0, "a pending prediction says so");
+        assertTrue(unsupported > 0, "an unreadable one says so");
+        assertTrue(pending < height(f, mods(false), false), "and shows none of the prediction rows");
+        /* Shift still shows the listed values whatever the modifiers' state */
+        assertTrue(height(f, FoodModifiers.pending(), true) > 0);
+    }
+
+    @Test
+    void implausibleWeightedTotalIsNotShown() {
+        /* a "weighted total" below the plain FEP sum (here a satiation-sized 0.04) is not that number */
+        assertEquals(0, food(0.04).weightedTotal());
+        assertEquals(0, food(100).weightedTotal(), "more than twice the FEP sum is not a +2 weighting");
+        assertEquals(15, food(15).weightedTotal());
+        assertEquals(12, food(12).weightedTotal());
+        assertEquals(24, food(24).weightedTotal());
+        assertTrue(height(food(0.04), mods(false), false) < height(food(15), mods(false), false));
     }
 }

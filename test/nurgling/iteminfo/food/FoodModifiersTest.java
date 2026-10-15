@@ -145,10 +145,93 @@ class FoodModifiersTest {
     }
 
     @Test
-    void unusableHungerModifierLabelsScaleNothing() {
+    void tableLabelsGiveMultipliersAndRejectWhatTheyCannotRead() {
         assertEquals(0.35, TableLabels.hungerMultiplier("Hunger modifier: 35%"), EPS);
-        assertEquals(1.0, TableLabels.hungerMultiplier("Hunger modifier: 0%"), EPS);
-        assertEquals(1.0, TableLabels.hungerMultiplier("Hunger modifier: ??"), EPS);
-        assertEquals(1.0, TableLabels.hungerMultiplier(null), EPS);
+        assertEquals(1.25, TableLabels.foodEventMultiplier("Food event bonus: 25%"), EPS);
+        /* unreadable labels are NaN so the caller shows no prediction; they are never quietly neutral */
+        assertTrue(Double.isNaN(TableLabels.hungerMultiplier("Hunger modifier: 0%")));
+        assertTrue(Double.isNaN(TableLabels.hungerMultiplier("Hunger modifier: ??")));
+        assertTrue(Double.isNaN(TableLabels.hungerMultiplier(null)));
+        assertTrue(Double.isNaN(TableLabels.foodEventMultiplier("Food event bonus: n/a")));
+        assertTrue(Double.isNaN(TableLabels.foodEventMultiplier("Food event bonus: -5%")));
+    }
+
+    @Test
+    void tableLabelsAreRecognisedByTheirStart() {
+        assertTrue(TableLabels.isFoodEventBonus("Food event bonus: 25%"));
+        assertFalse(TableLabels.isFoodEventBonus("Hunger modifier: 25%"));
+        assertTrue(TableLabels.isHungerModifier("Hunger modifier: 35%"));
+        assertFalse(TableLabels.isHungerModifier(null));
+    }
+
+    @Test
+    void realmLinesAreNothingUnlessTheyAreAboutFoodEvents() {
+        assertNull(TableLabels.realmBonus("Strength +5"));
+        assertNull(TableLabels.realmBonus(null));
+        assertEquals(0.25, TableLabels.realmBonus("Food event bonus: +25%"), EPS);
+        assertTrue(Double.isNaN(TableLabels.realmBonus("Food event bonus: lots")));
+    }
+
+    @Test
+    void everyTypeOfAMultiTypeFoodCounts() {
+        double[] entries = {0.9, 0.5, 1.2, 0.8};
+        /* a food of types 1 and 3 is reduced by both, whichever order the types come in */
+        assertEquals(0.5 * 0.8, FoodModifierReader.satiation(entries, new int[] {1, 3}), EPS);
+        assertEquals(0.5 * 0.8, FoodModifierReader.satiation(entries, new int[] {3, 1}), EPS);
+        /* a single type is exactly its entry, as it always was */
+        assertEquals(0.5, FoodModifierReader.satiation(entries, new int[] {1}), EPS);
+        /* bonuses (above 1) multiply in too */
+        assertEquals(0.9 * 1.2, FoodModifierReader.satiation(entries, new int[] {0, 2}), EPS);
+    }
+
+    @Test
+    void typesWithoutAnEntryDoNotReduceAnything() {
+        double[] entries = {0.5};
+        assertEquals(1.0, FoodModifierReader.satiation(entries, new int[] {}), EPS);
+        assertEquals(1.0, FoodModifierReader.satiation(entries, null), EPS);
+        assertEquals(1.0, FoodModifierReader.satiation(new double[0], new int[] {0, 1}), EPS);
+        assertEquals(0.5, FoodModifierReader.satiation(entries, new int[] {0, 7, -1}), EPS, "out-of-range types are skipped");
+    }
+
+    @Test
+    void multiTypeSatiationFeedsThePredictionAsOneFactor() {
+        double sat = FoodModifiers.combineSatiation(0.5, 0.8);
+        FoodModifiers m = mods(Account.NONE, 0, 1, 1, sat, null, 1);
+        assertEquals(100 * 0.4, m.predictedFep(100), EPS);
+        assertEquals(1, m.factors().stream().filter(f -> f.kind == Kind.SATIATION).count());
+    }
+
+    @Test
+    void incompleteDataIsNeverAvailable() {
+        assertEquals(FoodModifiers.Status.PENDING, FoodModifiers.pending().status());
+        assertEquals(FoodModifiers.Status.UNSUPPORTED, FoodModifiers.unsupported().status());
+        assertEquals(FoodModifiers.Status.UNAVAILABLE, FoodModifiers.unavailable().status());
+        assertFalse(FoodModifiers.pending().available());
+        assertFalse(FoodModifiers.unsupported().available());
+        assertTrue(FoodModifiers.pending().factors().isEmpty());
+        assertTrue(mods(Account.NONE, 0, 1, 1, 1, null, 1).available());
+    }
+
+    @Test
+    void signatureChangesWhenAnyDisplayedFactorChangesEvenIfThePredictionDoesNot() {
+        /* satiation x0.5 and table x2.0 cancel out: the predicted FEP is the same, the breakdown is not */
+        FoodModifiers a = mods(Account.NONE, 0, 1, 2.0, 0.5, null, 1);
+        FoodModifiers b = mods(Account.NONE, 0, 1, 1.0, 1.0, null, 1);
+        assertEquals(a.predictedFep(10), b.predictedFep(10), EPS);
+        assertNotEquals(a.signature(), b.signature());
+        assertEquals(a.signature(), mods(Account.NONE, 0, 1, 2.0, 0.5, null, 1).signature());
+        /* hunger-only, salt and the Deep Worm flag are part of what is shown too */
+        assertNotEquals(b.signature(), mods(Account.NONE, 0, 1, 1, 1, null, 0.5).signature());
+        assertNotEquals(b.signature(), mods(Account.NONE, 0, 1, 1, 1, 1.0, 1).signature());
+        assertNotEquals(b.signature(), FoodModifiers.of(Account.NONE, 0, 1, 1, 1, null, 1, true).signature());
+        assertNotEquals(b.signature(), FoodModifiers.pending().signature());
+        assertNotEquals(FoodModifiers.pending().signature(), FoodModifiers.unsupported().signature());
+    }
+
+    @Test
+    void barFillIsMeasuredAgainstTheGivenTarget() {
+        /* with the variety bonus the bar completes below its cap (cap 100, target 90) */
+        assertEquals(100.0, FoodModifiers.barFillPercent(60, 30, 90), EPS);
+        assertEquals(90.0, FoodModifiers.barFillPercent(60, 30, 100), EPS);
     }
 }

@@ -56,36 +56,52 @@ final class FoodDetailsLayout {
      *                 by whatever the previous row left below its text)
      * @param lineGap  gap between rows of this block, likewise reduced
      * @param current  current FEP in the bar, NaN if unknown
-     * @param cap      FEP bar cap, NaN if unknown
+     * @param target   FEP at which the bar completes after eating this food (the cap less the variety
+     *                 bonus it would add), NaN if unknown
+     * @param cap      FEP bar cap, NaN if unknown; only used to say whether the target is below it
      * @return whether any row was added
      */
     static boolean layout(NFoodInfo food, ItemInfo.Layout l, FoodModifiers mods, boolean unmodified,
-                          int firstGap, int lineGap, double current, double cap) {
+                          int firstGap, int lineGap, double current, double target, double cap) {
         Rows rows = new Rows(l, firstGap, lineGap);
+        final double weighted = food.weightedTotal();
         if(unmodified) {
             rows.add(NFoodInfo.labelColored(L10n.get("food.details.unmodified"), UNMODIFIED));
-            if(food.sev > 0)
-                rows.add(weightedRow(food.sev, food.glut * 100.0));
+            if(weighted > 0)
+                rows.add(weightedRow(weighted, food.glut * 100.0));
             return rows.any;
         }
-        if(!mods.available())
-            return false;
+        if(!mods.available()) {
+            /* never leave a gap that reads as "no modifiers": say why there is no prediction */
+            if(mods.status() == FoodModifiers.Status.PENDING)
+                rows.add(NFoodInfo.labelColored(L10n.get("food.details.pending"), UNMODIFIED));
+            else if(mods.status() == FoodModifiers.Status.UNSUPPORTED)
+                rows.add(NFoodInfo.labelColored(L10n.get("food.details.unsupported"), TooltipStyle.COLOR_NEGATIVE_STAT));
+            return rows.any;
+        }
 
         if(mods.deepWorm())
             rows.add(NFoodInfo.labelColored(L10n.get("food.details.deepworm"), TooltipStyle.COLOR_NEGATIVE_STAT));
 
         double hungerPct = mods.predictedHunger(food.glut * 100.0);
-        if(food.sev > 0)
-            rows.add(weightedRow(mods.predictedFep(food.sev), hungerPct));
+        if(weighted > 0)
+            rows.add(weightedRow(mods.predictedFep(weighted), hungerPct));
 
         double predicted = mods.predictedFep(food.fepSum);
         rows.add(NFoodInfo.label(L10n.get("food.details.predicted_per_hunger") + " "),
                  NFoodInfo.value(fmt(FoodModifiers.perHunger(predicted, hungerPct)), TooltipStyle.COLOR_FOOD_FEP_HUNGER));
 
-        double fill = FoodModifiers.barFillPercent(current, predicted, cap);
+        /* measured against where the bar really completes, not its cap: the variety bonus lowers that
+           point, so 100% here is exactly when the "Expected FEP" row shows a non-negative balance */
+        double fill = FoodModifiers.barFillPercent(current, predicted, target);
         if(!Double.isNaN(fill)) {
-            rows.add(NFoodInfo.label(L10n.get("food.details.bar_after") + " "),
-                     NFoodInfo.value(Utils.odformat2(fill, 2) + "%", (fill > 100) ? TooltipStyle.COLOR_FOOD_FEP_SUM : FILL_SHORT));
+            boolean adjusted = !Double.isNaN(cap) && target < cap - 0.005;
+            BufferedImage head = NFoodInfo.label(L10n.get("food.details.bar_after") + " ");
+            BufferedImage val = NFoodInfo.value(Utils.odformat2(fill, 2) + "%", (fill >= 100) ? TooltipStyle.COLOR_FOOD_FEP_SUM : FILL_SHORT);
+            if(adjusted)
+                rows.add(head, val, NFoodInfo.labelColored(" " + L10n.get("food.details.bar_variety"), TooltipStyle.COLOR_PERCENTAGE));
+            else
+                rows.add(head, val);
         }
 
         List<FoodModifiers.Factor> factors = mods.factors();

@@ -518,40 +518,22 @@ public class NGameUI extends GameUI
         return table_mod;
     }
 
+    /**
+     * The food event bonus of the realm buffs as a fraction, 0 when there is none or it is not known
+     * yet. Food predictions use {@link nurgling.iteminfo.food.FoodModifierReader}, which keeps "not
+     * known yet" apart from "none"; this is the lenient form.
+     */
     public double getRealmMod()
     {
-        double realmBuff = 0;
-
-        for (Widget wdg1 = child; wdg1 != null; wdg1 = wdg1.next)
+        try
         {
-            if (wdg1 instanceof Bufflist)
-            {
-                for (Widget pbuff = wdg1.child; pbuff != null; pbuff = pbuff.next)
-                {
-                    if (pbuff instanceof RealmBuff)
-                    {
-                        if (((Buff) pbuff).info!=null)
-                        {
-                            ArrayList<ItemInfo> realm = new ArrayList<>(((Buff) pbuff).info);
-                            for (Object data : realm)
-                            {
-                                if (data instanceof ItemInfo.AdHoc)
-                                {
-                                    ItemInfo.AdHoc ah = ((ItemInfo.AdHoc) data);
-                                    if (NParser.checkName(ah.str.text, new NAlias("Food event")))
-                                    {
-                                        realmBuff = realmBuff + Double.parseDouble(ah.str.text.substring(ah.str.text.indexOf("+") + 1, ah.str.text.indexOf("%"))) / 100.;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            return nurgling.iteminfo.food.FoodModifierReader.realm(this);
         }
-        return realmBuff;
+        catch (RuntimeException e)
+        {
+            return 0;
+        }
     }
-
     /**
      * Called when swimming toggle state changes (event-driven)
      */
