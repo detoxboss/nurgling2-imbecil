@@ -108,11 +108,7 @@ public class BotRegistry {
                 H4DMarketScanner.class,
                 "worldexplorer",
                 false,
-                Map.of(
-                        "endpoint", H4DMarketScanner.DEFAULT_ENDPOINT,
-                        "expectedStands", H4DMarketScanner.DEFAULT_STAND_COUNT,
-                        "firstCorner", "north-west"
-                )
+                Map.of("endpoint", H4DMarketScanner.DEFAULT_ENDPOINT)
         ));
 
         // RESOURCES (using localization keys: bot.<id>.title and bot.<id>.desc)

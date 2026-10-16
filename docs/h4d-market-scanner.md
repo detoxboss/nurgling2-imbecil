@@ -31,10 +31,10 @@ HTTP upload, and crash-safe progress.
    | Market NArea | `H4D Market`, when found | Area containing the full market |
    | API URL | `https://h4d.shop` | H4D Market public origin, without an API suffix |
    | Ingest token | blank | Bearer token matching `MARKET_INGEST_TOKEN` on the VPS |
-   | Expected stands | `24` | Safety check that prevents partial snapshots |
-   | Stall #1 corner | `North west` | Corner from which row-major stand numbering begins |
+   | Layout | Server-managed | The current H4D layout contains 27 renter clusters and 89 physical stands |
 
-5. Run the Scenario manually once and confirm that the stall numbers match the market map.
+5. Run the Scenario manually once. The first successful run calibrates the server layout against
+   the exact in-game coordinates; later runs use those saved coordinates.
 6. Select that Scenario and character in HnH Scheduler and assign the desired schedule.
 
 The scheduler already reads `scenarios.nurgling.json`, passes its numeric `scenarioId` through the
@@ -54,18 +54,20 @@ To keep the token out of the Scenario, leave the field blank and set
 On Windows, restart HnH Scheduler after adding or changing an environment variable so new Nurgling
 processes inherit it.
 
-## Stall numbering
+## Stable cluster and stand identity
 
-Stands are grouped into physical rows with a small coordinate tolerance, then numbered across each
-row. The selected `Stall #1 corner` controls both row direction and direction within each row:
+The server layout assigns every physical stand a stable key such as `C07-S3` (Cluster 7, Stand 3).
+The bot no longer invents numbers by sorting the currently visible objects into rows.
 
-- north-west: top row first, left to right;
-- north-east: top row first, right to left;
-- south-west: bottom row first, left to right;
-- south-east: bottom row first, right to left.
+On the first run, the server supplies the public floor-plan coordinates without game-world
+coordinates. The client compares the complete 89-stand shape against the loaded barter stands,
+tests every rotation/reflection, and accepts the match only when one result is clearly within the
+safety threshold. It then uploads the exact world coordinates to the authenticated layout endpoint.
+Later runs match against those saved coordinates and stop if a stand is missing or has moved beyond
+the configured tolerance.
 
-The bot stops before opening a server scan unless the number of visible stands exactly equals
-`Expected stands`. This prevents a partially loaded market from replacing the public snapshot.
+The bot also stops before opening a scan unless all 89 configured stands are loaded. The API rejects
+completion of layout-aware scans unless every stand was uploaded, preventing partial snapshots.
 
 ## Captured fields
 
@@ -86,7 +88,7 @@ including custom-minted coins that share a base resource, from overwriting one a
 The bot uses the resumable H4D API:
 
 1. `POST /api/v1/scans/begin`
-2. `PUT /api/v1/scans/{scanId}/stands/{houseId}` for every stand
+2. `PUT /api/v1/scans/{scanId}/stands/{houseId}` for every stable `Cxx-Sx` stand
 3. `POST /api/v1/scans/{scanId}/complete`
 
 Open scans are not public. Before each stand PUT, its payload is atomically saved to

@@ -18,7 +18,7 @@ class MarketScanSpoolTest {
     @Test
     void persistsPendingStandBeforeAcknowledgement() throws Exception {
         Path file = temporaryDirectory.resolve("scan.json");
-        MarketScanSpool spool = MarketScanSpool.fresh(file, "https://h4d.shop", 17, 24, "scan-123");
+        MarketScanSpool spool = MarketScanSpool.fresh(file, "https://h4d.shop", 17, 89, 2, "scan-123");
         JSONObject stand = new JSONObject().put("offers", new org.json.JSONArray());
 
         spool.setPending(4, stand);
@@ -39,20 +39,21 @@ class MarketScanSpoolTest {
     @Test
     void onlyResumesTheSameRouteContract() throws Exception {
         Path file = temporaryDirectory.resolve("scan.json");
-        MarketScanSpool spool = MarketScanSpool.fresh(file, "https://h4d.shop", 17, 24, "scan-123");
+        MarketScanSpool spool = MarketScanSpool.fresh(file, "https://h4d.shop", 17, 89, 2, "scan-123");
         spool.save();
 
         MarketScanSpool loaded = MarketScanSpool.load(file);
-        assertTrue(loaded.matches("https://h4d.shop", 17, 24));
-        assertFalse(loaded.matches("https://example.invalid", 17, 24));
-        assertFalse(loaded.matches("https://h4d.shop", 18, 24));
-        assertFalse(loaded.matches("https://h4d.shop", 17, 25));
+        assertTrue(loaded.matches("https://h4d.shop", 17, 89, 2));
+        assertFalse(loaded.matches("https://example.invalid", 17, 89, 2));
+        assertFalse(loaded.matches("https://h4d.shop", 18, 89, 2));
+        assertFalse(loaded.matches("https://h4d.shop", 17, 88, 2));
+        assertFalse(loaded.matches("https://h4d.shop", 17, 89, 3));
     }
 
     @Test
     void clearRemovesPrimaryAndBackup() throws Exception {
         Path file = temporaryDirectory.resolve("scan.json");
-        MarketScanSpool spool = MarketScanSpool.fresh(file, "https://h4d.shop", 17, 24, "scan-123");
+        MarketScanSpool spool = MarketScanSpool.fresh(file, "https://h4d.shop", 17, 89, 2, "scan-123");
         spool.save();
         spool.save();
         spool.clear();
