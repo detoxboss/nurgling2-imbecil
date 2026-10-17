@@ -3,6 +3,7 @@ package nurgling.actions.bots;
 import haven.GItem;
 import haven.GSprite;
 import haven.Gob;
+import haven.Coord2d;
 import haven.ItemInfo;
 import haven.Loading;
 import haven.ResData;
@@ -12,6 +13,7 @@ import haven.res.lib.itemtex.ItemTex;
 import haven.res.ui.barterbox.Shopbox;
 import haven.res.ui.tt.q.quality.Quality;
 import nurgling.NGameUI;
+import nurgling.NMapView;
 import nurgling.NUtils;
 import nurgling.actions.Action;
 import nurgling.actions.CloseTargetWindow;
@@ -20,8 +22,10 @@ import nurgling.actions.PathFinder;
 import nurgling.actions.Results;
 import nurgling.areas.NArea;
 import nurgling.market.MarketApiClient;
+import nurgling.market.MarketLayout;
+import nurgling.market.MarketLayoutMatcher;
 import nurgling.market.MarketScanSpool;
-import nurgling.market.MarketStandOrdering;
+import nurgling.navigation.ChunkNavManager;
 import nurgling.tools.Finder;
 import nurgling.tools.NAlias;
 import org.json.JSONArray;
@@ -54,8 +58,7 @@ public class H4DMarketScanner implements Action {
     public static final String BOT_ID = "h4d_market_scan";
     public static final String DEFAULT_ENDPOINT = "https://h4d.shop";
     public static final String DEFAULT_AREA_NAME = "H4D Market";
-    public static final int DEFAULT_STAND_COUNT = 24;
-    private static final double DEFAULT_ROW_TOLERANCE = 6.0;
+    public static final double DEFAULT_COORDINATE_TOLERANCE = 8.0;
     private static final long CAPTURE_TIMEOUT_MS = 15_000;
     private static final Map<Integer, Object> AREA_LOCKS = new ConcurrentHashMap<>();
 
@@ -102,29 +105,35 @@ public class H4DMarketScanner implements Action {
         if (NUtils.player() == null) {
             return Results.ERROR("H4D Market Scanner: player is not available");
         }
-        if (!NUtils.navigateToArea(area, true)) {
+        if (!navigateToMarket(gui, area)) {
             return Results.ERROR("H4D Market Scanner: could not navigate to NArea '" + area.name + "'");
         }
 
+        MarketApiClient client = new MarketApiClient(config.endpoint, config.token, 3);
+        MarketLayout layout = client.layout();
         List<Gob> found = Finder.findGobs(area, new NAlias("gfx/terobjs/barterstand"));
-        if (found.size() != config.expectedStands) {
-            return Results.ERROR("H4D Market Scanner: expected " + config.expectedStands
+        if (found.size() != layout.stands.size()) {
+            return Results.ERROR("H4D Market Scanner: layout expects " + layout.stands.size()
                     + " barter stands in NArea '" + area.name + "', but found " + found.size()
                     + ". Ensure the whole market is loaded and the NArea contains only its stalls.");
         }
 
-        List<MarketStandOrdering.Stand<Gob>> points = new ArrayList<>();
+        List<MarketLayoutMatcher.Point<Gob>> points = new ArrayList<>();
         for (Gob stand : found) {
-            points.add(new MarketStandOrdering.Stand<>(stand, stand.rc.x, stand.rc.y));
+            points.add(new MarketLayoutMatcher.Point<>(stand, stand.rc.x, stand.rc.y));
         }
-        List<MarketStandOrdering.Stand<Gob>> ordered = MarketStandOrdering.order(
-                points, config.firstCorner, config.rowTolerance);
+        List<MarketLayoutMatcher.Match<Gob>> ordered = MarketLayoutMatcher.match(
+                layout, points, config.coordinateTolerance);
+        if (!layout.isCalibrated()) {
+            gui.msg("H4D Market Scanner: saving exact coordinates for " + layout.stands.size() + " active stands");
+            client.saveWorldCoordinates(MarketLayoutMatcher.calibration(layout, ordered));
+        }
 
         Path spoolPath = NUtils.getDataFilePath("h4d-market-scan-" + area.id + ".json");
-        MarketApiClient client = new MarketApiClient(config.endpoint, config.token, 3);
         MarketScanSpool spool = MarketScanSpool.load(spoolPath);
-        if (spool == null || !spool.matches(config.endpoint, area.id, ordered.size()) || !valid(spool, ordered.size())) {
-            spool = begin(client, spoolPath, config, area.id, ordered.size());
+        if (spool == null || !spool.matches(config.endpoint, area.id, ordered.size(), layout.version)
+                || !valid(spool, layout)) {
+            spool = begin(client, spoolPath, config, area.id, ordered.size(), layout.version);
         } else {
             gui.msg("H4D Market Scanner: resuming scan " + spool.scanId);
         }
@@ -142,25 +151,27 @@ public class H4DMarketScanner implements Action {
                     throw apiFailure;
                 }
                 gui.msg("H4D Market Scanner: server lost the open scan; restarting it");
-                spool = begin(client, spoolPath, config, area.id, ordered.size());
+                spool = begin(client, spoolPath, config, area.id, ordered.size(), layout.version);
             }
         }
         return Results.ERROR("H4D Market Scanner: scan could not be recovered");
     }
 
     private static MarketScanSpool begin(MarketApiClient client, Path spoolPath, Config config,
-                                         int areaId, int standCount) throws Exception {
+                                         int areaId, int standCount, int layoutVersion) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("scannerId", "nurgling2-h4d-market");
         payload.put("startedAt", Instant.now().toString());
+        payload.put("layoutVersion", layoutVersion);
         String scanId = client.begin(payload);
-        MarketScanSpool spool = MarketScanSpool.fresh(spoolPath, config.endpoint, areaId, standCount, scanId);
+        MarketScanSpool spool = MarketScanSpool.fresh(
+                spoolPath, config.endpoint, areaId, standCount, layoutVersion, scanId);
         spool.save();
         return spool;
     }
 
     private static void executeRoute(NGameUI gui, MarketApiClient client, MarketScanSpool spool,
-                                     List<MarketStandOrdering.Stand<Gob>> ordered) throws Exception {
+                                     List<MarketLayoutMatcher.Match<Gob>> ordered) throws Exception {
         if (spool.pendingHouseId != null && spool.pendingStand != null) {
             gui.msg("H4D Market Scanner: retrying stall #" + spool.pendingHouseId);
             client.putStand(spool.scanId, spool.pendingHouseId, spool.pendingStand);
@@ -168,13 +179,15 @@ public class H4DMarketScanner implements Action {
         }
 
         Set<String> checkedIcons = new HashSet<>();
-        for (int index = 0; index < ordered.size(); index++) {
-            int houseId = index + 1;
+        List<Coord2d> learnedRouteBlocks = new ArrayList<>();
+        for (MarketLayoutMatcher.Match<Gob> match : ordered) {
+            int houseId = match.layout.houseId;
             if (spool.uploaded.contains(houseId)) {
                 continue;
             }
-            gui.msg("H4D Market Scanner: scanning stall #" + houseId + " of " + ordered.size());
-            CapturedStand captured = captureStand(gui, ordered.get(index).value);
+            gui.msg("H4D Market Scanner: scanning " + match.layout.standKey
+                    + " (" + (spool.uploaded.size() + 1) + " of " + ordered.size() + ")");
+            CapturedStand captured = captureStand(gui, match.value, learnedRouteBlocks);
             for (Map.Entry<String, byte[]> icon : captured.icons.entrySet()) {
                 if (checkedIcons.add(icon.getKey())) {
                     client.ensureIcon(icon.getKey(), icon.getValue());
@@ -189,8 +202,13 @@ public class H4DMarketScanner implements Action {
         }
     }
 
-    private static CapturedStand captureStand(NGameUI gui, Gob stand) throws Exception {
-        Results path = new PathFinder(stand).run(gui);
+    private static CapturedStand captureStand(NGameUI gui, Gob stand, List<Coord2d> learnedRouteBlocks) throws Exception {
+        PathFinder pathFinder = new PathFinder(stand);
+        // Re-plan around live gob hitboxes and remember any unmodelled stall point for the rest
+        // of this route. This is especially important for players and bill-of-sale cargo left in aisles.
+        pathFinder.learnedBlocks = learnedRouteBlocks;
+        pathFinder.maxStalls = 6;
+        Results path = pathFinder.run(gui);
         if (!path.IsSuccess()) {
             throw new IOException("Could not path to barter stand at " + stand.rc);
         }
@@ -240,7 +258,7 @@ public class H4DMarketScanner implements Action {
         Map<String, byte[]> icons = new LinkedHashMap<>();
         for (int slot = 0; slot < boxes.size(); slot++) {
             Shopbox box = boxes.get(slot);
-            if (box.res == null || box.price == null || box.spr == null || box.pnum <= 0) {
+            if (box.res == null || box.price == null || box.spr == null) {
                 continue;
             }
             ItemInfo.Name offerName = ItemInfo.find(ItemInfo.Name.class, box.info());
@@ -260,6 +278,7 @@ public class H4DMarketScanner implements Action {
 
             JSONObject offer = new JSONObject();
             offer.put("slot", slot);
+            offer.put("available", box.res != null && box.price != null && box.pnum > 0);
             offer.put("product", product.json);
             offer.put("price", price.json);
             offers.put(offer);
@@ -347,17 +366,29 @@ public class H4DMarketScanner implements Action {
         return partial;
     }
 
-    private static boolean valid(MarketScanSpool spool, int standCount) {
+    private static boolean navigateToMarket(NGameUI gui, NArea area) throws InterruptedException {
+        if (gui.map instanceof NMapView) {
+            ChunkNavManager chunkNav = ((NMapView) gui.map).getChunkNavManager();
+            if (chunkNav != null && chunkNav.isInitialized()) {
+                return chunkNav.navigateToArea(area, gui).IsSuccess();
+            }
+        }
+        return NUtils.navigateToArea(area, true);
+    }
+
+    private static boolean valid(MarketScanSpool spool, MarketLayout layout) {
         if (spool.scanId == null || spool.scanId.isEmpty()) {
             return false;
         }
+        Set<Integer> validIds = new HashSet<>();
+        for (MarketLayout.Stand stand : layout.stands) validIds.add(stand.houseId);
         for (Integer houseId : spool.uploaded) {
-            if (houseId == null || houseId < 1 || houseId > standCount) {
+            if (houseId == null || !validIds.contains(houseId)) {
                 return false;
             }
         }
         return spool.pendingHouseId == null
-                || (spool.pendingHouseId >= 1 && spool.pendingHouseId <= standCount && spool.pendingStand != null);
+                || (validIds.contains(spool.pendingHouseId) && spool.pendingStand != null);
     }
 
     private static String safeMessage(Throwable failure) {
@@ -391,18 +422,13 @@ public class H4DMarketScanner implements Action {
         final Integer areaId;
         final String endpoint;
         final String token;
-        final int expectedStands;
-        final double rowTolerance;
-        final MarketStandOrdering.FirstCorner firstCorner;
+        final double coordinateTolerance;
 
-        private Config(Integer areaId, String endpoint, String token, int expectedStands,
-                       double rowTolerance, MarketStandOrdering.FirstCorner firstCorner) {
+        private Config(Integer areaId, String endpoint, String token, double coordinateTolerance) {
             this.areaId = areaId;
             this.endpoint = endpoint;
             this.token = token;
-            this.expectedStands = expectedStands;
-            this.rowTolerance = rowTolerance;
-            this.firstCorner = firstCorner;
+            this.coordinateTolerance = coordinateTolerance;
         }
 
         static Config from(Map<String, Object> settings) {
@@ -415,11 +441,8 @@ public class H4DMarketScanner implements Action {
             if (token.isEmpty()) {
                 token = env("H4D_MARKET_INGEST_TOKEN", System.getProperty("h4d.market.ingestToken", ""));
             }
-            int expected = Math.max(1, Math.min(500,
-                    integer(settings.get("expectedStands"), DEFAULT_STAND_COUNT)));
-            double tolerance = decimal(settings.get("rowTolerance"), DEFAULT_ROW_TOLERANCE);
-            return new Config(areaId, endpoint, token, expected, Math.max(0, tolerance),
-                    MarketStandOrdering.FirstCorner.parse(settings.get("firstCorner")));
+            double tolerance = decimal(settings.get("coordinateTolerance"), DEFAULT_COORDINATE_TOLERANCE);
+            return new Config(areaId, endpoint, token, Math.max(0, tolerance));
         }
 
         private static String string(Object value, String fallback) {

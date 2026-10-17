@@ -180,48 +180,6 @@ public class StepSettingsPanel extends Widget {
             y += UI.scale(30);
             add(new Label("Blank = H4D_MARKET_INGEST_TOKEN"), new Coord(UI.scale(8), y));
             y += UI.scale(28);
-
-            add(new Label("Expected stands:"), new Coord(UI.scale(8), y));
-            y += UI.scale(22);
-            Object expectedSetting = step.getSetting("expectedStands");
-            int expected = expectedSetting instanceof Number ? ((Number) expectedSetting).intValue() : 24;
-            TextEntry expectedEntry = new TextEntry(UI.scale(70), Integer.toString(expected)) {
-                @Override
-                protected void changed() {
-                    try {
-                        int value = Integer.parseInt(text().trim());
-                        if (value >= 1 && value <= 500) step.setSetting("expectedStands", value);
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-            };
-            step.setSetting("expectedStands", expected);
-            add(expectedEntry, new Coord(UI.scale(8), y));
-            y += UI.scale(34);
-
-            add(new Label("Stall #1 corner:"), new Coord(UI.scale(8), y));
-            y += UI.scale(22);
-            List<String> corners = Arrays.asList("north-west", "north-east", "south-west", "south-east");
-            String currentCorner = settingText(step, "firstCorner", "north-west");
-            if (!corners.contains(currentCorner)) currentCorner = "north-west";
-            NDropbox<String> cornerDropdown = new NDropbox<String>(UI.scale(160), corners.size(), UI.scale(22)) {
-                @Override
-                protected String listitem(int i) { return corners.get(i); }
-                @Override
-                protected int listitems() { return corners.size(); }
-                @Override
-                protected void drawitem(GOut g, String item, int i) {
-                    g.text(item.substring(0, 1).toUpperCase() + item.substring(1).replace('-', ' '), Coord.z);
-                }
-                @Override
-                public void change(String item) {
-                    super.change(item);
-                    if (item != null) step.setSetting("firstCorner", item);
-                }
-            };
-            cornerDropdown.change(currentCorner);
-            add(cornerDropdown, new Coord(UI.scale(8), y));
-            y += UI.scale(40);
         }
         if (desc.id.equals("forager")) {
             hasAnySetting = true;

@@ -12,12 +12,13 @@ import java.util.Set;
 
 /** Crash-safe progress for a resumable, not-yet-public market scan. */
 public final class MarketScanSpool {
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private final Path path;
     public String endpoint;
     public int areaId;
     public int standCount;
+    public int layoutVersion;
     public String scanId;
     public final Set<Integer> uploaded = new LinkedHashSet<>();
     public Integer pendingHouseId;
@@ -27,11 +28,13 @@ public final class MarketScanSpool {
         this.path = path;
     }
 
-    public static MarketScanSpool fresh(Path path, String endpoint, int areaId, int standCount, String scanId) {
+    public static MarketScanSpool fresh(Path path, String endpoint, int areaId, int standCount,
+                                        int layoutVersion, String scanId) {
         MarketScanSpool spool = new MarketScanSpool(path);
         spool.endpoint = endpoint;
         spool.areaId = areaId;
         spool.standCount = standCount;
+        spool.layoutVersion = layoutVersion;
         spool.scanId = scanId;
         return spool;
     }
@@ -50,6 +53,7 @@ public final class MarketScanSpool {
             spool.endpoint = json.getString("endpoint");
             spool.areaId = json.getInt("areaId");
             spool.standCount = json.getInt("standCount");
+            spool.layoutVersion = json.getInt("layoutVersion");
             spool.scanId = json.getString("scanId");
             JSONArray uploaded = json.optJSONArray("uploadedHouseIds");
             if (uploaded != null) {
@@ -68,8 +72,9 @@ public final class MarketScanSpool {
         }
     }
 
-    public boolean matches(String endpoint, int areaId, int standCount) {
-        return this.endpoint.equals(endpoint) && this.areaId == areaId && this.standCount == standCount;
+    public boolean matches(String endpoint, int areaId, int standCount, int layoutVersion) {
+        return this.endpoint.equals(endpoint) && this.areaId == areaId && this.standCount == standCount
+                && this.layoutVersion == layoutVersion;
     }
 
     public void setPending(int houseId, JSONObject stand) throws IOException {
@@ -93,6 +98,7 @@ public final class MarketScanSpool {
         json.put("endpoint", endpoint);
         json.put("areaId", areaId);
         json.put("standCount", standCount);
+        json.put("layoutVersion", layoutVersion);
         json.put("scanId", scanId);
         json.put("uploadedHouseIds", new JSONArray(uploaded));
         json.put("pendingHouseId", pendingHouseId == null ? JSONObject.NULL : pendingHouseId);

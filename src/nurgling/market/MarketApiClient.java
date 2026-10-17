@@ -52,6 +52,14 @@ public final class MarketApiClient {
         return scanId;
     }
 
+    public MarketLayout layout() throws IOException, InterruptedException {
+        return MarketLayout.parse(requestJson("GET", "/api/v1/layout", null, attempts));
+    }
+
+    public void saveWorldCoordinates(JSONObject payload) throws IOException, InterruptedException {
+        requestJson("PUT", "/api/v1/layout/world-coordinates", payload, attempts);
+    }
+
     public void putStand(String scanId, int houseId, JSONObject payload) throws IOException, InterruptedException {
         requestJson("PUT", "/api/v1/scans/" + path(scanId) + "/stands/" + houseId, payload, attempts);
     }
