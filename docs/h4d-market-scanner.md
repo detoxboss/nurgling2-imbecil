@@ -15,8 +15,8 @@ The scanner does not emulate or scrape the game protocol. It uses Nurgling's exi
 - live `Shopbox` fields for the five offer slots;
 - Haven item tooltip/resource model and `ItemTex.sprimg` renderer.
 
-The scanner adds deterministic stall numbering, JSON conversion, PNG icon delivery, authenticated
-HTTP upload, and crash-safe progress.
+The scanner adds stable server-owned stand identity and route order, JSON conversion, PNG icon
+delivery, authenticated HTTP upload, and crash-safe progress.
 
 ## One-time setup
 
@@ -31,7 +31,7 @@ HTTP upload, and crash-safe progress.
    | Market NArea | `H4D Market`, when found | Area containing the full market |
    | API URL | `https://h4d.shop` | H4D Market public origin, without an API suffix |
    | Ingest token | blank | Bearer token matching `MARKET_INGEST_TOKEN` on the VPS |
-   | Layout | Server-managed | The current H4D layout contains 27 renter clusters and 89 physical stands |
+   | Layout | Server-managed | The active layout grows as new clusters and stands are commissioned |
 
 5. Run the Scenario manually once. The first successful run calibrates the server layout against
    the exact in-game coordinates; later runs use those saved coordinates.
@@ -60,21 +60,29 @@ The server layout assigns every physical stand a stable key such as `C07-S3` (Cl
 The bot no longer invents numbers by sorting the currently visible objects into rows.
 
 On the first run, the server supplies the public floor-plan coordinates without game-world
-coordinates. The client compares the complete 89-stand shape against the loaded barter stands,
+coordinates. The client compares the complete active floor shape against the loaded barter stands,
 tests every rotation/reflection, and accepts the match only when one result is clearly within the
 safety threshold. It then uploads the exact world coordinates to the authenticated layout endpoint.
-Later runs match against those saved coordinates and stop if a stand is missing or has moved beyond
-the configured tolerance.
+Later runs pin the old stands to those saved coordinates. When new stands are appended, the old
+coordinates anchor an affine prediction for only the additions; the completed calibration is then
+saved for the new layout version. Existing stand IDs are never renumbered.
 
-The bot also stops before opening a scan unless all 89 configured stands are loaded. The API rejects
+Each stand has an explicit `routeOrder`, allowing the scanner to follow the market's entrance-to-exit
+zig-zag without deriving a route from cluster numbers. The bot stops before opening a scan unless
+all currently configured stands are loaded. The API rejects
 completion of layout-aware scans unless every stand was uploaded, preventing partial snapshots.
+
+ChunkNav is used to reach the market NArea. Between stands, the local pathfinder continuously plans
+against loaded gob hitboxes, re-plans after a moving person or cargo blocks a step, and remembers
+unmodelled stall points for the remainder of the route. This lets it route around bill-of-sale cargo
+and other temporary aisle obstructions instead of repeatedly walking into them.
 
 ## Captured fields
 
 For every active Shopbox slot the bot records:
 
 - product and price display names;
-- stock remaining (`Shopbox.leftNum`);
+- the displayed stock counter (`Shopbox.leftNum`) and Buy-button availability as separate fields;
 - product stack quantity and quality from item tooltip data;
 - price amount (`Shopbox.pnum`) and minimum quality (`Shopbox.pq`);
 - slot index, stand world coordinates, and UTC capture time.
@@ -111,3 +119,6 @@ client/Scheduler logs.
   part of the complete snapshot.
 - The exact rendered icons are uploaded to the H4D VPS; the browser never needs access to the Haven
   resource server or a player's local resource cache.
+- Haven currently reports zero items left for some area-backed Taking Hand offers. The scanner uses
+  the same condition that creates the in-game Buy button (`res`, `price`, and positive `pnum`) as the
+  authoritative availability signal; zero is retained only as the raw, potentially incorrect count.

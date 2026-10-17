@@ -106,7 +106,7 @@ public class BotRegistry {
                 true,
                 true,
                 H4DMarketScanner.class,
-                "worldexplorer",
+                "h4dmarket",
                 false,
                 Map.of("endpoint", H4DMarketScanner.DEFAULT_ENDPOINT)
         ));

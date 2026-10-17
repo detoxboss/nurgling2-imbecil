@@ -17,17 +17,19 @@ public final class MarketLayout {
         public final String standKey;
         public final int clusterId;
         public final int stallNumber;
+        public final int routeOrder;
         public final double mapX;
         public final double mapY;
         public final Double worldX;
         public final Double worldY;
 
-        Stand(int houseId, String standKey, int clusterId, int stallNumber,
+        Stand(int houseId, String standKey, int clusterId, int stallNumber, int routeOrder,
               double mapX, double mapY, Double worldX, Double worldY) {
             this.houseId = houseId;
             this.standKey = standKey;
             this.clusterId = clusterId;
             this.stallNumber = stallNumber;
+            this.routeOrder = routeOrder;
             this.mapX = mapX;
             this.mapY = mapY;
             this.worldX = worldX;
@@ -68,6 +70,7 @@ public final class MarketLayout {
                         standKey,
                         source.optInt("clusterId", clusterId),
                         source.getInt("stallNumber"),
+                        source.optInt("routeOrder", houseId),
                         source.getDouble("x"),
                         source.getDouble("y"),
                         optionalDouble(source, "worldX"),
@@ -75,7 +78,7 @@ public final class MarketLayout {
                 ));
             }
         }
-        stands.sort(Comparator.comparingInt(stand -> stand.houseId));
+        stands.sort(Comparator.comparingInt(stand -> stand.routeOrder));
         if (stands.isEmpty()) {
             throw new IOException("Market layout contains no stands");
         }
@@ -89,6 +92,14 @@ public final class MarketLayout {
             }
         }
         return true;
+    }
+
+    public int calibratedCount() {
+        int count = 0;
+        for (Stand stand : stands) {
+            if (stand.worldX != null && stand.worldY != null) count++;
+        }
+        return count;
     }
 
     private static Double optionalDouble(JSONObject json, String name) {

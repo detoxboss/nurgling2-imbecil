@@ -3,6 +3,7 @@ package nurgling.actions.bots;
 import haven.GItem;
 import haven.GSprite;
 import haven.Gob;
+import haven.Coord2d;
 import haven.ItemInfo;
 import haven.Loading;
 import haven.ResData;
@@ -12,6 +13,7 @@ import haven.res.lib.itemtex.ItemTex;
 import haven.res.ui.barterbox.Shopbox;
 import haven.res.ui.tt.q.quality.Quality;
 import nurgling.NGameUI;
+import nurgling.NMapView;
 import nurgling.NUtils;
 import nurgling.actions.Action;
 import nurgling.actions.CloseTargetWindow;
@@ -23,6 +25,7 @@ import nurgling.market.MarketApiClient;
 import nurgling.market.MarketLayout;
 import nurgling.market.MarketLayoutMatcher;
 import nurgling.market.MarketScanSpool;
+import nurgling.navigation.ChunkNavManager;
 import nurgling.tools.Finder;
 import nurgling.tools.NAlias;
 import org.json.JSONArray;
@@ -102,7 +105,7 @@ public class H4DMarketScanner implements Action {
         if (NUtils.player() == null) {
             return Results.ERROR("H4D Market Scanner: player is not available");
         }
-        if (!NUtils.navigateToArea(area, true)) {
+        if (!navigateToMarket(gui, area)) {
             return Results.ERROR("H4D Market Scanner: could not navigate to NArea '" + area.name + "'");
         }
 
@@ -122,7 +125,7 @@ public class H4DMarketScanner implements Action {
         List<MarketLayoutMatcher.Match<Gob>> ordered = MarketLayoutMatcher.match(
                 layout, points, config.coordinateTolerance);
         if (!layout.isCalibrated()) {
-            gui.msg("H4D Market Scanner: saving the first exact 89-stand calibration");
+            gui.msg("H4D Market Scanner: saving exact coordinates for " + layout.stands.size() + " active stands");
             client.saveWorldCoordinates(MarketLayoutMatcher.calibration(layout, ordered));
         }
 
@@ -176,6 +179,7 @@ public class H4DMarketScanner implements Action {
         }
 
         Set<String> checkedIcons = new HashSet<>();
+        List<Coord2d> learnedRouteBlocks = new ArrayList<>();
         for (MarketLayoutMatcher.Match<Gob> match : ordered) {
             int houseId = match.layout.houseId;
             if (spool.uploaded.contains(houseId)) {
@@ -183,7 +187,7 @@ public class H4DMarketScanner implements Action {
             }
             gui.msg("H4D Market Scanner: scanning " + match.layout.standKey
                     + " (" + (spool.uploaded.size() + 1) + " of " + ordered.size() + ")");
-            CapturedStand captured = captureStand(gui, match.value);
+            CapturedStand captured = captureStand(gui, match.value, learnedRouteBlocks);
             for (Map.Entry<String, byte[]> icon : captured.icons.entrySet()) {
                 if (checkedIcons.add(icon.getKey())) {
                     client.ensureIcon(icon.getKey(), icon.getValue());
@@ -198,8 +202,13 @@ public class H4DMarketScanner implements Action {
         }
     }
 
-    private static CapturedStand captureStand(NGameUI gui, Gob stand) throws Exception {
-        Results path = new PathFinder(stand).run(gui);
+    private static CapturedStand captureStand(NGameUI gui, Gob stand, List<Coord2d> learnedRouteBlocks) throws Exception {
+        PathFinder pathFinder = new PathFinder(stand);
+        // Re-plan around live gob hitboxes and remember any unmodelled stall point for the rest
+        // of this route. This is especially important for players and bill-of-sale cargo left in aisles.
+        pathFinder.learnedBlocks = learnedRouteBlocks;
+        pathFinder.maxStalls = 6;
+        Results path = pathFinder.run(gui);
         if (!path.IsSuccess()) {
             throw new IOException("Could not path to barter stand at " + stand.rc);
         }
@@ -249,7 +258,7 @@ public class H4DMarketScanner implements Action {
         Map<String, byte[]> icons = new LinkedHashMap<>();
         for (int slot = 0; slot < boxes.size(); slot++) {
             Shopbox box = boxes.get(slot);
-            if (box.res == null || box.price == null || box.spr == null || box.pnum <= 0) {
+            if (box.res == null || box.price == null || box.spr == null) {
                 continue;
             }
             ItemInfo.Name offerName = ItemInfo.find(ItemInfo.Name.class, box.info());
@@ -269,6 +278,7 @@ public class H4DMarketScanner implements Action {
 
             JSONObject offer = new JSONObject();
             offer.put("slot", slot);
+            offer.put("available", box.res != null && box.price != null && box.pnum > 0);
             offer.put("product", product.json);
             offer.put("price", price.json);
             offers.put(offer);
@@ -354,6 +364,16 @@ public class H4DMarketScanner implements Action {
             }
         }
         return partial;
+    }
+
+    private static boolean navigateToMarket(NGameUI gui, NArea area) throws InterruptedException {
+        if (gui.map instanceof NMapView) {
+            ChunkNavManager chunkNav = ((NMapView) gui.map).getChunkNavManager();
+            if (chunkNav != null && chunkNav.isInitialized()) {
+                return chunkNav.navigateToArea(area, gui).IsSuccess();
+            }
+        }
+        return NUtils.navigateToArea(area, true);
     }
 
     private static boolean valid(MarketScanSpool spool, MarketLayout layout) {

@@ -47,6 +47,26 @@ class MarketLayoutMatcherTest {
         assertThrows(IOException.class, () -> MarketLayoutMatcher.match(layout, detected, 8));
     }
 
+    @Test
+    void preservesExistingCoordinatesWhileCalibratingNewStands() throws Exception {
+        double[][] map = {{0, 0}, {1, 0}, {0, 1}, {1, 1}, {.25, .5}, {.75, .5}};
+        double[][] world = {{100, 200}, {300, 220}, {80, 500}, {280, 520}, null, null};
+        MarketLayout layout = layout(map, world);
+        List<MarketLayoutMatcher.Point<String>> detected = new ArrayList<>(List.of(
+                new MarketLayoutMatcher.Point<>("one", 100, 200),
+                new MarketLayoutMatcher.Point<>("two", 300, 220),
+                new MarketLayoutMatcher.Point<>("three", 80, 500),
+                new MarketLayoutMatcher.Point<>("four", 280, 520),
+                new MarketLayoutMatcher.Point<>("five", 140, 355),
+                new MarketLayoutMatcher.Point<>("six", 240, 365)));
+        Collections.shuffle(detected, new Random(8));
+
+        List<MarketLayoutMatcher.Match<String>> matches = MarketLayoutMatcher.match(layout, detected, 8);
+
+        assertEquals(List.of("one", "two", "three", "four", "five", "six"),
+                matches.stream().map(match -> match.value).toList());
+    }
+
     private static MarketLayout layout(double[][] map, double[][] world) throws Exception {
         JSONArray stands = new JSONArray();
         for (int index = 0; index < map.length; index++) {
@@ -57,7 +77,7 @@ class MarketLayoutMatcherTest {
                     .put("stallNumber", 1)
                     .put("x", map[index][0])
                     .put("y", map[index][1]);
-            if (world != null) {
+            if (world != null && world[index] != null) {
                 stand.put("worldX", world[index][0]);
                 stand.put("worldY", world[index][1]);
             } else {

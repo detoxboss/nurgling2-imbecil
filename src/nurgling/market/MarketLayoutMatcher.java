@@ -49,9 +49,14 @@ public final class MarketLayoutMatcher {
         if (layout.stands.size() != detected.size()) {
             throw new IOException("Layout expects " + layout.stands.size() + " stands but found " + detected.size());
         }
-        return layout.isCalibrated()
-                ? matchCalibrated(layout, detected, calibratedTolerance)
-                : matchByShape(layout, detected);
+        int calibrated = layout.calibratedCount();
+        if (calibrated == layout.stands.size()) {
+            return matchCalibrated(layout, detected, calibratedTolerance);
+        }
+        if (calibrated >= 3) {
+            return matchPartiallyCalibrated(layout, detected, calibratedTolerance);
+        }
+        return matchByShape(layout, detected);
     }
 
     public static <T> JSONObject calibration(MarketLayout layout, List<Match<T>> matches) {
@@ -94,6 +99,112 @@ public final class MarketLayoutMatcher {
         return matches;
     }
 
+    /**
+     * Keeps every already-calibrated identity pinned to its exact world position, then uses those
+     * anchors to predict and assign only newly-added stands. This lets a market layout grow without
+     * renumbering or geometrically re-identifying the original floor on every expansion.
+     */
+    private static <T> List<Match<T>> matchPartiallyCalibrated(MarketLayout layout, List<Point<T>> detected,
+                                                                double tolerance) throws IOException {
+        List<Match<T>> matches = new ArrayList<>();
+        List<MarketLayout.Stand> missing = new ArrayList<>();
+        Set<Integer> used = new HashSet<>();
+        for (MarketLayout.Stand stand : layout.stands) {
+            if (stand.worldX == null || stand.worldY == null) {
+                missing.add(stand);
+                continue;
+            }
+            int bestIndex = -1;
+            double bestDistance = Double.POSITIVE_INFINITY;
+            for (int index = 0; index < detected.size(); index++) {
+                if (used.contains(index)) continue;
+                Point<T> point = detected.get(index);
+                double distance = Math.hypot(point.x - stand.worldX, point.y - stand.worldY);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestIndex = index;
+                }
+            }
+            if (bestIndex < 0 || bestDistance > tolerance) {
+                throw new IOException(stand.standKey + " is missing or moved " + format(bestDistance)
+                        + " units (allowed " + tolerance + ")");
+            }
+            used.add(bestIndex);
+            matches.add(new Match<>(stand, detected.get(bestIndex)));
+        }
+
+        double[][] affine = fitAffine(matches);
+        List<Point<T>> remaining = new ArrayList<>();
+        for (int index = 0; index < detected.size(); index++) {
+            if (!used.contains(index)) remaining.add(detected.get(index));
+        }
+        double[][] costs = new double[missing.size()][remaining.size()];
+        for (int row = 0; row < missing.size(); row++) {
+            MarketLayout.Stand stand = missing.get(row);
+            double predictedX = affine[0][0] * stand.mapX + affine[0][1] * stand.mapY + affine[0][2];
+            double predictedY = affine[1][0] * stand.mapX + affine[1][1] * stand.mapY + affine[1][2];
+            for (int col = 0; col < remaining.size(); col++) {
+                double dx = predictedX - remaining.get(col).x;
+                double dy = predictedY - remaining.get(col).y;
+                costs[row][col] = dx * dx + dy * dy;
+            }
+        }
+        int[] assignment = hungarian(costs);
+        double additionTolerance = Math.max(24.0, tolerance * 3.0);
+        for (int row = 0; row < missing.size(); row++) {
+            double distance = Math.sqrt(costs[row][assignment[row]]);
+            if (distance > additionTolerance) {
+                throw new IOException(missing.get(row).standKey + " could not be safely calibrated: predicted position is "
+                        + format(distance) + " units away (allowed " + additionTolerance + ")");
+            }
+            matches.add(new Match<>(missing.get(row), remaining.get(assignment[row])));
+        }
+        matches.sort(Comparator.comparingInt(match -> match.layout.routeOrder));
+        return matches;
+    }
+
+    /** Least-squares affine transform from normalized floor-plan coordinates to game-world coordinates. */
+    private static <T> double[][] fitAffine(List<Match<T>> anchors) throws IOException {
+        double[][] normal = new double[3][3];
+        double[] worldX = new double[3];
+        double[] worldY = new double[3];
+        for (Match<T> anchor : anchors) {
+            double[] row = {anchor.layout.mapX, anchor.layout.mapY, 1.0};
+            for (int i = 0; i < 3; i++) {
+                worldX[i] += row[i] * anchor.worldX;
+                worldY[i] += row[i] * anchor.worldY;
+                for (int j = 0; j < 3; j++) normal[i][j] += row[i] * row[j];
+            }
+        }
+        return new double[][]{solve3(normal, worldX), solve3(normal, worldY)};
+    }
+
+    private static double[] solve3(double[][] source, double[] target) throws IOException {
+        double[][] matrix = new double[3][4];
+        for (int row = 0; row < 3; row++) {
+            System.arraycopy(source[row], 0, matrix[row], 0, 3);
+            matrix[row][3] = target[row];
+        }
+        for (int col = 0; col < 3; col++) {
+            int pivot = col;
+            for (int row = col + 1; row < 3; row++) {
+                if (Math.abs(matrix[row][col]) > Math.abs(matrix[pivot][col])) pivot = row;
+            }
+            if (Math.abs(matrix[pivot][col]) < 1e-9) {
+                throw new IOException("Existing market coordinates cannot anchor new stand positions");
+            }
+            double[] swap = matrix[col]; matrix[col] = matrix[pivot]; matrix[pivot] = swap;
+            double divisor = matrix[col][col];
+            for (int j = col; j < 4; j++) matrix[col][j] /= divisor;
+            for (int row = 0; row < 3; row++) {
+                if (row == col) continue;
+                double factor = matrix[row][col];
+                for (int j = col; j < 4; j++) matrix[row][j] -= factor * matrix[col][j];
+            }
+        }
+        return new double[]{matrix[0][3], matrix[1][3], matrix[2][3]};
+    }
+
     private static <T> List<Match<T>> matchByShape(MarketLayout layout, List<Point<T>> detected) throws IOException {
         double[][] map = normalizeLayout(layout.stands);
         double[][] world = normalizeDetected(detected);
@@ -124,7 +235,7 @@ public final class MarketLayoutMatcher {
         for (int index = 0; index < layout.stands.size(); index++) {
             matches.add(new Match<>(layout.stands.get(index), detected.get(best.assignment[index])));
         }
-        matches.sort(Comparator.comparingInt(match -> match.layout.houseId));
+        matches.sort(Comparator.comparingInt(match -> match.layout.routeOrder));
         return matches;
     }
 
