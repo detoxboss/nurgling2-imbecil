@@ -106,7 +106,8 @@ public class NHitBoxD implements Comparable<NHitBoxD>, java.io.Serializable {
             quarterTurns += 2;
         angle = quarterTurns * Math.PI / 2.0;
 
-        switch (quarterTurns % 4) {
+        // floorMod: a negative rotation (e.g. plob.a < 0) made '%' yield -1..-3, matched no case and left c[] null
+        switch (Math.floorMod(quarterTurns, 4)) {
             case 0:
                 c[0] = this.ul.add(rc);
                 c[1] = Coord2d.of(this.br.x, this.ul.y).add(rc);

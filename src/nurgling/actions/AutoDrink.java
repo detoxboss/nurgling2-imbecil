@@ -35,25 +35,47 @@ public class AutoDrink implements Action
     {
         while(!stop.get())
         {
+            try {
+                runCycle(gui);
+            } catch (InterruptedException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                // A stray runtime exception used to end this loop silently; log it and keep going.
+                System.err.println("AutoDrink: cycle failed, retrying: " + e);
+                e.printStackTrace();
+                NUtils.addTask(cooldown());
+            }
+        }
+        return Results.SUCCESS();
+    }
+
+    private void runCycle(NGameUI gui) throws InterruptedException
+    {
             NUtils.addTask(new NTask() {
                 @Override
                 public boolean check() {
                     if(stop.get())
                         return true;
-                    double stamina = NUtils.getStamina();
-                    if(stamina < 0)
-                        return false;
-                    if(stamina >= FULL_STAMINA) {
-                        active = false;
+                    // Runs on the UI tick thread: an exception here would abort the whole task pass.
+                    try {
+                        double stamina = NUtils.getStamina();
+                        if(stamina < 0)
+                            return false;
+                        if(stamina >= FULL_STAMINA) {
+                            active = false;
+                            return false;
+                        }
+                        if(!active && stamina <= getThresholdFraction())
+                            active = true;
+                        return active;
+                    } catch (RuntimeException e) {
+                        System.err.println("AutoDrink: stamina check failed: " + e);
                         return false;
                     }
-                    if(!active && stamina <= getThresholdFraction())
-                        active = true;
-                    return active;
                 }
             });
             if(stop.get()) {
-                return Results.SUCCESS();
+                return;
             }
 
             if(hasDrinkableWater(gui)) {
@@ -61,7 +83,7 @@ public class AutoDrink implements Action
                 if (gui.menu == null) {
                     // Menu not ready yet -- back off instead of spinning.
                     NUtils.addTask(cooldown());
-                    continue;
+                    return;
                 }
                 MenuGrid.Pagina drinkPag = null;
                 for (MenuGrid.Pagina pag : gui.menu.paginae) {
@@ -73,13 +95,13 @@ public class AutoDrink implements Action
                 if (drinkPag == null) {
                     // No "Drink" button registered yet -- back off instead of spinning.
                     NUtils.addTask(cooldown());
-                    continue;
+                    return;
                 }
                 drinkPag.button().use(new MenuGrid.Interaction(1, 0));
                 Gob player = NUtils.player();
                 if (player == null) {
                     NUtils.addTask(cooldown());
-                    continue;
+                    return;
                 }
                 WaitPoseOrMsg wops = new WaitPoseOrMsg(player, "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
                 NUtils.getUI().core.addTask(wops);
@@ -88,7 +110,7 @@ public class AutoDrink implements Action
                     // container just emptied, etc). Back off instead of hammering the button.
                     reportAutoDrinkIssue(gui, "Auto-drink: drink attempt failed, backing off.");
                     NUtils.addTask(cooldown());
-                    continue;
+                    return;
                 }
                 // Drink actually began -- clear the notification latch so a later, genuine
                 // failure/no-water episode can notify again.
@@ -106,8 +128,6 @@ public class AutoDrink implements Action
                 reportAutoDrinkIssue(gui, "Auto-drink: no water available.");
                 NUtils.addTask(cooldown());
             }
-        }
-        return Results.SUCCESS();
     }
 
     private void reportAutoDrinkIssue(NGameUI gui, String message) {
