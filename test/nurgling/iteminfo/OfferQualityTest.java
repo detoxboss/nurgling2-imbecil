@@ -2,6 +2,9 @@ package nurgling.iteminfo;
 
 import haven.ItemInfo;
 import haven.res.ui.tt.q.qbuff.QBuff;
+import nurgling.NConfig;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -11,6 +14,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class OfferQualityTest {
+    /** ItemInfo and QBuff pull in haven.Text, whose static initializer needs the game resources. */
+    @BeforeAll
+    static void gameResources() {
+        try {
+            NConfig.getGlobalInstance();
+            Class.forName("haven.Text");
+        } catch(LinkageError | ClassNotFoundException e) {
+            Assumptions.abort("game resources are not available to the test classpath: " + e);
+        }
+    }
+
     private static QBuff q(double v) {
         return new QBuff(null, null, "Quality", v);
     }

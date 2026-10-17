@@ -18,10 +18,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class FoodDetailsLayoutTest {
     @BeforeAll
     static void defaultConfig() {
-        NConfig.getGlobalInstance();
         try {
+            NConfig.getGlobalInstance();
             Class.forName("haven.Text");
-        } catch(ClassNotFoundException | LinkageError e) {
+        } catch(LinkageError | ClassNotFoundException e) {
             Assumptions.abort("game resource jars (lib/ext/builtin-res.jar) are not on the test classpath: " + e);
         }
     }

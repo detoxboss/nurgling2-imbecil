@@ -29,10 +29,10 @@ class NTooltipGildingTest {
     /** haven.Text takes its fonts from the config in a static initializer, so the defaults must exist first. */
     @BeforeAll
     static void defaultConfig() {
-        NConfig.getGlobalInstance();
         try {
+            NConfig.getGlobalInstance();
             Class.forName("haven.Text");
-        } catch(ClassNotFoundException | LinkageError e) {
+        } catch(LinkageError | ClassNotFoundException e) {
             Assumptions.abort("game resource jars (lib/ext/builtin-res.jar) are not on the test classpath: " + e);
         }
     }
