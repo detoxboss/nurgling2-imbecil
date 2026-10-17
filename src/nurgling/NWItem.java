@@ -5,7 +5,10 @@ import haven.res.lib.itemtex.*;
 import haven.res.ui.stackinv.ItemStack;
 import nurgling.iteminfo.NSearchable;
 import nurgling.styles.TooltipStyle;
+import nurgling.tools.DisposableSlot;
+import nurgling.tools.ItemDurability;
 import nurgling.tools.NSearchItem;
+import nurgling.tools.TooltipRebuildGate;
 import nurgling.widgets.DropContainer;
 import org.json.*;
 
@@ -40,7 +43,7 @@ public class NWItem extends WItem
     /**
      * Custom tooltip class that wraps the image with padding
      */
-    public class PaddedTip implements Indir<Tex>, ItemInfo.InfoTip {
+    public class PaddedTip implements Indir<Tex>, ItemInfo.InfoTip, Disposable {
         private final List<ItemInfo> info;
         private final TexI tex;
 
@@ -56,6 +59,7 @@ public class NWItem extends WItem
         public GItem item() { return item; }
         public List<ItemInfo> info() { return info; }
         public Tex get() { return tex; }
+        public void dispose() { tex.dispose(); }
 
         private BufferedImage addPadding(BufferedImage img) {
             int padding = getTooltipPadding();
@@ -70,38 +74,82 @@ public class NWItem extends WItem
         }
     }
 
-    private PaddedTip nlongtip = null;
-    private List<ItemInfo> nttinfo = null;
-    private boolean nlastModshift = false;
-    private double nlastLongtipBuild = 0;
-    private static final double NLONGTIP_REBUILD_INTERVAL = 0.5;
+    private ItemDurability durability = null;
+    private int durabilitySeq = -1;
+
+    /** The item's wear, re-read only when its tooltip data changed. Null for items without durability. */
+    private ItemDurability durability() {
+        int seq = item.infoseq;
+        if (seq != durabilitySeq) {
+            try {
+                durability = ItemDurability.of(item.info());
+                durabilitySeq = seq;
+            } catch (Loading l) {
+                durability = null;  // not ready: try again next frame
+            }
+        }
+        return durability;
+    }
+
+    /**
+     * Drawn right after the item sprite, so item overlays (quality, counts, study timers) are drawn over
+     * it, and with the sprite's render state already reset so search/colour effects do not tint it.
+     */
+    @Override
+    public void drawmain(GOut g, GSprite spr) {
+        super.drawmain(g, spr);
+        if (Boolean.FALSE.equals(NConfig.get(NConfig.Key.showDurabilityBars)))
+            return;
+        ItemDurability d = durability();
+        if (d == null)
+            return;
+        g.defstate();
+        int pad = UI.scale(1);
+        int w = UI.scale(4);
+        Coord track = new Coord(pad, pad);
+        int h = sz.y - pad * 2;
+        g.chcolor(0, 0, 0, 170);
+        g.frect(track, new Coord(w, h));
+        int inner = h - pad * 2;
+        int fill = (int) Math.round(inner * d.remaining);
+        if (d.remaining > 0 || d.broken())
+            fill = Math.max(fill, pad);  // never vanish entirely: a broken item shows a red stub
+        g.chcolor(d.color);
+        g.frect(new Coord(pad * 2, pad + pad + inner - fill), new Coord(w - pad * 2, fill));
+        g.chcolor();
+    }
+
+    // The cached tooltip; the slot frees a texture as soon as it is replaced or dropped
+    private final DisposableSlot<PaddedTip> nlongtipSlot = new DisposableSlot<>();
+    private final TooltipRebuildGate nlongtipGate = new TooltipRebuildGate();
 
     @Override
     public Object tooltip(Coord c, Widget prev) {
         List<ItemInfo> info = item.info();
         if (info.size() < 1)
             return null;
-        // Reset tooltip cache if Shift state changed
-        if (ui.modshift != nlastModshift) {
-            nlongtip = null;
-            nlastModshift = ui.modshift;
-        }
-        if (info != nttinfo) {
-            nlongtip = null;
-            nttinfo = info;
-        }
+        // A changed Shift state or a replaced info list drops the cached tooltip (the gate tracks both);
+        // otherwise it is rebuilt only when the item asks for it, at most twice a second.
+        nlongtipGate.observe(ui.modshift, info);
+        if (!nlongtipGate.present())
+            nlongtipSlot.clear();
         double now = Utils.rtime();
-        boolean wantRebuild = (nlongtip == null) || ((NGItem) item).needlongtip();
-        boolean throttled = (nlongtip != null) && (now - nlastLongtipBuild < NLONGTIP_REBUILD_INTERVAL);
-        if (wantRebuild && !throttled) {
+        if (nlongtipGate.shouldRebuild(nlongtipSlot.get() == null || ((NGItem) item).needlongtip(), now)) {
             BufferedImage img = NTooltip.build(info);
             if (img != null) {
-                nlongtip = new PaddedTip(info, img);
+                nlongtipSlot.replace(new PaddedTip(info, img));
                 ((NGItem) item).consumedLongtip();
-                nlastLongtipBuild = now;
+                nlongtipGate.built(now);
             }
         }
-        return nlongtip;
+        return nlongtipSlot.get();
+    }
+
+    @Override
+    public void destroy()
+    {
+        nlongtipSlot.clear();
+        super.destroy();
     }
 
     @Override

@@ -459,6 +459,9 @@ public abstract class ItemInfo implements Comparable<ItemInfo> {
 		ret.add(new NQuestItem(owner));
 		ret.add(new NKilnInfo(owner));
 		ret.add(new NSmelterInfo(owner));
+		nurgling.iteminfo.NSpiceMarks spice = nurgling.iteminfo.NSpiceMarks.of(owner, ret);
+		if(spice != null)
+			ret.add(spice);
 	}
 	Collections.sort(ret);
 	return(ret);

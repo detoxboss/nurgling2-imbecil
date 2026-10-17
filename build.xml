@@ -351,6 +351,11 @@
         <pathelement path="build/classes" />
         <pathelement path="build/test-classes" />
         <path refid="client.classpath" />
+        <!-- Built-in game resources (fonts etc.), for tests that render real tooltips. Missing jars are
+             ignored here; those tests detect that and skip themselves. -->
+        <pathelement location="lib/ext/builtin-res.jar" />
+        <pathelement location="lib/ext/hafen-res.jar" />
+        <pathelement location="build/nurgling-res.jar" />
         <pathelement location="${junit-platform.jar}" />
       </classpath>
       <arg value="execute" />

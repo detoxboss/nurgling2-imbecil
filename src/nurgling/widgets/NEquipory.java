@@ -5,9 +5,11 @@ import haven.res.ui.tt.gast.Gast;
 import haven.res.ui.tt.wear.Wear;
 import nurgling.*;
 import nurgling.i18n.L10n;
+import nurgling.iteminfo.bonus.EquipmentBonuses;
 import nurgling.styles.UITheme;
 import nurgling.tasks.GetItem;
 import nurgling.tasks.WaitItemSpr;
+import nurgling.tools.EquipStats;
 import nurgling.tools.NAlias;
 import nurgling.tools.NParser;
 
@@ -36,6 +38,14 @@ public class NEquipory extends Equipory
     int percExp = -1;
     int hardArmor = -1;
     int softArmor = -1;
+    // Subtlety (Intelligence x Stealth); -1 / null while either attribute is unavailable
+    int subtlety = -1;
+    BufferedImage subtletyText = null;
+    private BufferedImage subtletyLabel = null;
+    // The character sheet's own Stealth icon (Subtlety is Intelligence x Stealth); null until it exists
+    private Tex subtletyIcon = null;
+    // Where the stat rows were last drawn, for the hover tooltip
+    private Coord statsPos = null, statsSz = null;
 
     // Toggle button textures for quick slot configuration
     private static final Tex addUp = new TexI(Resource.loadsimg("nurgling/hud/buttons/add/u"));
@@ -51,10 +61,70 @@ public class NEquipory extends Equipory
     // Queue for pending parasite checks
     private final ArrayList<NGItem> pendingParasiteChecks = new ArrayList<>();
 
+    // Collapsible "Equipment Bonuses" sidebar, to the right of the slot area
+    private final Coord baseSz;
+    private final EquipBonusPanel bonusPanel;
+    private final EquipBonusPanel.Toggle bonusToggle;
+    private boolean bonusesExpanded;
+    private long bonusSig = 0;
+    private boolean bonusDirty = true;
+    private double bonusRetryAt = 0;
+
     public NEquipory(long gobid)
     {
         super(gobid);
         initToggleButtons();
+        baseSz = sz;
+        int gap = UI.scale(4);
+        bonusToggle = add(new EquipBonusPanel.Toggle(() -> bonusesExpanded, this::toggleBonuses), new Coord(baseSz.x + gap, UI.scale(4)));
+        bonusPanel = add(new EquipBonusPanel(new Coord(UI.scale(EquipBonusPanel.WIDTH), baseSz.y)), new Coord(bonusToggle.c.x + bonusToggle.sz.x + gap, 0));
+        bonusesExpanded = Boolean.TRUE.equals(NConfig.get(NConfig.Key.equipBonusesExpanded));
+        applyBonusLayout();
+    }
+
+    private void toggleBonuses()
+    {
+        bonusesExpanded = !bonusesExpanded;
+        NConfig.set(NConfig.Key.equipBonusesExpanded, bonusesExpanded);
+        bonusDirty = true;
+        applyBonusLayout();
+        // the equipment window sized itself to this widget when it was first added
+        if (parent instanceof haven.Window)
+            parent.pack();
+    }
+
+    /** Show or hide the sidebar and size this widget (and so the window) to match. */
+    private void applyBonusLayout()
+    {
+        bonusPanel.show(bonusesExpanded);
+        int w = bonusToggle.c.x + bonusToggle.sz.x;
+        if (bonusesExpanded)
+            w = bonusPanel.c.x + bonusPanel.sz.x;
+        resize(new Coord(w, baseSz.y));
+    }
+
+    /**
+     * Recompute the totals only when the worn items or their tooltip data changed, or when a
+     * previous pass could not finish because item data was still loading.
+     */
+    private void updateBonuses()
+    {
+        if (!bonusesExpanded)
+            return;
+        java.util.List<EquipmentBonuses.Source> sources = new ArrayList<>();
+        for (GItem gi : wmap.keySet())
+            sources.add(EquipmentBonuses.of(gi));
+        long sig = EquipmentBonuses.signature(sources);
+        double now = Utils.rtime();
+        boolean changed = bonusDirty || sig != bonusSig;
+        boolean retry = bonusRetryAt != 0 && now >= bonusRetryAt;
+        if (!changed && !retry)
+            return;
+        EquipmentBonuses.Result res = EquipmentBonuses.compute(sources);
+        bonusPanel.setResult(res);
+        bonusSig = sig;
+        bonusDirty = false;
+        bonusRetryAt = res.retry() ? now + 0.5 : 0;
     }
 
     // Custom offset for STORE_HAT slot to avoid overlapping HEAD slot's button
@@ -298,33 +368,76 @@ public class NEquipory extends Equipory
                 this.percExp = percExp;
                 percExpText = fnd.render(String.valueOf(percExp)).img;
             }
+            updateSubtlety(gui);
+        }
+    }
+
+    /**
+     * Subtlety = Intelligence x Stealth, from the same computed attribute values as Detection. Shown
+     * only when both attributes are actually present, never as a 0 that merely means "not loaded yet".
+     */
+    private void updateSubtlety(GameUI gui) {
+        Integer intelligence = null, stealth = null;
+        Tex stealthIcon = null;
+        if (gui.chrwdg.battr != null) {
+            for (BAttrWnd.Attr attr : gui.chrwdg.battr.attrs) {
+                if (attr.nm.equals("int")) {
+                    intelligence = attr.attr.comp;
+                    break;
+                }
+            }
+        }
+        if (gui.chrwdg.sattr != null) {
+            for (SAttrWnd.SAttr attr : gui.chrwdg.sattr.attrs) {
+                if (attr.nm.equals("stealth")) {
+                    stealth = attr.attr.comp;
+                    stealthIcon = attr.img;
+                    break;
+                }
+            }
+        }
+        Integer product = EquipStats.subtlety(intelligence, stealth);
+        if (product == null) {
+            subtlety = -1;
+            subtletyText = null;
+            subtletyIcon = null;
+            return;
+        }
+        subtletyIcon = stealthIcon;
+        int value = product;
+        if (value != subtlety || subtletyText == null) {
+            subtlety = value;
+            subtletyText = fnd.render(String.valueOf(value)).img;
         }
     }
 
     public void updateTotalArmor() {
-        int hardArmor = 0;
-        int softArmor = 0;
-
+        java.util.List<EquipStats.Armored> worn = new ArrayList<>();
         for (Slots slot : Slots.values()) {
             WItem item = quickslots[slot.idx];
             if (item != null) {
                 NGItem gitem = (NGItem) item.item;
                 Wear wear = gitem.getInfo(Wear.class);
-                if(wear!=null) {
-                    if(wear.d!=wear.m) {
-                        hardArmor += gitem.hardArmor;
-                        softArmor += gitem.softArmor;
-                    }
+                if (wear != null) {
+                    worn.add(new EquipStats.Armored() {
+                        public Object id() {return gitem;}
+                        public boolean intact() {return wear.d != wear.m;}
+                        public int hard() {return gitem.hardArmor;}
+                        public int soft() {return gitem.softArmor;}
+                    });
                 }
             }
         }
+        // An item in several slots is one item: counted once (see EquipStats.armor)
+        int[] armor = EquipStats.armor(worn);
+        int hardArmor = armor[0];
+        int softArmor = armor[1];
         if(hardArmor!=this.hardArmor || softArmor!=this.softArmor) {
             this.hardArmor = hardArmor;
             this.softArmor = softArmor;
             hardSoft = fnd.render(String.format("%d/%d",hardArmor,softArmor)).img;
         }
     }
-
 
     @Override
     public void addchild (
@@ -377,6 +490,7 @@ public class NEquipory extends Equipory
         super.tick(dt);
         updatePercExpText();
         updateTotalArmor();
+        updateBonuses();
         checkPendingParasites();
     }
     
@@ -483,38 +597,112 @@ public class NEquipory extends Equipory
             drawStatsPanel(g);
             return;
         }
-        Coord textCoord = new Coord(sz.x - UI.scale(85), UI.scale(3));
+        statsPos = null;
+        Coord textCoord = new Coord(baseSz.x - UI.scale(85), UI.scale(3));
+        Coord first = textCoord;
+        int textW = 0;
+        int rows = 0;
         if (percExpText != null) {
             textCoord = textCoord.sub(percExpText.getWidth(), 0);
+            first = textCoord;
             g.image(eye, textCoord, UI.scale(20,20));
             g.image(percExpText, textCoord.add(UI.scale(21, -1)));
+            textW = Math.max(textW, percExpText.getWidth());
+            rows++;
         }
         if(hardSoft!=null) {
             textCoord = textCoord.add(UI.scale(0, 18));
             g.image(armor, textCoord, UI.scale(20, 20));
             g.image(hardSoft, textCoord.add(UI.scale(21, -1)));
+            textW = Math.max(textW, hardSoft.getWidth());
+            rows++;
+        }
+        if(subtletyText != null) {
+            // Not an extra row when the others are missing: it then takes the first position
+            textCoord = (rows == 0) ? textCoord : textCoord.add(UI.scale(0, 18));
+            if (rows == 0) first = textCoord;
+            if (subtletyIcon != null)
+                g.image(subtletyIcon, textCoord, UI.scale(20, 20));
+            else
+                g.image(subtletyLabel(), textCoord.add(UI.scale(1, 4)));
+            g.image(subtletyText, textCoord.add(UI.scale(21, -1)));
+            textW = Math.max(textW, subtletyText.getWidth());
+            rows++;
+        }
+        if (rows > 0) {
+            statsPos = first;
+            statsSz = new Coord(UI.scale(21) + textW, UI.scale(18) * rows);
         }
     }
 
-    /** New UI: perception/armor stats on a flat panel, right-aligned against the shoulder toggle. */
+    /** The row label standing in for an icon, in the same style as the stat values. */
+    private BufferedImage subtletyLabel() {
+        if (subtletyLabel == null) {
+            subtletyLabel = new PUtils.BlurFurn(new Text.Foundry(Text.sans.deriveFont(java.awt.Font.BOLD), 9).aa(true),
+                    UI.scale(1), UI.scale(1), Color.BLACK).render(L10n.get("equipment.stats.subtlety_short")).img;
+        }
+        return subtletyLabel;
+    }
+
+    private Text statsTip = null;
+    private String statsTipKey = null;
+
+    /** Hovering the stat rows explains how each number is derived. */
+    @Override
+    public Object tooltip(Coord c, Widget prev) {
+        if (statsPos != null && c.isect(statsPos, statsSz)) {
+            StringBuilder sb = new StringBuilder();
+            if (percExpText != null)
+                sb.append(L10n.get("equipment.stats.detection")).append('\n');
+            if (hardSoft != null)
+                sb.append(L10n.get("equipment.stats.armor")).append('\n');
+            if (subtletyText != null)
+                sb.append(L10n.get("equipment.stats.subtlety")).append('\n');
+            String text = sb.toString().trim();
+            if (!text.isEmpty()) {
+                if (statsTip == null || !text.equals(statsTipKey)) {
+                    statsTip = RichText.render(text, 0);
+                    statsTipKey = text;
+                }
+                return statsTip;
+            }
+        }
+        return super.tooltip(c, prev);
+    }
+
+    /** New UI: perception/armor/subtlety stats on a flat panel, right-aligned against the shoulder toggle. */
     private void drawStatsPanel(GOut g) {
-        if(percExpText == null && hardSoft == null) return;
+        statsPos = null;
+        if(percExpText == null && hardSoft == null && subtletyText == null) return;
         int pad = UI.scale(4), gap = UI.scale(4), icon = UI.scale(20);
-        int textW = Math.max(percExpText == null ? 0 : percExpText.getWidth(), hardSoft == null ? 0 : hardSoft.getWidth());
-        int textH = Math.max(percExpText == null ? 0 : percExpText.getHeight(), hardSoft == null ? 0 : hardSoft.getHeight());
+        int textW = Math.max(Math.max(percExpText == null ? 0 : percExpText.getWidth(), hardSoft == null ? 0 : hardSoft.getWidth()), subtletyText == null ? 0 : subtletyText.getWidth());
+        int textH = Math.max(Math.max(percExpText == null ? 0 : percExpText.getHeight(), hardSoft == null ? 0 : hardSoft.getHeight()), subtletyText == null ? 0 : subtletyText.getHeight());
         int rowH = Math.max(icon, textH);
-        int rows = (percExpText == null ? 0 : 1) + (hardSoft == null ? 0 : 1);
+        int rows = (percExpText == null ? 0 : 1) + (hardSoft == null ? 0 : 1) + (subtletyText == null ? 0 : 1);
         Coord panelSize = new Coord(pad * 2 + icon + gap + textW, pad * 2 + rows * rowH);
         int right = toggleButtons[Slots.SHOULDER.idx].c.x - UI.scale(6);
         Coord panelPos = new Coord(right - panelSize.x, UI.scale(3));
         UITheme.panel(g, panelPos, panelSize, UITheme.PANEL, UITheme.LINE);
+        statsPos = panelPos;
+        statsSz = panelSize;
         int y = panelPos.y + pad;
         if(percExpText != null) {
             drawStat(g, eye, eyeInset, percExpText, panelPos.x + pad, right - pad, y, icon, rowH);
             y += rowH;
         }
-        if(hardSoft != null)
+        if(hardSoft != null) {
             drawStat(g, armor, armorInset, hardSoft, panelPos.x + pad, right - pad, y, icon, rowH);
+            y += rowH;
+        }
+        if(subtletyText != null) {
+            if (subtletyIcon != null) {
+                g.image(subtletyIcon, new Coord(panelPos.x + pad, y + (rowH - icon) / 2), new Coord(icon, icon));
+            } else {
+                BufferedImage label = subtletyLabel();
+                g.image(label, new Coord(panelPos.x + pad + (icon - label.getWidth()) / 2, y + (rowH - label.getHeight()) / 2));
+            }
+            g.image(subtletyText, new Coord(right - pad - subtletyText.getWidth(), y + (rowH - subtletyText.getHeight()) / 2));
+        }
     }
 
     private void drawStat(GOut g, Tex icon, int sourceInset, BufferedImage value, int left, int right, int y, int iconSize, int rowH) {

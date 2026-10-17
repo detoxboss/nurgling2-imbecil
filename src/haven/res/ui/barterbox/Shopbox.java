@@ -35,6 +35,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
     private Button spipe, bpipe, bbtn, cbtn;
     private TextEntry pnume, pqe, cnte;
     public final boolean admin;
+    /* nurgling: the offered item's quality, shown beside it (the tooltip is the only other place it appears) */
+    private Text quality;
 
     public static Widget mkwidget(UI ui, Object... args) {
 	boolean adm = (Integer)args[0] != 0;
@@ -110,6 +112,9 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 		    sg.aimage(itemnum.get(), sqsz, 1, 1);
 		if(num != null)
 		    g.aimage(num.tex(), itemc.add(invsq.sz()).add(UI.scale(5, 0)), 0.0, 1.0);
+		Text ql = quality();
+		if(ql != null)
+		    g.aimage(ql.tex(), itemc.add(invsq.sz()).add(UI.scale(5, -18)), 0.0, 1.0);
 	    }
 	}
 
@@ -139,6 +144,25 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 	if(cinfo == null)
 	    cinfo = ItemInfo.buildinfo(this, info);
 	return(cinfo);
+    }
+
+    /* nurgling: the label for the offered item's quality. Cached per built info list, so it is rebuilt
+     * only when the server sends new item information; while that information is still loading (or
+     * has none) no label is shown, never the previous item's. */
+    private List<ItemInfo> qinfo;
+    private Text quality() {
+	List<ItemInfo> ci;
+	try {
+	    ci = info();
+	} catch(Loading l) {
+	    return(null);
+	}
+	if(ci != qinfo) {
+	    Double q = nurgling.iteminfo.OfferQuality.of(ci);
+	    quality = (q == null) ? null : Text.render(nurgling.iteminfo.OfferQuality.label(q));
+	    qinfo = ci;
+	}
+	return(quality);
     }
 
     public class IconTip implements Indir<Tex>, ItemInfo.InfoTip {
@@ -278,6 +302,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 	if(name == "res") {
 	    this.res = null;
 	    this.spr = null;
+	    this.qinfo = null;
+	    this.quality = null;
 	    if(args.length > 0) {
 		ResData res = new ResData(ui.sess.getresv(args[0]), Message.nil);
 		if(args.length > 1)
@@ -288,6 +314,8 @@ public class Shopbox extends Widget implements ItemInfo.SpriteOwner, GSprite.Own
 	} else if(name == "tt") {
 	    info = args;
 	    cinfo = null;
+	    qinfo = null;
+	    quality = null;
 	    longtip = null;
 	} else if(name == "n") {
 	    int num = Utils.iv(args[0]);

@@ -214,6 +214,57 @@ itself still succeeds. Confirm `NCore.autoSaveTableware` stays null at runtime (
 "protect eating, never block replacing" semantics — not merely if upstream adds any generic tableware
 auto-save behavior of its own.
 
+## Equipment bonuses, compact gilding tooltip, food predictions, durability bars, seasoning marks
+
+**Files:** `src/nurgling/NTooltip.java`, `NWItem.java`, `widgets/NEquipory.java`,
+`iteminfo/NFoodInfo.java`, new `iteminfo/bonus/**`, `iteminfo/food/**`, `iteminfo/FoodDetailsLayout.java`,
+`widgets/EquipBonusPanel.java`, `tools/{TooltipRebuildGate,ItemDurability,EquipStats,DisposableSlot}.java`,
+`iteminfo/NSpiceMarks.java`, `iteminfo/marks/**`, `widgets/options/QoL.java`, `NConfig.java`
+(`equipBonusesExpanded`, `showDurabilityBars`, `showSpiceMarks`), the `test` classpath in `build.xml`.
+Two small `src/haven/**` touch points, both in files that already carry nurgling code: `ItemInfo.buildinfo`
+(attaches `NSpiceMarks`) and the server-distributed `res/ui/barterbox/Shopbox` (quality label).
+
+**Fork behavior:** Hurricane-inspired features built on Nurgling's own classes — the full description,
+implementation map and verification status are in
+[`equipment-tooltip-enhancements.md`](equipment-tooltip-enhancements.md); only the sync hooks are listed here.
+
+**Minimum hooks that must survive a merge:**
+* `NTooltip`: `build(info, expandedOverride)`/`isExpandedView`/`renderGildingSummary` (compact view unless
+  Shift), and `extractStatsFromAttrMod` delegating to `AttrBonusCollector` (one extraction for summary and
+  breakdown). The `islots.isShifted = expandedView` assignment.
+* `NWItem`: the tooltip cache goes through `TooltipRebuildGate` and `DisposableSlot` (replaced tooltip textures
+  are disposed; `destroy()` clears it); `drawmain` draws the durability bar.
+* `haven/ItemInfo.buildinfo`: the three-line `NSpiceMarks.of(owner, ret)` block, inside the existing
+  `owner instanceof NGItem` block. Without it the seasoning marks silently stop appearing.
+* `res/ui/barterbox/Shopbox` (`@FromResource` v76, unchanged): the private `quality`/`qinfo` fields, the
+  `quality()` method with its call in `draw`, and the two invalidation lines in `uimsg` (`res`, `tt`); the rule is in
+  `nurgling.iteminfo.OfferQuality`. **Version dependency:** the label exists only while the local class is the
+  active one, i.e. while the annotation equals the server's `ui/barterbox` version. After a server bump the
+  server's class is used, the label silently disappears and the other Nurgling classes that read `Shopbox`
+  fields (`TransferToBarter`, `FindBarterStand`, `TakeItems2`, ...) are subject to the usual re-fetch procedure in
+  `resource-upgrade-strategy.md`; re-apply these lines after re-fetching, and never bump the annotation by hand.
+* `NFoodInfo`: `gui()` (the owning item's session UI — never reintroduce `NUtils.getGameUI()` for item
+  data), `modifiers()` and `calcExpectedFep()` delegating to `FoodModifiers` (the optimizer's value must
+  stay equal to the tooltip's "Expected FEP"), the Shift/`unmodified` handling and the `FoodDetailsLayout`
+  call in `layout()`. `NFoodInfo`'s `label`/`value`/`labelColored` are package-private, not private, for
+  `FoodDetailsLayout`. If upstream retunes the subscribed/verified coefficients they now live in
+  `FoodModifiers`, not `NFoodInfo`. Predicted hunger (`FoodModifiers.hungerMultiplier`) is satiation x salt x table
+  hunger modifier, and `NFoodInfo.layout` and `FoodDetailsLayout` both take it from `predictedHunger`.
+  `FoodModifierReader` must keep telling *loading* and *unreadable* apart
+  from *absent* (a neutral factor), and `NGameUI.getRealmMod()` delegates to its realm reader.
+* `NEquipory`: `baseSz` (legacy stat text is positioned from it, not `sz`), the sidebar toggle/panel and
+  `updateBonuses()` (retry only while `Result.retry()`), `updateSubtlety()`, `updateTotalArmor()` going through
+  `EquipStats.armor` (one count per worn item).
+* `build.xml` `test` target: the optional `lib/ext/builtin-res.jar`, `hafen-res.jar`,
+  `build/nurgling-res.jar` classpath entries (rendering tests skip themselves without them).
+
+**Verify:** `ant jar && ant test`; then in a client: hover a gilded item with and without Shift, hover a
+food with and without Shift, open Equipment and toggle the bonuses tab, check a worn tool shows its bar, hover
+a salted/peppered food for its marks, and open a barter stand.
+
+**Superseded when:** upstream ships an equivalent equipment-wide bonus total, compact gilding view or food
+modifier breakdown — then drop the matching piece and keep the rest.
+
 ## Fork configuration keys
 
 **File:** `src/nurgling/NConfig.java` (`Key` enum and its defaults block)
