@@ -20,8 +20,9 @@ delivery, authenticated HTTP upload, and crash-safe progress.
 
 ## One-time setup
 
-1. In Nurgling, create an NArea around all market barter stands. It should contain the stands and
-   no unrelated barter stands. `H4D Market` is the recommended name.
+1. In Nurgling, create one NArea around the entire present and future market floor. Empty expansion
+   space is fine; it must contain every commissioned market stand and no unrelated barter stands.
+   `H4D Market` is the recommended name.
 2. Make sure the market is reachable through the same ChunkNav data used by `Go to area`.
 3. Open **Nurgling Settings > Autorunner > Scenarios** and create or edit a Scenario.
 4. Add **H4D Market Scanner** and configure:
@@ -71,6 +72,9 @@ Each stand has an explicit `routeOrder`, allowing the scanner to follow the mark
 zig-zag without deriving a route from cluster numbers. The bot stops before opening a scan unless
 all currently configured stands are loaded. The API rejects
 completion of layout-aware scans unless every stand was uploaded, preventing partial snapshots.
+Only commissioned stands belong in the active server layout, so the route automatically skips
+unbuilt future slots. When new stands are constructed, append them to the server layout before the
+next scheduled scan; Nurgling then calibrates and inserts only those additions into the route.
 
 ChunkNav is used to reach the market NArea. Between stands, the local pathfinder continuously plans
 against loaded gob hitboxes, re-plans after a moving person or cargo blocks a step, and remembers
