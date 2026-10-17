@@ -1037,15 +1037,15 @@ override to retire.
 ## H4D Market Scanner
 
 **Files:** `src/nurgling/actions/bots/H4DMarketScanner.java`, `src/nurgling/market/MarketApiClient.java`,
-`src/nurgling/market/MarketScanSpool.java`, `src/nurgling/market/MarketStandOrdering.java`,
+`src/nurgling/market/MarketScanSpool.java`, `src/nurgling/market/StandMatcher.java`,
+`src/nurgling/market/MarketRoutePlanner.java`, `src/nurgling/market/AreaSweep*.java`,
 `src/nurgling/actions/bots/registry/BotRegistry.java` (`H4DMarketScanner.BOT_ID`).
 
 **Fork behavior:** A schedulable bot (`BotType` + `BotDescriptor` in `BotRegistry`, id constant
 `H4DMarketScanner.BOT_ID` = `"h4d_market_scan"`) that walks a village's barter stands
 (`gfx/terobjs/barterstand`), reads their listings via `Shopbox`/`ItemInfo`/`ItemTex`, and uploads a
 structured snapshot to an external market API (`MarketApiClient`), with local spooling for
-offline/retry (`MarketScanSpool`) and stand-ordering logic (`MarketStandOrdering`) so repeated scans
-visit stands in a stable, efficient order.
+offline/retry (`MarketScanSpool`). Stand identity is the server-owned permanent id bound to a physical position (map grid id + offset, `StandMatcher`), never customer-map coordinates; the area is swept in sections (`AreaSweep`) and visited in a cluster-level zig-zag (`MarketRoutePlanner`).
 
 **Why:** Lets a village operator keep an external market index up to date automatically on a
 schedule, instead of manually re-entering stand contents.
