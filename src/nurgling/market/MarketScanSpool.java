@@ -12,33 +12,32 @@ import java.util.Set;
 
 /** Crash-safe progress for a resumable, not-yet-public market scan. */
 public final class MarketScanSpool {
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
 
     private final Path path;
     public String endpoint;
     public int areaId;
-    public int standCount;
     public int layoutVersion;
     public String scanId;
+    /** Permanent stand ids already acknowledged by the server. */
     public final Set<Integer> uploaded = new LinkedHashSet<>();
-    public Integer pendingHouseId;
+    public Integer pendingStandId;
     public JSONObject pendingStand;
 
     private MarketScanSpool(Path path) {
         this.path = path;
     }
 
-    public static MarketScanSpool fresh(Path path, String endpoint, int areaId, int standCount,
-                                        int layoutVersion, String scanId) {
+    public static MarketScanSpool fresh(Path path, String endpoint, int areaId, int layoutVersion, String scanId) {
         MarketScanSpool spool = new MarketScanSpool(path);
         spool.endpoint = endpoint;
         spool.areaId = areaId;
-        spool.standCount = standCount;
         spool.layoutVersion = layoutVersion;
         spool.scanId = scanId;
         return spool;
     }
 
+    /** Older spool versions (house ids under the previous numbering) are never resumed. */
     public static MarketScanSpool load(Path path) {
         String content = NFileUtils.readWithBackupFallback(path.toString());
         if (content == null) {
@@ -52,17 +51,16 @@ public final class MarketScanSpool {
             MarketScanSpool spool = new MarketScanSpool(path);
             spool.endpoint = json.getString("endpoint");
             spool.areaId = json.getInt("areaId");
-            spool.standCount = json.getInt("standCount");
             spool.layoutVersion = json.getInt("layoutVersion");
             spool.scanId = json.getString("scanId");
-            JSONArray uploaded = json.optJSONArray("uploadedHouseIds");
+            JSONArray uploaded = json.optJSONArray("uploadedStandIds");
             if (uploaded != null) {
                 for (int index = 0; index < uploaded.length(); index++) {
                     spool.uploaded.add(uploaded.getInt(index));
                 }
             }
-            if (!json.isNull("pendingHouseId") && json.has("pendingStand")) {
-                spool.pendingHouseId = json.getInt("pendingHouseId");
+            if (!json.isNull("pendingStandId") && json.has("pendingStand")) {
+                spool.pendingStandId = json.getInt("pendingStandId");
                 spool.pendingStand = json.getJSONObject("pendingStand");
             }
             return spool;
@@ -72,22 +70,39 @@ public final class MarketScanSpool {
         }
     }
 
-    public boolean matches(String endpoint, int areaId, int standCount, int layoutVersion) {
-        return this.endpoint.equals(endpoint) && this.areaId == areaId && this.standCount == standCount
-                && this.layoutVersion == layoutVersion;
+    /**
+     * Resumable only for the same endpoint, area and layout version. A layout change (stands
+     * commissioned, renumbered or remapped) begins a new scan: the server refuses to complete a scan
+     * started under an older layout, and identities may have changed.
+     */
+    public boolean matches(String endpoint, int areaId, int layoutVersion) {
+        return this.endpoint.equals(endpoint) && this.areaId == areaId && this.layoutVersion == layoutVersion;
     }
 
-    public void setPending(int houseId, JSONObject stand) throws IOException {
-        pendingHouseId = houseId;
+    /** Every recorded stand must still be a commissioned stand of the current layout. */
+    public boolean isValidFor(Set<Integer> boundStandIds) {
+        if (scanId == null || scanId.isEmpty()) {
+            return false;
+        }
+        for (Integer standId : uploaded) {
+            if (standId == null || !boundStandIds.contains(standId)) {
+                return false;
+            }
+        }
+        return pendingStandId == null || (boundStandIds.contains(pendingStandId) && pendingStand != null);
+    }
+
+    public void setPending(int standId, JSONObject stand) throws IOException {
+        pendingStandId = standId;
         pendingStand = stand;
         save();
     }
 
     public void acknowledgePending() throws IOException {
-        if (pendingHouseId != null) {
-            uploaded.add(pendingHouseId);
+        if (pendingStandId != null) {
+            uploaded.add(pendingStandId);
         }
-        pendingHouseId = null;
+        pendingStandId = null;
         pendingStand = null;
         save();
     }
@@ -97,11 +112,10 @@ public final class MarketScanSpool {
         json.put("version", VERSION);
         json.put("endpoint", endpoint);
         json.put("areaId", areaId);
-        json.put("standCount", standCount);
         json.put("layoutVersion", layoutVersion);
         json.put("scanId", scanId);
-        json.put("uploadedHouseIds", new JSONArray(uploaded));
-        json.put("pendingHouseId", pendingHouseId == null ? JSONObject.NULL : pendingHouseId);
+        json.put("uploadedStandIds", new JSONArray(uploaded));
+        json.put("pendingStandId", pendingStandId == null ? JSONObject.NULL : pendingStandId);
         json.put("pendingStand", pendingStand == null ? JSONObject.NULL : pendingStand);
         NFileUtils.writeAtomically(path.toString(), json.toString(2));
     }
