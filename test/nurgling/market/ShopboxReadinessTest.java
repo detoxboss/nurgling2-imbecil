@@ -127,27 +127,91 @@ class ShopboxReadinessTest {
     }
 
     @Test
-    void aSilentSlotNextToSyncedOnesBecomesEmptyOnlyAfterTheStandGoesQuiet() {
+    void quietNeverAuthorisesEmptyByDefault() {
         FakeSlot synced = new FakeSlot().configured();
         synced.productSprite = synced.priceSprite = synced.names = true;
         List<FakeSlot> slots = new ArrayList<>();
         slots.add(synced);
         for (int index = 1; index < 5; index++) slots.add(new FakeSlot().silent());
 
-        assertFalse(ShopboxReadiness.assess(slots, ShopboxReadiness.QUIET_MS - 1).ready());
-        ShopboxReadiness.Verdict verdict = ShopboxReadiness.assess(slots, ShopboxReadiness.QUIET_MS);
+        for (long quiet : new long[]{0, ShopboxReadiness.QUIET_MS, 60_000}) {
+            ShopboxReadiness.Verdict verdict = ShopboxReadiness.assess(slots, quiet);
+            assertFalse(verdict.ready(), "quiet=" + quiet);
+            assertEquals(4, verdict.pending());
+        }
+    }
+
+    /**
+     * Reproducer from review: slot 1 gets its offer and is ready; slots 2-5 have received neither message. After
+     * 1.2 s of quiet they were being treated as empty, so a stand could be published before slot 2's configured
+     * offer arrived at 2 s, replacing its previous listing.
+     */
+    @Test
+    void aConfiguredOfferThatArrivesAfterTheQuietPeriodIsNotLost() throws Exception {
+        FakeSlot first = new FakeSlot().configured();
+        first.productSprite = first.priceSprite = first.names = true;
+        FakeSlot second = new FakeSlot().silent();                         // its messages arrive at t = 2000 ms
+        List<FakeSlot> slots = new ArrayList<>();
+        slots.add(first);
+        slots.add(second);
+        for (int index = 2; index < 5; index++) slots.add(new FakeSlot().clearedByServer());
+        FakeClock clock = new FakeClock();
+        List<ShopboxReadiness.Verdict> published = new ArrayList<>();
+        clock.onSleep = () -> {
+            // Would the scanner have been allowed to publish at this moment?
+            ShopboxReadiness.Verdict now = ShopboxReadiness.assess(slots, clock.now);
+            if (now.ready()) published.add(now);
+            if (clock.now == 2_000) {
+                second.product = second.price = second.heardProduct = second.heardPrice = true;
+            }
+            if (clock.now == 2_400) {
+                second.productSprite = second.priceSprite = second.names = true;
+            }
+        };
+
+        ShopboxReadiness.Verdict verdict = ShopboxReadiness.await(() -> slots, () -> clock.now, 15_000, 100, clock);
+
         assertTrue(verdict.ready());
-        assertEquals(ShopboxReadiness.State.READY, verdict.states.get(0));
+        assertEquals(ShopboxReadiness.State.READY, verdict.states.get(1));   // the late offer is present
+        assertEquals(0, published.size(), "the stand must never be publishable before the late offer is ready");
+        assertTrue(clock.now >= 2_400);
     }
 
     @Test
+    void aSlotThatNeverReceivesMessagesTimesOutAsNotReadyInsteadOfEmpty() throws Exception {
+        FakeSlot first = new FakeSlot().configured();
+        first.productSprite = first.priceSprite = first.names = true;
+        List<FakeSlot> slots = new ArrayList<>();
+        slots.add(first);
+        for (int index = 1; index < 5; index++) slots.add(new FakeSlot().silent());
+        FakeClock clock = new FakeClock();
+
+        ShopboxReadiness.Verdict verdict = ShopboxReadiness.await(() -> slots, () -> clock.now, 15_000, 100, clock);
+
+        assertFalse(verdict.ready());                    // => unread, previous listings survive
+        assertEquals(4, verdict.pending());
+    }
+
+    @Test
+    void theSilenceFallbackIsAvailableOnlyWhenExplicitlyEnabled() {
+        FakeSlot synced = new FakeSlot().configured();
+        synced.productSprite = synced.priceSprite = synced.names = true;
+        List<FakeSlot> slots = new ArrayList<>();
+        slots.add(synced);
+        for (int index = 1; index < 5; index++) slots.add(new FakeSlot().silent());
+
+        assertFalse(ShopboxReadiness.assess(slots, ShopboxReadiness.QUIET_MS - 1, true).ready());
+        assertTrue(ShopboxReadiness.assess(slots, ShopboxReadiness.QUIET_MS, true).ready());
+        assertFalse(ShopboxReadiness.assess(slots, ShopboxReadiness.QUIET_MS, false).ready());
+    }
+@Test
     void aProductWhosePriceMessageHasNotArrivedIsPendingAndOnceHeardIsAConfirmedIncompleteOffer() {
         FakeSlot slot = new FakeSlot();
         slot.product = slot.heardProduct = true;
 
-        assertEquals(ShopboxReadiness.State.PENDING, ShopboxReadiness.assess(slot, true, 5_000));
+        assertEquals(ShopboxReadiness.State.PENDING, ShopboxReadiness.assess(slot, true, 5_000, false));
         slot.heardPrice = true; // "price" message arrived with no price
-        assertEquals(ShopboxReadiness.State.INACTIVE, ShopboxReadiness.assess(slot, true, 5_000));
+        assertEquals(ShopboxReadiness.State.INACTIVE, ShopboxReadiness.assess(slot, true, 5_000, false));
     }
 
     @Test
@@ -175,6 +239,8 @@ class ShopboxReadinessTest {
         assertFalse(log.heard(first, "tt"));
         assertFalse(log.heard(second, "res"));
         assertEquals(250, log.lastMessageAt(first));
+        assertEquals("res@+0ms price@+150ms", log.trace(first));
+        assertEquals("(no messages)", log.trace(second));
         assertEquals(0, log.lastMessageAt(second));
     }
 }

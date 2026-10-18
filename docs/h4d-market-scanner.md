@@ -56,6 +56,8 @@ id is persistent (the same property NArea and the mining overlay memory rely on)
    | `sweepSpacingTiles` | `40` | Spacing of the waypoints used to search the area |
    | `maxStandAttempts` | `3` | Bounded attempts per stand (1–6) before it is recorded as unreachable |
    | `publishPartial` | `true` | `false` leaves the scan open (resumable) instead of publishing carried-forward data |
+   | `traceShopbox` | `false` | `true` logs, for every captured stand, each slot's state and the ordered server messages it received (e.g. `res@+0ms tt@+12ms price@+40ms`); failures always include this trace |
+   | `emptySlotSilenceFallback` | `false` | **Diagnostic only, off by default.** `true` lets 1.2 s of silence mark a message-less slot empty once another slot has synced. Enable it only after an in-game trace shows that empty slots really receive no messages |
 
 5. Commission the stands once (next section), then run the Scenario and select it in HnH Scheduler.
 
@@ -111,11 +113,12 @@ neighbouring clusters can be close together.
    scanner records the server's `res`/`tt`/`n`/`price` messages per widget through the existing `UiEvents`
    seam (`ShopMessageLog`, registered before the window opens; no change to the server-distributed Shopbox
    class) and classifies each slot:
-   - *empty* — the server's `res` and `price` messages were received and cleared the slot (or the stand has
-     demonstrably synced and gone quiet for 1.2 s);
+   - *empty* — the server's `res` **and** `price` messages for that slot were received and cleared it. Silence is
+     never evidence of an empty slot: a configured offer can arrive seconds after the others, so neither a
+     timeout nor a quiet period authorises clearing prior listings;
    - *inactive* — product without price or the reverse, confirmed by the received messages;
    - *ready* — product and price known, both sprites constructible, names available;
-   - *pending* — anything else, including a window that has heard nothing yet.
+   - *pending* — anything else, including any slot that has received no message yet.
    The wait is bounded (15 s). If it times out the stand is **not** published as an empty scan: it is recorded
    as unread and its previous listing is kept (carried forward by the server).
 8. **Publish** (below).
@@ -182,6 +185,6 @@ Scheduler after changing it on Windows). `H4D_MARKET_ENDPOINT` overrides the URL
   shapes, extra/unknown stands, identity preservation, missing and moved stands, independence from
   customer-map data, route ordering, area sweep over a simulated partially-loaded world, spool resume
   rules, Buy-button rule, discovery report.
-- **Not verified in-game** (also: whether the server really sends es/price for empty slots, which decides how often an empty stand needs the 1.2 s quiet fallback): the live `GameSource` (grid lookup, `Finder`-style gob scan, `PathFinder`
+- **Not verified in-game** (including whether the server sends `res`/`price` for empty slots: nothing available to the author proves it): the live `GameSource` (grid lookup, `Finder`-style gob scan, `PathFinder`
   and ChunkNav legs, `Shopbox` capture) compiles and reuses existing mechanisms but has only been
   exercised through its pure collaborators. See the PR description for the in-game test checklist.

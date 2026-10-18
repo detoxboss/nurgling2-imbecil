@@ -342,7 +342,7 @@ public class H4DMarketScanner implements Action {
                         config.standTolerance, new LiveWorld(gui, area), REACQUIRE_TIMEOUT_MS, 250,
                         ShopboxReadiness.SYSTEM);
                 if (live.found()) {
-                    return captureStand(gui, live.stand.value, learnedRouteBlocks, messages);
+                    return captureStand(gui, live.stand.value, learnedRouteBlocks, messages, config);
                 }
                 reason = live.failure;
             } catch (InterruptedException interrupted) {
@@ -360,7 +360,7 @@ public class H4DMarketScanner implements Action {
     }
 
     private static CapturedStand captureStand(NGameUI gui, Gob stand, List<Coord2d> learnedRouteBlocks,
-                                              ShopMessageLog messages) throws Exception {
+                                              ShopMessageLog messages, Config config) throws Exception {
         PathFinder pathFinder = new PathFinder(stand);
         // Re-plan around live gob hitboxes and remember any unmodelled stall point for the rest
         // of this route. This is especially important for players and bill-of-sale cargo left in aisles.
@@ -380,7 +380,7 @@ public class H4DMarketScanner implements Action {
             throw new IOException("Barter Stand window did not open");
         }
         try {
-            return waitForCapture(window, stand, messages);
+            return waitForCapture(gui, window, stand, messages, config);
         } finally {
             new CloseTargetWindow(window).run(gui);
         }
@@ -402,7 +402,9 @@ public class H4DMarketScanner implements Action {
      * lifecycle, then captures. A stand that never becomes ready is NOT published as empty: the timeout is
      * reported as a failed attempt so the stand ends up unread and its previous listing is kept.
      */
-    private static CapturedStand waitForCapture(Window window, Gob stand, ShopMessageLog messages) throws Exception {
+    private static CapturedStand waitForCapture(NGameUI gui, Window window, Gob stand, ShopMessageLog messages,
+                                                Config config) throws Exception {
+        boolean silenceFallback = config.emptySlotSilenceFallback;
         long deadline = System.currentTimeMillis() + CAPTURE_TIMEOUT_MS;
         ShopboxReadiness.Verdict verdict = null;
         while (System.currentTimeMillis() < deadline) {
@@ -415,8 +417,11 @@ public class H4DMarketScanner implements Action {
                     last = Math.max(last, messages.lastMessageAt(box));
                 }
                 long quiet = last == 0 ? 0 : System.currentTimeMillis() - last;
-                verdict = ShopboxReadiness.assess(slots, quiet);
+                verdict = ShopboxReadiness.assess(slots, quiet, silenceFallback);
                 if (verdict.ready()) {
+                    if (config.traceShopbox) {
+                        gui.msg("H4D Market Scanner [trace] " + verdict.describe() + " " + traces(boxes, messages));
+                    }
                     try {
                         return capture(boxes, slots, verdict, stand);
                     } catch (Loading loading) {
@@ -426,9 +431,21 @@ public class H4DMarketScanner implements Action {
             }
             Thread.sleep(100);
         }
+        List<Shopbox> lastBoxes = shopboxes(window);
+        // Diagnostic for an in-game trace: which messages each slot did (not) receive.
         throw new IOException("Barter stand did not finish loading ("
                 + (verdict == null ? "fewer than five Shopbox widgets" : verdict.pending() + " slot(s) pending "
-                + verdict.describe()) + "); keeping its previous listing");
+                + verdict.describe()) + "; messages " + traces(lastBoxes, messages)
+                + "); keeping its previous listing");
+    }
+
+    private static String traces(List<Shopbox> boxes, ShopMessageLog messages) {
+        StringBuilder text = new StringBuilder();
+        for (int slot = 0; slot < boxes.size(); slot++) {
+            text.append(slot > 0 ? " | " : "").append("slot").append(slot).append(": ").append(messages.trace(boxes.get(slot)));
+        }
+        return text.toString();
+
     }
 
     private static CapturedStand capture(List<Shopbox> boxes, List<ShopSlot> slots, ShopboxReadiness.Verdict verdict,
@@ -919,9 +936,12 @@ public class H4DMarketScanner implements Action {
         final int sweepSpacingTiles;
         final int maxStandAttempts;
         final boolean publishPartial;
+        final boolean emptySlotSilenceFallback;
+        final boolean traceShopbox;
 
         private Config(Integer areaId, String endpoint, String token, double standTolerance,
-                       int sweepSpacingTiles, int maxStandAttempts, boolean publishPartial) {
+                       int sweepSpacingTiles, int maxStandAttempts, boolean publishPartial,
+                       boolean emptySlotSilenceFallback, boolean traceShopbox) {
             this.areaId = areaId;
             this.endpoint = endpoint;
             this.token = token;
@@ -929,6 +949,8 @@ public class H4DMarketScanner implements Action {
             this.sweepSpacingTiles = sweepSpacingTiles;
             this.maxStandAttempts = maxStandAttempts;
             this.publishPartial = publishPartial;
+            this.emptySlotSilenceFallback = emptySlotSilenceFallback;
+            this.traceShopbox = traceShopbox;
         }
 
         static Config from(Map<String, Object> settings) {
@@ -948,7 +970,9 @@ public class H4DMarketScanner implements Action {
             int spacing = Math.max(8, integer(settings.get("sweepSpacingTiles"), AreaSweepPlanner.DEFAULT_SPACING_TILES));
             int attempts = Math.max(1, Math.min(6, integer(settings.get("maxStandAttempts"), 3)));
             boolean partial = !"false".equalsIgnoreCase(String.valueOf(settings.getOrDefault("publishPartial", "true")));
-            return new Config(areaId, endpoint, token, tolerance, spacing, attempts, partial);
+            boolean silence = "true".equalsIgnoreCase(String.valueOf(settings.getOrDefault("emptySlotSilenceFallback", "false")));
+            boolean trace = "true".equalsIgnoreCase(String.valueOf(settings.getOrDefault("traceShopbox", "false")));
+            return new Config(areaId, endpoint, token, tolerance, spacing, attempts, partial, silence, trace);
         }
 
         private static String string(Object value, String fallback) {

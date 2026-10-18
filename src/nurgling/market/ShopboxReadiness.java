@@ -15,7 +15,11 @@ import java.util.function.Supplier;
  * loading.
  */
 public final class ShopboxReadiness {
-    /** Silence on every slot for this long, after the server clearly started talking, confirms an untouched slot is empty. */
+    /**
+     * Only used when the silence fallback is explicitly enabled (OFF by default). Silence is NOT evidence of an
+     * empty slot: a configured offer can arrive seconds after other slots finished, so a quiet period alone must
+     * never authorise treating a slot as empty (and thereby replacing previously published listings).
+     */
     public static final long QUIET_MS = 1200;
 
     private ShopboxReadiness() {
@@ -78,7 +82,7 @@ public final class ShopboxReadiness {
         }
     }
 
-    public static State assess(SlotView slot, boolean standSynced, long quietMs) {
+    public static State assess(SlotView slot, boolean standSynced, long quietMs, boolean silenceFallback) {
         boolean product = slot.hasProduct();
         boolean price = slot.hasPrice();
         if (product && price) {
@@ -94,11 +98,16 @@ public final class ShopboxReadiness {
         if (slot.heardProduct() && slot.heardPrice()) {
             return State.EMPTY;
         }
-        // No message for this slot at all: empty only once the stand has demonstrably synced and gone quiet.
-        return standSynced && quietMs >= QUIET_MS ? State.EMPTY : State.PENDING;
+        // No message for this slot at all. By default that stays PENDING (and times out as unread). Only an explicit,
+        // opt-in fallback may read sustained silence as empty.
+        return silenceFallback && standSynced && quietMs >= QUIET_MS ? State.EMPTY : State.PENDING;
     }
 
     public static Verdict assess(List<? extends SlotView> slots, long quietMs) {
+        return assess(slots, quietMs, false);
+    }
+
+    public static Verdict assess(List<? extends SlotView> slots, long quietMs, boolean silenceFallback) {
         boolean synced = false;
         for (SlotView slot : slots) {
             if (slot.heardProduct() && slot.heardPrice()) {
@@ -108,7 +117,7 @@ public final class ShopboxReadiness {
         }
         List<State> states = new ArrayList<>();
         for (SlotView slot : slots) {
-            states.add(assess(slot, synced, quietMs));
+            states.add(assess(slot, synced, quietMs, silenceFallback));
         }
         return new Verdict(states);
     }
@@ -137,11 +146,16 @@ public final class ShopboxReadiness {
      */
     public static Verdict await(Supplier<List<? extends SlotView>> slots, Supplier<Long> quietMs, long timeoutMs,
                                 long pollMs, Clock clock) throws InterruptedException {
+        return await(slots, quietMs, timeoutMs, pollMs, clock, false);
+    }
+
+    public static Verdict await(Supplier<List<? extends SlotView>> slots, Supplier<Long> quietMs, long timeoutMs,
+                                long pollMs, Clock clock, boolean silenceFallback) throws InterruptedException {
         long deadline = clock.now() + timeoutMs;
-        Verdict verdict = assess(slots.get(), quietMs.get());
+        Verdict verdict = assess(slots.get(), quietMs.get(), silenceFallback);
         while (!verdict.ready() && clock.now() < deadline) {
             clock.sleep(pollMs);
-            verdict = assess(slots.get(), quietMs.get());
+            verdict = assess(slots.get(), quietMs.get(), silenceFallback);
         }
         return verdict;
     }

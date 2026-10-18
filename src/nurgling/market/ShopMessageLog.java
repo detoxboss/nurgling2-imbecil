@@ -19,6 +19,8 @@ public final class ShopMessageLog implements UiEvents.Listener {
     private static final class Entry {
         final Set<String> heard = new HashSet<>();
         long lastAt;
+        long firstAt;
+        final java.util.List<String> trace = new java.util.ArrayList<>();
     }
 
     private final Map<Object, Entry> entries = Collections.synchronizedMap(new WeakHashMap<>());
@@ -34,7 +36,13 @@ public final class ShopMessageLog implements UiEvents.Listener {
         }
         synchronized (entries) {
             Entry entry = entries.computeIfAbsent(widget, ignored -> new Entry());
+            if (entry.trace.isEmpty()) {
+                entry.firstAt = at;
+            }
             entry.heard.add(message);
+            if (entry.trace.size() < 40) {
+                entry.trace.add(message + "@+" + (at - entry.firstAt) + "ms");
+            }
             entry.lastAt = at;
         }
     }
@@ -43,6 +51,14 @@ public final class ShopMessageLog implements UiEvents.Listener {
         synchronized (entries) {
             Entry entry = entries.get(widget);
             return entry != null && entry.heard.contains(message);
+        }
+    }
+
+    /** Diagnostic: the ordered server messages this widget received, e.g. "res@+0ms tt@+12ms price@+40ms" (empty if none). */
+    public String trace(Object widget) {
+        synchronized (entries) {
+            Entry entry = entries.get(widget);
+            return entry == null || entry.trace.isEmpty() ? "(no messages)" : String.join(" ", entry.trace);
         }
     }
 
