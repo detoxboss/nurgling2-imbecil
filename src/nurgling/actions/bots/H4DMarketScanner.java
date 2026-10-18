@@ -33,7 +33,11 @@ import nurgling.market.MarketOffers;
 import nurgling.market.MarketRoutePlanner;
 import nurgling.market.MarketScanSpool;
 import nurgling.market.PhysicalRef;
+import nurgling.market.ShopMessageLog;
+import nurgling.market.ShopboxReadiness;
 import nurgling.market.StandMatcher;
+import nurgling.market.StandReacquirer;
+import nurgling.plugins.UiEvents;
 import nurgling.navigation.ChunkNavManager;
 import nurgling.tools.Finder;
 import nurgling.tools.NAlias;
@@ -80,6 +84,11 @@ public class H4DMarketScanner implements Action {
     private static final NAlias STAND_ALIAS = new NAlias(STAND_RESOURCE);
     private static final long CAPTURE_TIMEOUT_MS = 15_000;
     private static final long WAYPOINT_SETTLE_MS = 1_500;
+    private static final long REACQUIRE_TIMEOUT_MS = 8_000;
+    /** A waypoint or saved stand position counts as reached within this distance of the requested spot. */
+    private static final double ARRIVAL_UNITS = MCache.tilesz.x * 6;
+    /** Farther than this from a loaded target, local pathing is not trusted; ChunkNav goes first. */
+    private static final double LOCAL_RANGE_UNITS = MCache.tilesz.x * 25;
     private static final Map<Integer, Object> AREA_LOCKS = new ConcurrentHashMap<>();
 
     private final Map<String, Object> settings;
@@ -121,6 +130,18 @@ public class H4DMarketScanner implements Action {
     }
 
     private Results runLocked(NGameUI gui, NArea area, Config config) throws Exception {
+        // Records the server's Shopbox messages for the whole run, so a Barter Stand window's first
+        // messages are never missed (they arrive right as the window opens).
+        ShopMessageLog messages = new ShopMessageLog();
+        UiEvents.addListener(messages);
+        try {
+            return runWithMessages(gui, area, config, messages);
+        } finally {
+            UiEvents.removeListener(messages);
+        }
+    }
+
+    private Results runWithMessages(NGameUI gui, NArea area, Config config, ShopMessageLog messages) throws Exception {
         gui.msg("H4D Market Scanner: navigating to " + area.name);
         if (NUtils.player() == null) {
             return Results.ERROR("H4D Market Scanner: player is not available");
@@ -142,7 +163,7 @@ public class H4DMarketScanner implements Action {
 
         // 2. A stand that is merely not loaded right now is unknown, not gone: look once more where it was.
         if (!match.missing.isEmpty()) {
-            List<StandMatcher.Detected<Gob>> recovered = recoverMissing(gui, source, match.missing, sweep.stands);
+            List<StandMatcher.Detected<Gob>> recovered = recoverMissing(gui, area, source, match.missing, sweep.stands);
             if (!recovered.isEmpty()) {
                 match = StandMatcher.match(layout, recovered, config.standTolerance, StandMatcher.DEFAULT_MOVE_RADIUS);
             }
@@ -194,7 +215,7 @@ public class H4DMarketScanner implements Action {
         // One recovery is allowed if the VPS was rebuilt and no longer knows the persisted scan.
         for (int recovery = 0; recovery < 2; recovery++) {
             try {
-                Set<Integer> unreachable = executeRoute(gui, client, spool, route, layout, config);
+                Set<Integer> unreachable = executeRoute(gui, client, spool, route, area, config, messages);
                 return publish(gui, client, spool, layout, match, unreachable, config);
             } catch (MarketApiClient.ApiException apiFailure) {
                 if (apiFailure.status != 404 || recovery > 0) {
@@ -265,8 +286,8 @@ public class H4DMarketScanner implements Action {
 
     /** @return stand ids that stayed unreachable after the bounded retries. */
     private static Set<Integer> executeRoute(NGameUI gui, MarketApiClient client, MarketScanSpool spool,
-                                             List<StandMatcher.Matched<Gob>> route, MarketLayout layout,
-                                             Config config) throws Exception {
+                                             List<StandMatcher.Matched<Gob>> route, NArea area,
+                                             Config config, ShopMessageLog messages) throws Exception {
         if (spool.pendingStandId != null && spool.pendingStand != null) {
             gui.msg("H4D Market Scanner: retrying stand " + spool.pendingStandId);
             client.putStand(spool.scanId, spool.pendingStandId, spool.pendingStand);
@@ -284,7 +305,7 @@ public class H4DMarketScanner implements Action {
             }
             gui.msg("H4D Market Scanner: scanning " + match.stand.standKey + " (" + (done + 1) + " of "
                     + (route.size() + unreachable.size()) + ")");
-            CapturedStand captured = captureWithRetries(gui, match, learnedRouteBlocks, config);
+            CapturedStand captured = captureWithRetries(gui, area, match, learnedRouteBlocks, config, messages);
             if (captured == null) {
                 unreachable.add(standId);
                 gui.msg("H4D Market Scanner: giving up on " + match.stand.standKey + " after "
@@ -305,35 +326,41 @@ public class H4DMarketScanner implements Action {
     }
 
     /**
-     * Bounded attempts per stand: people and cargo move, so a failed approach waits, refreshes the stand's
-     * live object by its physical reference and re-plans. Returns null (never loops forever) when every
-     * attempt failed, so the caller records the stand as unreachable.
+     * Bounded attempts per stand. Every attempt starts by re-acquiring the live stand from its SAVED physical
+     * reference (the Gob collected during the sweep may have been unloaded since): navigate toward the grid and
+     * offset (ChunkNav when needed), wait for the section to load, then require exactly one stand within
+     * tolerance. Only then does local obstacle-aware navigation and opening happen. Returns null (never loops
+     * forever) when every attempt failed, so the caller records the stand as unread and its last listing survives.
      */
-    private static CapturedStand captureWithRetries(NGameUI gui, StandMatcher.Matched<Gob> match,
-                                                     List<Coord2d> learnedRouteBlocks, Config config) throws Exception {
-        Gob stand = match.detected.value;
+    private static CapturedStand captureWithRetries(NGameUI gui, NArea area, StandMatcher.Matched<Gob> match,
+                                                     List<Coord2d> learnedRouteBlocks, Config config,
+                                                     ShopMessageLog messages) throws Exception {
         for (int attempt = 1; attempt <= config.maxStandAttempts; attempt++) {
+            String reason;
             try {
-                return captureStand(gui, stand, learnedRouteBlocks);
+                StandReacquirer.Result<Gob> live = StandReacquirer.reacquire(match.stand.physical,
+                        config.standTolerance, new LiveWorld(gui, area), REACQUIRE_TIMEOUT_MS, 250,
+                        ShopboxReadiness.SYSTEM);
+                if (live.found()) {
+                    return captureStand(gui, live.stand.value, learnedRouteBlocks, messages);
+                }
+                reason = live.failure;
             } catch (InterruptedException interrupted) {
                 throw interrupted;
             } catch (IOException | Loading failure) {
-                gui.msg("H4D Market Scanner: " + match.stand.standKey + " attempt " + attempt + "/"
-                        + config.maxStandAttempts + " failed: " + safeMessage(failure));
-                if (attempt == config.maxStandAttempts) {
-                    break;
-                }
+                reason = safeMessage(failure);
+            }
+            gui.msg("H4D Market Scanner: " + match.stand.standKey + " attempt " + attempt + "/"
+                    + config.maxStandAttempts + " failed: " + reason);
+            if (attempt < config.maxStandAttempts) {
                 Thread.sleep(2_000L * attempt);
-                Gob fresh = findCurrentGob(gui, match.detected.ref, config.standTolerance);
-                if (fresh != null) {
-                    stand = fresh;
-                }
             }
         }
         return null;
     }
 
-    private static CapturedStand captureStand(NGameUI gui, Gob stand, List<Coord2d> learnedRouteBlocks) throws Exception {
+    private static CapturedStand captureStand(NGameUI gui, Gob stand, List<Coord2d> learnedRouteBlocks,
+                                              ShopMessageLog messages) throws Exception {
         PathFinder pathFinder = new PathFinder(stand);
         // Re-plan around live gob hitboxes and remember any unmodelled stall point for the rest
         // of this route. This is especially important for players and bill-of-sale cargo left in aisles.
@@ -353,45 +380,66 @@ public class H4DMarketScanner implements Action {
             throw new IOException("Barter Stand window did not open");
         }
         try {
-            return waitForCapture(window, stand);
+            return waitForCapture(window, stand, messages);
         } finally {
             new CloseTargetWindow(window).run(gui);
         }
     }
 
-    private static CapturedStand waitForCapture(Window window, Gob stand) throws Exception {
-        long deadline = System.currentTimeMillis() + CAPTURE_TIMEOUT_MS;
-        Loading lastLoading = null;
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                return capture(window, stand);
-            } catch (Loading loading) {
-                lastLoading = loading;
-                Thread.sleep(100);
-            }
-        }
-        throw new IOException("Timed out waiting for barter stand item resources", lastLoading);
-    }
-
-    private static CapturedStand capture(Window window, Gob stand) throws Exception {
+    private static List<Shopbox> shopboxes(Window window) {
         List<Shopbox> boxes = new ArrayList<>();
         for (Widget child = window.child; child != null; child = child.next) {
             if (child instanceof Shopbox) {
                 boxes.add((Shopbox) child);
             }
         }
-        if (boxes.size() != 5) {
-            throw new Loading("Waiting for all five Shopbox widgets");
-        }
         boxes.sort(Comparator.comparingInt((Shopbox box) -> box.c.y).thenComparingInt(box -> box.c.x));
+        return boxes;
+    }
 
+    /**
+     * Waits (bounded) until the window's five Shopboxes have finished loading according to their own message
+     * lifecycle, then captures. A stand that never becomes ready is NOT published as empty: the timeout is
+     * reported as a failed attempt so the stand ends up unread and its previous listing is kept.
+     */
+    private static CapturedStand waitForCapture(Window window, Gob stand, ShopMessageLog messages) throws Exception {
+        long deadline = System.currentTimeMillis() + CAPTURE_TIMEOUT_MS;
+        ShopboxReadiness.Verdict verdict = null;
+        while (System.currentTimeMillis() < deadline) {
+            List<Shopbox> boxes = shopboxes(window);
+            if (boxes.size() == 5) {
+                List<ShopSlot> slots = new ArrayList<>();
+                long last = 0;
+                for (Shopbox box : boxes) {
+                    slots.add(new ShopSlot(box, messages));
+                    last = Math.max(last, messages.lastMessageAt(box));
+                }
+                long quiet = last == 0 ? 0 : System.currentTimeMillis() - last;
+                verdict = ShopboxReadiness.assess(slots, quiet);
+                if (verdict.ready()) {
+                    try {
+                        return capture(boxes, slots, verdict, stand);
+                    } catch (Loading loading) {
+                        // a sprite or name regressed to loading between assessment and capture: keep waiting
+                    }
+                }
+            }
+            Thread.sleep(100);
+        }
+        throw new IOException("Barter stand did not finish loading ("
+                + (verdict == null ? "fewer than five Shopbox widgets" : verdict.pending() + " slot(s) pending "
+                + verdict.describe()) + "); keeping its previous listing");
+    }
+
+    private static CapturedStand capture(List<Shopbox> boxes, List<ShopSlot> slots, ShopboxReadiness.Verdict verdict,
+                                         Gob stand) throws Exception {
         JSONArray offers = new JSONArray();
         Map<String, byte[]> icons = new LinkedHashMap<>();
         for (int slot = 0; slot < boxes.size(); slot++) {
-            Shopbox box = boxes.get(slot);
-            if (box.res == null || box.price == null || box.spr == null) {
-                continue;
+            if (verdict.states.get(slot) != ShopboxReadiness.State.READY) {
+                continue; // confirmed empty or confirmed incomplete (not a purchasable offer)
             }
+            Shopbox box = boxes.get(slot);
             ItemInfo.Name offerName = ItemInfo.find(ItemInfo.Name.class, box.info());
             String productName = offerName == null ? null : offerName.str.text;
             String priceName = box.price.name();
@@ -399,7 +447,11 @@ public class H4DMarketScanner implements Action {
                 throw new Loading("Waiting for barter stand item names");
             }
 
-            CapturedItem product = captureItem(productName, box.res, box.spr, box.info(),
+            GSprite productSprite = slots.get(slot).sprite();
+            if (productSprite == null) {
+                throw new Loading("Waiting for product sprite");
+            }
+            CapturedItem product = captureItem(productName, box.res, productSprite, box.info(),
                     Math.max(0, box.leftNum), quality(box.info()));
             double priceQuality = box.pq > 0 ? box.pq : quality(box.price.info());
             CapturedItem price = captureItem(priceName, box.price.res, box.price.spr(), box.price.info(),
@@ -422,6 +474,77 @@ public class H4DMarketScanner implements Action {
         json.put("worldY", stand.rc.y);
         json.put("offers", offers);
         return new CapturedStand(json, icons);
+    }
+
+    /** One Shopbox seen through the readiness rules. The product sprite is built here exactly as Shopbox.draw does. */
+    private static final class ShopSlot implements ShopboxReadiness.SlotView {
+        private final Shopbox box;
+        private final ShopMessageLog messages;
+
+        ShopSlot(Shopbox box, ShopMessageLog messages) {
+            this.box = box;
+            this.messages = messages;
+        }
+
+        @Override
+        public boolean hasProduct() {
+            return box.res != null;
+        }
+
+        @Override
+        public boolean hasPrice() {
+            return box.price != null;
+        }
+
+        @Override
+        public boolean heardProduct() {
+            return messages.heard(box, "res");
+        }
+
+        @Override
+        public boolean heardPrice() {
+            return messages.heard(box, "price");
+        }
+
+        /** The product sprite, constructing it like Shopbox.draw() does when the widget has not been drawn yet. */
+        GSprite sprite() {
+            GSprite spr = box.spr;
+            if (spr == null && box.res != null) {
+                try {
+                    spr = box.spr = GSprite.create(box, box.res.res.get(), box.res.sdt.clone());
+                } catch (Loading stillLoading) {
+                    return null;
+                }
+            }
+            return spr;
+        }
+
+        @Override
+        public boolean productSpriteReady() {
+            return sprite() != null;
+        }
+
+        @Override
+        public boolean priceSpriteReady() {
+            try {
+                return box.price != null && box.price.spr() != null;
+            } catch (Loading stillLoading) {
+                return false;
+            }
+        }
+
+        @Override
+        public boolean namesReady() {
+            try {
+                ItemInfo.Name offerName = ItemInfo.find(ItemInfo.Name.class, box.info());
+                String productName = offerName == null ? null : offerName.str.text;
+                String priceName = box.price == null ? null : box.price.name();
+                return productName != null && !productName.trim().isEmpty()
+                        && priceName != null && !priceName.trim().isEmpty();
+            } catch (Loading stillLoading) {
+                return false;
+            }
+        }
     }
 
     private static CapturedItem captureItem(String name, ResData resource, GSprite sprite,
@@ -555,21 +678,17 @@ public class H4DMarketScanner implements Action {
     }
 
     /** One bounded, targeted look at the saved position of every stand the sweep did not see. */
-    private static List<StandMatcher.Detected<Gob>> recoverMissing(NGameUI gui, GameSource source,
+    private static List<StandMatcher.Detected<Gob>> recoverMissing(NGameUI gui, NArea area, GameSource source,
                                                                     List<MarketLayout.Stand> missing,
                                                                     List<StandMatcher.Detected<Gob>> already)
             throws InterruptedException {
         List<StandMatcher.Detected<Gob>> all = new ArrayList<>(already);
         boolean changed = false;
         for (MarketLayout.Stand stand : missing) {
-            MCache.Grid grid = findGrid(gui, stand.physical.gridId);
-            if (grid == null) {
+            if (!goNear(gui, area, stand.physical.gridId, stand.physical.offX, stand.physical.offY)) {
                 continue;
             }
-            Coord2d spot = grid.ul.mul(MCache.tilesz).add(stand.physical.offX, stand.physical.offY);
-            if (NUtils.player() != null && NUtils.player().rc.dist(spot) > 60) {
-                source.approach(spot);
-            }
+            Thread.sleep(500);
             for (StandMatcher.Detected<Gob> seen : source.detect()) {
                 boolean known = false;
                 for (StandMatcher.Detected<Gob> existing : all) {
@@ -595,6 +714,81 @@ public class H4DMarketScanner implements Action {
         }
     }
 
+    /** World position of a grid-relative point, or null while that grid is not loaded. */
+    private static Coord2d spotOf(NGameUI gui, String gridId, double offX, double offY) {
+        MCache.Grid grid = findGrid(gui, gridId);
+        return grid == null ? null : grid.ul.mul(MCache.tilesz).add(offX, offY);
+    }
+
+    private static boolean arrivedAt(Coord2d spot) {
+        return spot != null && NUtils.player() != null && NUtils.player().rc.dist(spot) <= ARRIVAL_UNITS;
+    }
+
+    /**
+     * Moves toward a grid-relative position and VERIFIES arrival before reporting success. ChunkNav goes first
+     * when the grid is not loaded or the target is far; some ChunkNav paths end at the overall NArea rather than
+     * the requested point, so afterwards local obstacle-aware navigation finishes the leg and the distance is
+     * checked. Returns false (never loops) when the spot cannot be reached.
+     */
+    static boolean goNear(NGameUI gui, NArea area, String gridId, double offX, double offY) throws InterruptedException {
+        Coord2d spot = spotOf(gui, gridId, offX, offY);
+        if (arrivedAt(spot)) {
+            return true;
+        }
+        if (spot == null || NUtils.player().rc.dist(spot) > LOCAL_RANGE_UNITS) {
+            chunkNavigate(gui, area, gridId, offX, offY);
+            long deadline = System.currentTimeMillis() + 8_000;
+            while (spot == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(250);
+                spot = spotOf(gui, gridId, offX, offY);
+            }
+            if (spot == null) {
+                return false;
+            }
+            if (arrivedAt(spot)) {
+                return true;
+            }
+        }
+        new PathFinder(spot).run(gui);
+        return arrivedAt(spot);
+    }
+
+    private static boolean chunkNavigate(NGameUI gui, NArea area, String gridId, double offX, double offY)
+            throws InterruptedException {
+        if (!(gui.map instanceof NMapView)) {
+            return false;
+        }
+        ChunkNavManager chunkNav = ((NMapView) gui.map).getChunkNavManager();
+        if (chunkNav == null || !chunkNav.isInitialized()) {
+            return false;
+        }
+        int tileX = (int) Math.max(0, Math.min(MCache.cmaps.x - 1, Math.floor(offX / MCache.tilesz.x)));
+        int tileY = (int) Math.max(0, Math.min(MCache.cmaps.y - 1, Math.floor(offY / MCache.tilesz.y)));
+        nurgling.navigation.ChunkPath path = chunkNav.planToGridCoord(Long.parseLong(gridId), new Coord(tileX, tileY));
+        return path != null && chunkNav.navigateWithPath(path, area, gui).IsSuccess();
+    }
+
+    /** Live game access for re-acquiring one stand from its saved physical reference. */
+    private static final class LiveWorld implements StandReacquirer.World<Gob> {
+        private final NGameUI gui;
+        private final NArea area;
+
+        LiveWorld(NGameUI gui, NArea area) {
+            this.gui = gui;
+            this.area = area;
+        }
+
+        @Override
+        public boolean approach(PhysicalRef saved) throws InterruptedException {
+            return goNear(gui, area, saved.gridId, saved.offX, saved.offY);
+        }
+
+        @Override
+        public List<StandMatcher.Detected<Gob>> loaded() throws InterruptedException {
+            return detectAll(gui);
+        }
+    }
+
     private static void exportDiscovery(NArea area, JSONObject discovery) {
         try {
             nurgling.tools.NFileUtils.writeAtomically(
@@ -605,7 +799,7 @@ public class H4DMarketScanner implements Action {
         }
     }
 
-    /** Live game access for the sweep: movement uses ChunkNav for cross-chunk legs and PathFinder locally. */
+    /** Live game access for the sweep. */
     private static final class GameSource implements AreaSweep.Source<Gob> {
         private final NGameUI gui;
         private final NArea area;
@@ -626,33 +820,16 @@ public class H4DMarketScanner implements Action {
             return pieces;
         }
 
+        /** Reached only when the player is verifiably near the requested waypoint (not merely somewhere in the NArea). */
         @Override
         public boolean visit(AreaSweepPlanner.Waypoint waypoint) throws InterruptedException {
-            MCache.Grid grid = gui.map.glob.map.findGrid(waypoint.gridId);
-            if (grid != null) {
-                Coord2d spot = grid.ul.add(waypoint.tileX, waypoint.tileY).mul(MCache.tilesz).add(MCache.tilesz.div(2));
-                if (NUtils.player().rc.dist(spot) < MCache.tilesz.x * 3 || approach(spot)) {
-                    settle();
-                    return true;
-                }
+            double offX = (waypoint.tileX + 0.5) * MCache.tilesz.x;
+            double offY = (waypoint.tileY + 0.5) * MCache.tilesz.y;
+            if (!goNear(gui, area, Long.toString(waypoint.gridId), offX, offY)) {
+                return false;
             }
-            // The waypoint's grid is not loaded (or the local walk failed): use chunk navigation to get there.
-            if (gui.map instanceof NMapView) {
-                ChunkNavManager chunkNav = ((NMapView) gui.map).getChunkNavManager();
-                if (chunkNav != null && chunkNav.isInitialized()) {
-                    nurgling.navigation.ChunkPath path = chunkNav.planToGridCoord(waypoint.gridId,
-                            new Coord(waypoint.tileX, waypoint.tileY));
-                    if (path != null && chunkNav.navigateWithPath(path, area, gui).IsSuccess()) {
-                        settle();
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        boolean approach(Coord2d spot) throws InterruptedException {
-            return new PathFinder(spot).run(gui).IsSuccess();
+            settle();
+            return true;
         }
 
         private void settle() throws InterruptedException {

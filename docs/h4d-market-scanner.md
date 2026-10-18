@@ -96,10 +96,29 @@ neighbouring clusters can be close together.
    physical position, alternating direction, then bounded 2-opt), starting from where the walk begins.
    It uses only physical positions, so it is independent of cluster numbers and of the customer map, and
    unbuilt positions simply never appear.
-6. **Scan** each stand with bounded attempts (`maxStandAttempts`). A failed approach waits (people move),
-   re-finds the stand by its physical reference and re-plans. A stand that still fails is recorded as
-   unreachable and the route continues. There is no unbounded retry loop.
-7. **Publish** (below).
+6. **Re-acquire, then scan** each stand with bounded attempts (`maxStandAttempts`). Gob handles collected during
+   the sweep may have unloaded since, so every attempt starts from the stand's *saved* physical reference
+   (`StandReacquirer`): navigate toward the saved grid/offset (ChunkNav when the grid is unloaded or far, then
+   local `PathFinder`), **verify arrival** near that point, wait (bounded) for the section and its objects to
+   load, and require exactly one stand within tolerance. Only then is the live stand pathed to (obstacle-aware,
+   `learnedBlocks`) and opened. A failed attempt waits (people move) and repeats the whole sequence. A stand
+   that still fails is recorded as unreachable and the route continues. There is no unbounded retry loop, and
+   interruption/cancellation is propagated everywhere.
+   Sweep waypoints use the same arrival check: `ChunkNavExecutor` may finish at the overall NArea instead of the
+   requested point, so a waypoint counts as reached only if the player is within about six tiles of it.
+7. **Wait for the Barter Stand to finish loading** (`ShopboxReadiness`) before reading it. A Shopbox slot starts
+   as `res == null && price == null`, and its sprite is built lazily, so "no sprite yet" is not "no offer". The
+   scanner records the server's `res`/`tt`/`n`/`price` messages per widget through the existing `UiEvents`
+   seam (`ShopMessageLog`, registered before the window opens; no change to the server-distributed Shopbox
+   class) and classifies each slot:
+   - *empty* — the server's `res` and `price` messages were received and cleared the slot (or the stand has
+     demonstrably synced and gone quiet for 1.2 s);
+   - *inactive* — product without price or the reverse, confirmed by the received messages;
+   - *ready* — product and price known, both sprites constructible, names available;
+   - *pending* — anything else, including a window that has heard nothing yet.
+   The wait is bounded (15 s). If it times out the stand is **not** published as an empty scan: it is recorded
+   as unread and its previous listing is kept (carried forward by the server).
+8. **Publish** (below).
 
 ## Publication semantics
 
@@ -163,6 +182,6 @@ Scheduler after changing it on Windows). `H4D_MARKET_ENDPOINT` overrides the URL
   shapes, extra/unknown stands, identity preservation, missing and moved stands, independence from
   customer-map data, route ordering, area sweep over a simulated partially-loaded world, spool resume
   rules, Buy-button rule, discovery report.
-- **Not verified in-game**: the live `GameSource` (grid lookup, `Finder`-style gob scan, `PathFinder`
+- **Not verified in-game** (also: whether the server really sends es/price for empty slots, which decides how often an empty stand needs the 1.2 s quiet fallback): the live `GameSource` (grid lookup, `Finder`-style gob scan, `PathFinder`
   and ChunkNav legs, `Shopbox` capture) compiles and reuses existing mechanisms but has only been
   exercised through its pure collaborators. See the PR description for the in-game test checklist.
