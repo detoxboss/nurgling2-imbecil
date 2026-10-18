@@ -641,13 +641,23 @@ public class H4DMarketScanner implements Action {
         return piece != null && piece.area.contains(tile.sub(grid.ul));
     }
 
+    /**
+     * Non-blocking stand test. NParser.isIt(gob, ...) queues a GetGobName task and WAITS for it; calling it for every
+     * gob while holding the object-cache lock deadlocks the client (the UI thread needs that lock to draw), which
+     * freezes the whole client with no error. Gobs whose name has not loaded yet are skipped and seen on a later poll.
+     */
+    private static boolean isBarterStand(Gob gob) {
+        return !(gob instanceof OCache.Virtual) && gob.ngob != null && gob.ngob.name != null
+                && NParser.checkName(gob.ngob.name, STAND_ALIAS);
+    }
+
     private static List<StandMatcher.Detected<Gob>> detectLoaded(NGameUI gui, NArea area) throws InterruptedException {
         MCache map = gui.map.glob.map;
         List<StandMatcher.Detected<Gob>> found = new ArrayList<>();
         List<Gob> candidates = new ArrayList<>();
         synchronized (gui.ui.sess.glob.oc) {
             for (Gob gob : gui.ui.sess.glob.oc) {
-                if (!(gob instanceof OCache.Virtual) && NParser.isIt(gob, STAND_ALIAS)) {
+                if (isBarterStand(gob)) {
                     candidates.add(gob);
                 }
             }
@@ -679,7 +689,7 @@ public class H4DMarketScanner implements Action {
         List<Gob> candidates = new ArrayList<>();
         synchronized (gui.ui.sess.glob.oc) {
             for (Gob gob : gui.ui.sess.glob.oc) {
-                if (!(gob instanceof OCache.Virtual) && NParser.isIt(gob, STAND_ALIAS)) {
+                if (isBarterStand(gob)) {
                     candidates.add(gob);
                 }
             }
