@@ -1063,6 +1063,43 @@ every other fork and upstream bot id with zero duplicates.
 **Superseded when:** never — fork-specific integration with an external service upstream has no
 equivalent for.
 
+## Village Watch
+
+**Files:** feature-owned — `src/nurgling/watch/**`, `src/nurgling/actions/bots/VillageWatchBot.java`,
+`…/VillageWatchSettingsAction.java`, `src/nurgling/notifications/Discord{Message,Transport,WebhookQueue}.java`,
+`resources/src/nurgling/bots/icons/villagewatch{,cfg}/`. Full description: `docs/village-watch.md`.
+
+**Shared-file hooks (the only edits outside fork-owned files):**
+
+| File | Hook |
+|---|---|
+| `actions/bots/registry/BotRegistry.java` | two `BotDescriptor`s, ids `village_watch` and `village_watch_settings`, right after the H4D Market Scanner entry |
+| `widgets/StepSettingsPanel.java` | one block calling `VillageWatchStepPanel.populate(...)` for `village_watch`, before the "No settings" fallback |
+| `widgets/StepListWidget.java` | `village_watch` added to the `hasSettings` (✪) condition |
+| `widgets/NAlarmWdg.java` | public `isMapFullyLoaded()` getter; field made `volatile` (read from the bot thread) |
+| `notifications/DiscordHookObject.java` | JSON building moved from `run()` into public `toPayload()`; `run()` sends exactly what it did before |
+
+**Why:** a passive multi-lookout security watcher driven through Scenarios, reusing the existing
+webhook settings, bot registry and Scenario step settings instead of an external service. The feature
+code is fork-owned so it merges without conflict; the hooks above are the minimum needed to appear in
+the registry/Scenario UI and to reuse the alarm's map-loaded check and the embed JSON builder.
+
+**Minimum hook that must survive:** the bot id strings `village_watch` / `village_watch_settings`
+(saved Scenarios reference `village_watch` and its `profile` step setting by string); the
+`toPayload()` extraction (if upstream rewrites `DiscordHookObject`, re-extract it — `DiscordMessage`
+depends on it); `NAlarmWdg.isMapFullyLoaded()` (if upstream renames the private map-loaded state,
+`GobScanner` must be pointed at the replacement or Unknown alerts never fire — a safe failure, but silent).
+Session ownership is explicit: `GobScanner`, `MapScreenshotProvider` and `WatchStatus` take the owning
+`NGameUI`; nothing resolves a session through `NUtils.getGameUI()` except the Scenario-panel button,
+which prefers `panel.ui`.
+
+**Verify:** after a sync, `ant jar && ant test` (the `nurgling.watch`, `nurgling.notifications` and
+`VillageWatchBotSettingsTest` tests), `village_watch` present exactly once in `BotRegistry`, and the
+manual checklist in `docs/village-watch.md` for anything touching sessions or rendering.
+
+**Superseded when:** upstream ships an equivalent lookout/Discord-attachment feature — then retire
+this section and migrate saved `village_watch` Scenario steps.
+
 ## A note on upstream's multi-session convergence (2026-09-30 sync)
 
 Several of the "owning-session, not ambient" entries above note a "superseded when upstream ships

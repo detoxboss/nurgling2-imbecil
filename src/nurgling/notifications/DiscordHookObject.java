@@ -64,6 +64,41 @@ public class DiscordHookObject implements Runnable{
     }
 
     public void run() {
+        JSONObject json = toPayload();
+
+        try
+        {
+            URL url = new URL(this.url);
+            HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
+            connection.addRequestProperty("Content-Type", "application/json");
+            connection.addRequestProperty("User-Agent", "Java-DiscordWebhook");
+            connection.setDoOutput(true);
+            connection.setRequestMethod("POST");
+            byte[] data = json.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(data.length);
+            OutputStream stream = connection.getOutputStream();
+            stream.write(data);
+            stream.flush();
+            stream.close();
+
+            String str;
+            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            while ((str = in.readLine()) != null)
+            {
+                NUtils.getGameUI().msg(str);
+            }
+            in.close();
+
+            connection.disconnect();
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    /** The webhook request body (JSON) for the content and embeds set so far; shared with multipart senders. */
+    public JSONObject toPayload() {
         JSONObject json = new JSONObject();
 
         json.put("content", this.content);
@@ -145,35 +180,7 @@ public class DiscordHookObject implements Runnable{
             json.put("embeds", embedObjects.toArray());
         }
 
-        try
-        {
-            URL url = new URL(this.url);
-            HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
-            connection.addRequestProperty("Content-Type", "application/json");
-            connection.addRequestProperty("User-Agent", "Java-DiscordWebhook");
-            connection.setDoOutput(true);
-            connection.setRequestMethod("POST");
-            byte[] data = json.toString().getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(data.length);
-            OutputStream stream = connection.getOutputStream();
-            stream.write(data);
-            stream.flush();
-            stream.close();
-
-            String str;
-            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            while ((str = in.readLine()) != null)
-            {
-                NUtils.getGameUI().msg(str);
-            }
-            in.close();
-
-            connection.disconnect();
-        }
-        catch (IOException e)
-        {
-            e.printStackTrace();
-        }
+        return json;
     }
 
     public static class EmbedObject {

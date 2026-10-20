@@ -43,8 +43,13 @@ public class NAlarmWdg extends Widget
     // Track frame counter for characters without buddy to delay alarm
     private final HashMap<Long, Integer> unknownPlayerFrameCounter = new HashMap<>();
     // Track if map is fully loaded (all 9 grids)
-    private boolean isMapFullyLoaded = false;
-    
+    private volatile boolean isMapFullyLoaded = false;
+
+    /** Whether this session's surrounding map is fully loaded; read by Village Watch before it trusts "no buddy record". */
+    public boolean isMapFullyLoaded() {
+        return isMapFullyLoaded;
+    }
+
     public NAlarmWdg() {
         super();
         sz = NStyle.alarm[0].sz();

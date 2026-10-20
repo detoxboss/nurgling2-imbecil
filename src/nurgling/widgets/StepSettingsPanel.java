@@ -700,6 +700,10 @@ public class StepSettingsPanel extends Widget {
                 add(pilesBox, new Coord(UI.scale(8), y));
             }
         }
+        if (desc.id.equals(nurgling.actions.bots.VillageWatchBot.BOT_ID)) {
+            hasAnySetting = true;
+            nurgling.watch.ui.VillageWatchStepPanel.populate(this, step, y, () -> { if (ui != null) setStep(step); });
+        }
         if (!hasAnySetting) {
             add(new Label("No settings for this step."), new Coord(UI.scale(8), y));
         }
