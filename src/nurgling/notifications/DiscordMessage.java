@@ -38,6 +38,10 @@ public final class DiscordMessage {
     public String avatarUrl;
     public String title;
     public String description;
+    /** Top-level message text; the only part of a message that can notify. Must never carry untrusted text. */
+    public String content;
+    /** Discord {@code allowed_mentions} for {@link #content}; null means nothing may be mentioned. */
+    public JSONObject allowedMentions;
     public int color = 0xE74C3C;
     public String footer;
     /** ISO-8601 instant shown by Discord in the embed footer area. */
@@ -72,8 +76,12 @@ public final class DiscordMessage {
         JSONObject json = new JSONObject(hook.toPayload().toString());
         if (timestamp != null)
             json.getJSONArray("embeds").getJSONObject(0).put("timestamp", timestamp);
-        // Player names and template text are untrusted: never let them ping @everyone or a role.
-        json.put("allowed_mentions", new JSONObject().put("parse", new JSONArray()));
+        // Top-level content is the only place Discord notifies from. It stays unset unless the caller
+        // supplies a generated mention, and allowed_mentions then permits only that mention.
+        if (content != null && !content.isEmpty())
+            json.put("content", content);
+        json.put("allowed_mentions", allowedMentions != null ? new JSONObject(allowedMentions.toString())
+                : new JSONObject().put("parse", new JSONArray()));
         if (withAttachment && attachment != null)
             json.put("attachments", new JSONArray().put(new JSONObject().put("id", 0).put("filename", attachment.filename)));
         return json;

@@ -23,6 +23,33 @@ public final class WatchTesting {
         run(gui, "Village Watch: screenshot test", profile, true);
     }
 
+    /**
+     * Sends one clearly marked test message that DOES notify the category's ping target. The caller
+     * must have confirmed with the user first; does nothing when the target is not usable.
+     */
+    public static void testPing(NGameUI gui, WatchProfile profile, WatchCategory category) {
+        WatchProfile.Category cat = profile.category(category);
+        if (!cat.ping.usable(cat.pingId)) {
+            gui.error("Village Watch: no ping target set for " + category.label);
+            return;
+        }
+        final WatchWebhook webhook;
+        try {
+            webhook = WatchWebhook.resolve();
+        } catch (IllegalStateException e) {
+            gui.error(e.getMessage());
+            return;
+        }
+        ThreatTracker.Alert alert = ThreatTracker.sampleAlert(new ThreatTracker.Sighting(0, category, null, null));
+        DiscordMessage m = AlertFormatter.format(profile, alert, ZonedDateTime.now(Clock.systemDefaultZone()),
+                webhook.username, webhook.icon, AlertFormatter.Shot.none(), false);
+        m.title = "TEST - " + m.title;
+        m.addField("Test message", "No player was detected. This ping test was sent from the Village Watch settings window.", false);
+        m.content = cat.ping.mention(cat.pingId) + " Village Watch ping TEST - no player detected";
+        m.allowedMentions = cat.ping.allowedMentions(cat.pingId);
+        DiscordWebhookQueue.shared().submit(webhook.transport, m, r -> gui.msg("Village Watch: ping test " + r.summary()));
+    }
+
     private static void run(NGameUI gui, String what, WatchProfile profile, boolean screenshot) {
         final WatchWebhook webhook;
         try {
@@ -48,8 +75,9 @@ public final class WatchTesting {
                 }
                 ThreatTracker.Alert alert = sampleAlert();
                 ZonedDateTime when = ZonedDateTime.now(Clock.systemDefaultZone());
+                // Test buttons never ping, whatever the profile's ping targets are.
                 DiscordMessage m = AlertFormatter.format(profile, alert, when, webhook.username, webhook.icon,
-                        new AlertFormatter.Shot(jpeg, jpeg == null ? missing : null, null));
+                        new AlertFormatter.Shot(jpeg, jpeg == null ? missing : null, null), false);
                 m.title = "TEST - " + m.title;
                 m.addField("Test message", "No player was detected. Sent from the Village Watch settings window.", false);
                 DiscordWebhookQueue.shared().submit(webhook.transport, m,

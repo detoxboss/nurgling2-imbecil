@@ -12,6 +12,7 @@ import haven.Window;
 import nurgling.NGameUI;
 import nurgling.actions.bots.VillageWatchBot;
 import nurgling.sessions.BotExecutor;
+import nurgling.watch.PingTarget;
 import nurgling.watch.WatchCategory;
 import nurgling.watch.WatchProfile;
 import nurgling.watch.WatchProfileStore;
@@ -38,7 +39,7 @@ import java.util.function.Consumer;
  */
 public class VillageWatchWindow extends Window {
     private static final int CONTENT_W = UI.scale(450);
-    private static final int TAB_H = UI.scale(300);
+    private static final int TAB_H = UI.scale(372);
     private static final int PREVIEW_LINES = 8;
 
     private final NGameUI gui;
@@ -310,7 +311,73 @@ public class VillageWatchWindow extends Window {
             ct.refreshPreview();
         }), new Coord(UI.scale(320), UI.scale(172)));
         ct.preview = t.add(new Widget(new Coord(CONTENT_W, UI.scale(PREVIEW_LINES * 15 + 6))), new Coord(0, UI.scale(198)));
+
+        // Ping row. Pings only fire on a new sighting or an escalation, never on cooldown repeats.
+        int py = UI.scale(332);
+        t.add(new Label("Ping:"), new Coord(0, py + UI.scale(3)));
+        ct.pingBox = t.add(new NDropbox<PingTarget>(UI.scale(130), PingTarget.values().length, UI.scale(20)) {
+            @Override
+            protected PingTarget listitem(int i) {
+                return PingTarget.values()[i];
+            }
+
+            @Override
+            protected int listitems() {
+                return PingTarget.values().length;
+            }
+
+            @Override
+            protected void drawitem(GOut g, PingTarget item, int i) {
+                g.text(item.label, Coord.z);
+            }
+
+            @Override
+            public void change(PingTarget item) {
+                super.change(item);
+                if (item != null && !loading && editing != null) {
+                    editing.category(cat).ping = item;
+                    ct.refreshPingId();
+                }
+            }
+        }, new Coord(UI.scale(40), py));
+        ct.pingBox.settip("Who Discord notifies on a new or escalated sighting. Repeat alerts never ping. "
+                + "Needs the webhook's channel to allow the mention, and members' own notification settings decide whether it rings.", false);
+        ct.idEntry = t.add(new TextEntry(UI.scale(150), "") {
+            @Override
+            protected void changed() {
+                if (!loading && editing != null)
+                    editing.category(cat).pingId = text().trim();
+                ct.refreshPingId();
+            }
+        }, new Coord(UI.scale(180), py));
+        ct.idEntry.settip("Discord ID (17-20 digits). Enable Developer Mode in Discord (Settings > Advanced), "
+                + "then right-click the role or user > Copy ID.", false);
+        ct.idHint = t.add(new Label(""), new Coord(UI.scale(335), py + UI.scale(3)));
+        ct.testPing = t.add(new Button(UI.scale(110), "Test ping", () -> testPing(cat)), new Coord(UI.scale(340), py));
         return t;
+    }
+
+    /** Test ping needs a second click within 5 s: it really notifies people. */
+    private WatchCategory pingArmed;
+    private double pingArmedFor;
+
+    private void testPing(WatchCategory cat) {
+        if (editing == null)
+            return;
+        WatchProfile.Category c = editing.category(cat);
+        if (!c.ping.usable(c.pingId)) {
+            say("Choose a ping target (and a valid ID for role/user) first", true);
+            return;
+        }
+        if (pingArmed != cat) {
+            pingArmed = cat;
+            pingArmedFor = 5;
+            say("This WILL notify " + c.ping.label + (c.ping.needsId() ? " " + c.pingId : "") + ". Click Test ping again within 5 s to send.", true);
+            return;
+        }
+        pingArmed = null;
+        WatchTesting.testPing(gui, editing.copy().normalized(), cat);
+        say("Ping test sent for " + cat.label + " (check Discord)", false);
     }
 
     private final class CategoryTab {
@@ -318,6 +385,30 @@ public class VillageWatchWindow extends Window {
         CheckBox enabled;
         NTextArea editor;
         Widget preview;
+        NDropbox<PingTarget> pingBox;
+        TextEntry idEntry;
+        Label idHint;
+        Button testPing;
+
+        /** Shows the ID box only for role/user and flags an invalid ID. */
+        void refreshPingId() {
+            if (pingBox == null || editing == null)
+                return;
+            WatchProfile.Category c = editing.category(category);
+            boolean needs = c.ping.needsId();
+            if (needs) {
+                idEntry.show();
+                idHint.show();
+            } else {
+                idEntry.hide();
+                idHint.hide();
+            }
+            if (needs) {
+                boolean ok = PingTarget.validId(idEntry.text());
+                idHint.settext(ok ? "ok" : "bad ID");
+                idHint.setcolor(ok ? Color.WHITE : Color.RED);
+            }
+        }
 
         CategoryTab(WatchCategory category) {
             this.category = category;
@@ -362,12 +453,17 @@ public class VillageWatchWindow extends Window {
                 CategoryTab ct = categoryTabs.get(c);
                 ct.enabled.set(p.enabled(c));
                 ct.editor.settext(p.category(c).template);
+                ct.pingBox.change(p.category(c).ping);
+                ct.idEntry.settext(p.category(c).pingId);
             }
         } finally {
             loading = false;
         }
-        for (CategoryTab ct : categoryTabs.values())
+        pingArmed = null;
+        for (CategoryTab ct : categoryTabs.values()) {
             ct.refreshPreview();
+            ct.refreshPingId();
+        }
         say("Loaded profile '" + p.name + "'", false);
     }
 
@@ -431,6 +527,14 @@ public class VillageWatchWindow extends Window {
                 return false;
             }
         }
+        for (WatchCategory c : WatchCategory.values()) {
+            WatchProfile.Category pc = editing.category(c);
+            if (pc.ping.needsId() && !PingTarget.validId(pc.pingId)) {
+                say(c.label + " ping: enter a valid Discord " + pc.ping.label.toLowerCase().replace("specific ", "") + " ID (17-20 digits)", true);
+                showTab(c.ordinal() + 1);
+                return false;
+            }
+        }
         try {
             store.save(editing);
             store.assign(gui.chrid, editing.name);
@@ -478,6 +582,8 @@ public class VillageWatchWindow extends Window {
     @Override
     public void tick(double dt) {
         super.tick(dt);
+        if (pingArmed != null && (pingArmedFor -= dt) <= 0)
+            pingArmed = null;
         sinceStatus += dt;
         if (sinceStatus >= 0.5 && statusLabel != null) {
             sinceStatus = 0;
