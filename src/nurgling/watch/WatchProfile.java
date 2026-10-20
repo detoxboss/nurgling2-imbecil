@@ -21,6 +21,10 @@ public final class WatchProfile {
     public static final class Category {
         public boolean enabled = true;
         public String template;
+        /** Who is notified on a new or escalated sighting; never on cooldown repeats. Off by default. */
+        public PingTarget ping = PingTarget.NONE;
+        /** Discord role/user snowflake, used when {@link #ping} needs one. */
+        public String pingId = "";
 
         Category(WatchCategory c) {
             this.template = WatchTemplate.defaultFor(c);
@@ -30,6 +34,8 @@ public final class WatchProfile {
             Category n = new Category(c);
             n.enabled = enabled;
             n.template = template;
+            n.ping = ping;
+            n.pingId = pingId;
             return n;
         }
     }
@@ -88,6 +94,9 @@ public final class WatchProfile {
                 cat.template = WatchTemplate.defaultFor(c);
             else if (cat.template.length() > WatchTemplate.MAX_TEMPLATE_LENGTH)
                 cat.template = cat.template.substring(0, WatchTemplate.MAX_TEMPLATE_LENGTH);
+            if (cat.ping == null || (cat.ping.needsId() && !PingTarget.validId(cat.pingId)))
+                cat.ping = PingTarget.NONE; // a half-configured ping must fail quiet, not loud
+            cat.pingId = cat.pingId == null ? "" : cat.pingId.trim();
         }
         return this;
     }
@@ -121,6 +130,8 @@ public final class WatchProfile {
             JSONObject co = new JSONObject();
             co.put("enabled", categories.get(c).enabled);
             co.put("template", categories.get(c).template);
+            co.put("ping", categories.get(c).ping.key);
+            co.put("pingId", categories.get(c).pingId);
             cats.put(c.key, co);
         }
         o.put("categories", cats);
@@ -146,6 +157,8 @@ public final class WatchProfile {
                 Category cat = p.categories.get(c);
                 cat.enabled = co.optBoolean("enabled", true);
                 cat.template = co.optString("template", cat.template);
+                cat.ping = PingTarget.fromKey(co.optString("ping", "none"));
+                cat.pingId = co.optString("pingId", "");
             }
         }
         return p.normalized();

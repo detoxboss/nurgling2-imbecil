@@ -30,6 +30,18 @@ Placeholders: `{watcher}` `{player}` `{status}` `{time}` `{gob_id}` `{coords}`. 
 genuinely unavailable renders as `unavailable` — names and positions are never guessed. A *Position*
 field is added to the embed when a position is known and the template does not already use `{coords}`.
 
+### Pings (real Discord notifications)
+
+Each category tab has a **Ping** selector: *No ping* (default, also for every existing profile),
+*@here*, *@everyone*, *Specific role*, *Specific user*. Role/user need the Discord ID (17–20 digits;
+enable Developer Mode in Discord → Settings → Advanced, right-click the role/user → Copy ID); Save
+refuses a bad ID, and a hand-edited profile with a bad ID loads as *No ping*.
+
+* The mention goes in the message's top-level `content` (embeds never notify) as a fixed phrase, e.g. `@here Village Watch alert: red player detected`, and `allowed_mentions` permits exactly that target (`parse:["everyone"]` for @here/@everyone; `roles:[id]` or `users:[id]` otherwise). Player names, the watcher name and templates never reach `content`, and with no ping everything stays blocked as before.
+* Pings fire only on a **new** sighting or an **escalation**, never on cooldown repeats. Embed template and screenshot are unchanged.
+* **Test Discord** / **Test screenshot** never ping. **Test ping** (per tab) really notifies, so it needs a second click within 5 s.
+* Discord still decides delivery: the webhook's channel must let the webhook mention that target (`@everyone`/`@here`/non-mentionable roles need the right channel permissions), and each member's notification settings decide whether they get a badge/sound.
+
 ### Profiles — one per lookout
 
 Settings live in named **profiles** (`Southeast Watch`, `North Watch`, …) in one file,

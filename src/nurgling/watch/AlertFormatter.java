@@ -48,7 +48,17 @@ public final class AlertFormatter {
 
     public static DiscordMessage format(WatchProfile profile, ThreatTracker.Alert alert, ZonedDateTime when,
                                         String webhookUsername, String webhookIcon, Shot shot) {
+        return format(profile, alert, when, webhookUsername, webhookIcon, shot, true);
+    }
+
+    /**
+     * @param allowPing false for test messages, which must never notify anyone. Even when true, only a
+     *                  new sighting or an escalation pings - a cooldown repeat never does.
+     */
+    public static DiscordMessage format(WatchProfile profile, ThreatTracker.Alert alert, ZonedDateTime when,
+                                        String webhookUsername, String webhookIcon, Shot shot, boolean allowPing) {
         ThreatTracker.Sighting s = alert.sighting;
+        WatchProfile.Category cat = profile.category(s.category);
         String template = profile.category(s.category).template;
 
         DiscordMessage m = new DiscordMessage();
@@ -61,6 +71,13 @@ public final class AlertFormatter {
         m.color = s.category.embedColor;
         m.footer = "Village Watch | " + profile.watcher;
         m.timestamp = when.toInstant().toString();
+
+        // The mention is built only from the configured target and a fixed phrase - never from the
+        // player's name, the watcher name or the template, so none of those can ping anyone.
+        if (allowPing && alert.reason != ThreatTracker.Reason.REPEAT && cat.ping.usable(cat.pingId)) {
+            m.content = cat.ping.mention(cat.pingId) + " Village Watch alert: " + s.category.label.toLowerCase() + " player detected";
+            m.allowedMentions = cat.ping.allowedMentions(cat.pingId);
+        }
 
         // Position is shown even when the template does not ask for it, but only when it is known.
         if (s.coords != null && !WatchTemplate.usesPlaceholder(template, WatchTemplate.COORDS))
