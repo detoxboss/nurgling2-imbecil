@@ -110,6 +110,28 @@ public class BotRegistry {
                 false,
                 Map.of("endpoint", H4DMarketScanner.DEFAULT_ENDPOINT)
         ));
+        bots.add(new BotDescriptor(
+                VillageWatchBot.BOT_ID,
+                BotDescriptor.BotType.UTILS,
+                "Village Watch",
+                "Passive lookout: sends Discord alerts (with a screenshot) when an unknown, white or red player is near. Runs until stopped - make it the last Scenario step",
+                true,
+                true,
+                VillageWatchBot.class,
+                "villagewatch",
+                false
+        ));
+        bots.add(new BotDescriptor(
+                VillageWatchSettingsAction.BOT_ID,
+                BotDescriptor.BotType.UTILS,
+                "Village Watch Settings",
+                "Opens the Village Watch settings: watcher profiles, message templates, tests, start/stop",
+                false,
+                true,
+                VillageWatchSettingsAction.class,
+                "villagewatchcfg",
+                false
+        ));
 
         // RESOURCES (using localization keys: bot.<id>.title and bot.<id>.desc)
         bots.add(new BotDescriptor("choper", BotDescriptor.BotType.RESOURCES, "bot.chopper.title", "bot.chopper.desc", false, true, Chopper.class, "choper", false));
