@@ -876,6 +876,8 @@ public class NGameUI extends GameUI
         final String name;
         private boolean vertical = false;
         ArrayList<NKeyBinding> beltkeys = new ArrayList<>();
+        /* Scenario/preset buttons live between frames instead of being rebuilt in draw(). */
+        private final nurgling.widgets.ToolBeltButtonCache buttons = new nurgling.widgets.ToolBeltButtonCache();
         public NToolBelt(String name, int start, int group, int size) {
             super( new Coord(0,0) );
             this.start = start;
@@ -1052,6 +1054,7 @@ public class NGameUI extends GameUI
             if(slot < 0) {return null;}
             String path;
             if((path = NToolBeltProp.get(name).custom.get(slot) )== null) {
+                buttons.evict(slot);
                 GameUI.BeltSlot res = null;
                 if (ui != null && belt[slot] != null)
                     res = belt[slot];
@@ -1060,26 +1063,31 @@ public class NGameUI extends GameUI
             else
             {
                 if(path.startsWith("atlas:")) {
+                    buttons.evict(slot);
                     return atlas.catalog().get(path.substring("atlas:".length()));
                 } else if(path.startsWith("scenario:")) {
                     String scenarioName = path.substring("scenario:".length());
                     for(nurgling.scenarios.Scenario scenario : ui.core.scenarioManager.getScenarios().values()) {
                         if(scenario.getName().equals(scenarioName)) {
-                            return new NScenarioButton(scenario);
+                            return buttons.scenario(slot, scenario);
                         }
                     }
+                    buttons.evict(slot);
                     return null;
                 } else if(path.startsWith("equippreset:")) {
                     String presetId = path.substring("equippreset:".length());
-                    nurgling.equipment.EquipmentPreset preset = ui.core.equipmentPresetManager.getPreset(presetId);
-                    if(preset != null) {
-                        return new nurgling.widgets.NEquipmentPresetButton(preset);
-                    }
-                    return null;
+                    return buttons.preset(slot, ui.core.equipmentPresetManager.getPreset(presetId));
                 } else {
+                    buttons.evict(slot);
                     return botsMenu.find(path);
                 }
             }
+        }
+
+        @Override
+        public void dispose() {
+            buttons.clear();
+            super.dispose();
         }
 
         private int slot(int i) {return i + start;}
