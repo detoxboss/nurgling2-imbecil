@@ -70,6 +70,8 @@ public class PathFinder implements Action {
     // Opt-in (Forager): spots walks sharing this list stalled at - blocked like a small obstacle the grid can't see (a young
     // tree with no client hitbox), and appended to on every new stall (see noteStall).
     public List<Coord2d> learnedBlocks = null;
+    // Opt-in: >= 0 treats cliffs and this many tiles around them as walls; -1 (the default) leaves cliffs walkable.
+    public int blockCliffBuffer = -1;
     // With learnedBlocks: stalls allowed in one run() before giving up, instead of bumping the same obstacle until a guard fires.
     public int maxStalls = 3;
     private int stalls = 0;
@@ -505,6 +507,7 @@ public class PathFinder implements Action {
             }
             pfmap.waterMode = waterMode;
             pfmap.gatesAlwaysClosed = gatesAlwaysClosed;
+            pfmap.cliffBuffer = blockCliffBuffer;
             pfmap.build();
             blockAvoided();
             CellsArray dca = null;
@@ -794,6 +797,29 @@ public class PathFinder implements Action {
         PathFinder pf = new PathFinder(target);
         LinkedList<Graph.Vertex> res = pf.construct(true);
         return res != null || pf.dn;
+    }
+
+    /**
+     * How far the player would walk to reach the target: 0 when already there, infinity when there
+     * is no path. Never less than the straight-line distance, so callers can stop searching once
+     * a candidate's straight line is longer than the best walk found so far.
+     */
+    public static double walkLength(Gob target) throws InterruptedException {
+        Gob player = NUtils.player();
+        if(player == null || target == null)
+            return Double.POSITIVE_INFINITY;
+        PathFinder pf = new PathFinder(target);
+        LinkedList<Graph.Vertex> path = pf.construct(true);
+        if(path == null)
+            return pf.dn ? 0 : Double.POSITIVE_INFINITY;
+        double len = 0;
+        Coord2d at = player.rc;
+        for(Graph.Vertex v : path) {
+            Coord2d next = Utils.pfGridToWorld(v.pos);
+            len += at.dist(next);
+            at = next;
+        }
+        return len;
     }
 
     public static boolean isAvailable(Coord2d target) throws InterruptedException {

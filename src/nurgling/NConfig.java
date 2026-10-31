@@ -122,12 +122,13 @@ public class NConfig
         autoDrinkThreshold,
         autoSaveTableware,
         chipperprop,
+        drinkerprop,
         animalrad,
         smokeprop,
         worldexplorerprop,
         questNotified, lpassistent, fishingsettings,
         serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, shareHearthSecret, autoHearthSecret, sharePosition, showPeerPositions, todoNotify, dbGrantRole, dbStatsOverlay, mapShareMarkers, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
-        temsmarktime, exploredAreaEnable, chunkNavOverlay, minimapTogglesShown, player_box, player_fov, temsmarkdist, tempmark, tempmarkIgnoreDist, gridbox, gridWallColor, useGlobalPf, useHFinGlobalPF, boxFillColor, boxEdgeColor, boxLineWidth, ropeAfterFeeding, ropeAfterTaiming, eatingConf, deersprop,dropConf, printpfmap, showPlayerCoords, fonts,
+        temsmarktime, exploredAreaEnable, chunkNavOverlay, minimapTogglesShown, player_box, player_fov, temsmarkdist, tempmark, tempmarkIgnoreDist, gridbox, gridWallColor, gridDiagonals, gridDiagonalColor, useGlobalPf, useHFinGlobalPF, boxFillColor, boxEdgeColor, boxLineWidth, ropeAfterFeeding, ropeAfterTaiming, eatingConf, deersprop,dropConf, printpfmap, showPlayerCoords, fonts,
         areaRankPresets,  // Map of areaId -> Map of animalType -> presetName
         shortCupboards,
         shortPalisades,
@@ -140,6 +141,7 @@ public class NConfig
         persistentBarrelLabels,
         uniformBiomeColors,
         inventoryRightPanelShow,
+        craftUseStorage,     // craft window: autocraft may fetch inputs with no area from the Storage Items index
         inventoryRightPanelMode,
         stackSizeLearning,
         showTerrainName,
@@ -154,6 +156,8 @@ public class NConfig
         curioFinishedSound,
         milestones,          // MilestoneRegistry's persisted gobHash -> {location, destinations[]} map
         milestoneTracking,   // Whether MilestoneTracker passively records signpost/milestone travel
+        roadTags,            // RoadTags' private per-post road labels shown in milestone windows
+        tunnelingBot,        // TunnelingDialog's last choices (direction, support, sides, wings, road, ore stop)
         waypointRetryOnStuck,
         holdToMove,
         verboseCal,
@@ -191,6 +195,7 @@ public class NConfig
         simpleInspect,
         showSpeedometer,
         showPathLine,
+        decoupledRender,
         pathLineWidth,
         pathLineColor,
         parasiteBotEnabled,
@@ -411,7 +416,7 @@ public class NConfig
         conf.put(Key.kamiCompatMapper, false);
         conf.put(Key.showInventoryNums, true);
         conf.put(Key.autoDrink, false);
-        conf.put(Key.autoDrinkThreshold, 75);
+        conf.put(Key.autoDrinkThreshold, 75);  // Stamina % at or below which auto-drink triggers (1-100)
         conf.put(Key.autoSaveTableware, true);
         conf.put(Key.endpoint, "");
         conf.put(Key.questNotified, false);
@@ -449,6 +454,7 @@ public class NConfig
         conf.put(Key.player_box, false);
         conf.put(Key.player_fov, false);
         conf.put(Key.gridbox, false);
+        conf.put(Key.gridDiagonals, false);
         conf.put(Key.tempmark, false);
         conf.put(Key.tempmarkIgnoreDist, false);
         conf.put(Key.temsmarkdist, 4);
@@ -474,6 +480,7 @@ public class NConfig
         conf.put(Key.persistentBarrelLabels, false);
         conf.put(Key.uniformBiomeColors, false);
         conf.put(Key.inventoryRightPanelShow, false);
+        conf.put(Key.craftUseStorage, false);
         conf.put(Key.inventoryRightPanelMode, "EXPANDED");
         conf.put(Key.stackSizeLearning, true);
         conf.put(Key.showTerrainName, false);
@@ -484,12 +491,15 @@ public class NConfig
         conf.put(Key.curioFinishedSound, true);
         conf.put(Key.milestones, "");
         conf.put(Key.milestoneTracking, true);
+        conf.put(Key.roadTags, "");
+        conf.put(Key.tunnelingBot, "");
         conf.put(Key.waypointRetryOnStuck, true);
         conf.put(Key.holdToMove, false);
         conf.put(Key.verboseCal, false);
         conf.put(Key.highlightRockTiles, true);
         conf.put(Key.showSpeedometer, false);
         conf.put(Key.showPathLine, false);
+        conf.put(Key.decoupledRender, false);
         conf.put(Key.pathLineWidth, 4);
         conf.put(Key.pathLineColor, new Color(255, 255, 0));  // Yellow
 
@@ -1274,6 +1284,9 @@ public class NConfig
                                 break;
                             case "NChipperProp":
                                 res.add(new NChipperProp(obj));
+                                break;
+                            case "NDrinkerProp":
+                                res.add(new NDrinkerProp(obj));
                                 break;
                             case "NPrepBProp":
                                 res.add(new NPrepBlocksProp(obj));

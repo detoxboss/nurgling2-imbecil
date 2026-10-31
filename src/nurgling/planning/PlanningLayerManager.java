@@ -359,6 +359,57 @@ public class PlanningLayerManager implements ProfileAwareService, PlanningServic
         synchronized (treeLock) { return ghostById.containsKey(id); }
     }
 
+    public PlanningGhost getGhostById(String id) {
+        synchronized (treeLock) { return ghostById.get(id); }
+    }
+
+    /** Name of the layer holding the ghost, or null if it is gone. */
+    public String layerNameOf(String ghostId) {
+        synchronized (treeLock) {
+            String layerId = layerByGhostId.get(ghostId);
+            PlanningNode n = (layerId != null) ? byId.get(layerId) : null;
+            return (n != null) ? n.name : null;
+        }
+    }
+
+    /** Ghosts of a layer, or of every layer in a folder, regardless of visibility. */
+    public List<PlanningGhost> ghostsOf(String nodeId) {
+        List<PlanningGhost> out = new ArrayList<>();
+        synchronized (treeLock) {
+            PlanningNode n = byId.get(nodeId);
+            if (n instanceof PlanningFolder) {
+                for (PlanningLayer layer : ((PlanningFolder) n).layers) out.addAll(layer.ghosts);
+            } else if (n instanceof PlanningLayer) {
+                out.addAll(((PlanningLayer) n).ghosts);
+            }
+        }
+        return out;
+    }
+
+    /** Ghosts of every visible layer whose centre lies in the world rectangle (loaded grids only). */
+    public List<PlanningGhost> visibleGhostsIn(Coord2d minWorld, Coord2d maxWorld) {
+        List<PlanningGhost> out = new ArrayList<>();
+        Glob glob = activeGlob();
+        if (glob == null) return out;
+        synchronized (treeLock) {
+            for (PlanningNode n : byId.values()) {
+                if (!(n instanceof PlanningLayer) || !effectiveVisibleUnlocked(n)) continue;
+                for (PlanningGhost g : ((PlanningLayer) n).ghosts) {
+                    Coord2d wp = resolveWorldPos(g, glob);
+                    if (wp != null && wp.x >= minWorld.x && wp.x < maxWorld.x && wp.y >= minWorld.y && wp.y < maxWorld.y)
+                        out.add(g);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** World position of the ghost in the active world, or null if its grid isn't loaded. */
+    public Coord2d worldPosOf(PlanningGhost g) {
+        Glob glob = activeGlob();
+        return (glob == null) ? null : resolveWorldPos(g, glob);
+    }
+
     public String getActiveLayerId() { return activeLayerId; }
 
     public PlanningLayer getActiveLayer() { return getLayer(activeLayerId); }
@@ -1152,28 +1203,46 @@ public class PlanningLayerManager implements ProfileAwareService, PlanningServic
         Glob glob = activeGlob();
         PlannerPreset p = new PlannerPreset();
         p.name = name;
-        if (glob != null) {
-            synchronized (treeLock) {
-                List<PlanningLayer> layers = new ArrayList<>();
-                for (PlanningNode n : roots) {
-                    if (n instanceof PlanningFolder) layers.addAll(((PlanningFolder) n).layers);
-                    else if (n instanceof PlanningLayer) layers.add((PlanningLayer) n);
-                }
-                for (PlanningLayer layer : layers) {
-                    if (!effectiveVisibleUnlocked(layer)) continue;
-                    PlannerPreset.Layer pl = new PlannerPreset.Layer(layer.name);
-                    for (PlanningGhost g : layer.ghosts) {
-                        Coord2d wp = resolveWorldPos(g, glob);
-                        if (wp == null) continue;
-                        if (wp.x >= minWorld.x && wp.x < maxWorld.x && wp.y >= minWorld.y && wp.y < maxWorld.y)
-                            pl.ghosts.add(new PlannerPreset.Ghost(g.resName, g.sdt, wp.x, wp.y, g.angleRadians()));
-                    }
-                    if (!pl.ghosts.isEmpty()) p.layers.add(pl);
-                }
-            }
-        }
+        if (glob != null) p.layers.addAll(regionGhostLayers(glob, minWorld, maxWorld));
         if (p.layers.size() > 1) p.kind = PlannerPreset.Kind.FOLDER;
         return finishCapture(p, 0);
+    }
+
+    /**
+     * Saves what is built in the world rectangle, plus the ghosts of every visible layer there, as a
+     * one-layer preset. See {@link WorldCapture}.
+     */
+    public WorldCapture.Result capturePresetWorld(String name, Coord2d minWorld, Coord2d maxWorld) throws PlannerPreset.CaptureException {
+        Glob glob = activeGlob();
+        if (glob == null)
+            throw new PlannerPreset.CaptureException(nurgling.i18n.L10n.get("planner.preset.world_unloaded"));
+        List<PlannerPreset.Ghost> ghosts = new ArrayList<>();
+        for (PlannerPreset.Layer l : regionGhostLayers(glob, minWorld, maxWorld)) ghosts.addAll(l.ghosts);
+        return WorldCapture.capture(name, glob, minWorld, maxWorld, ghosts);
+    }
+
+    /** Ghosts of every visible layer whose centre lies in the world rectangle, per layer, in world units. */
+    private List<PlannerPreset.Layer> regionGhostLayers(Glob glob, Coord2d minWorld, Coord2d maxWorld) {
+        List<PlannerPreset.Layer> res = new ArrayList<>();
+        synchronized (treeLock) {
+            List<PlanningLayer> layers = new ArrayList<>();
+            for (PlanningNode n : roots) {
+                if (n instanceof PlanningFolder) layers.addAll(((PlanningFolder) n).layers);
+                else if (n instanceof PlanningLayer) layers.add((PlanningLayer) n);
+            }
+            for (PlanningLayer layer : layers) {
+                if (!effectiveVisibleUnlocked(layer)) continue;
+                PlannerPreset.Layer pl = new PlannerPreset.Layer(layer.name);
+                for (PlanningGhost g : layer.ghosts) {
+                    Coord2d wp = resolveWorldPos(g, glob);
+                    if (wp == null) continue;
+                    if (wp.x >= minWorld.x && wp.x < maxWorld.x && wp.y >= minWorld.y && wp.y < maxWorld.y)
+                        pl.ghosts.add(new PlannerPreset.Ghost(g.resName, g.sdt, wp.x, wp.y, g.angleRadians()));
+                }
+                if (!pl.ghosts.isEmpty()) res.add(pl);
+            }
+        }
+        return res;
     }
 
     private static PlannerPreset finishCapture(PlannerPreset p, int unloaded) throws PlannerPreset.CaptureException {

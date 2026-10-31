@@ -46,26 +46,35 @@ upstream's `NCombatData`-based HUD wholesale while re-grafting these same hooks 
 same non-exclusive-control semantics — not merely when upstream adds its own combat automation, which
 may make different tradeoffs entirely.
 
-## MapFile shared `(ResCache, filename)` locking
+## MapFile shared `(ResCache, filename)` locking — SUPERSEDED by upstream (2026-10-30 sync)
 
-**File:** `src/haven/MapFile.java`
+**File:** `src/haven/MapFile.java` (now identical to upstream Nurgling2 at `2ce51342e`)
 
-**Fork behavior:** Map file locks are keyed by `(ResCache, filename)` and shared across sessions
-running in the same process, instead of being exclusive per-session.
+**Status: retired.** The fork's `sessionLocks`/`sharedLock(...)` machinery (an `IdentityHashMap` of
+`ReentrantReadWriteLock`s keyed by `(ResCache, filename)`, handed to every `MapFile` constructed for
+that pair) was removed in the 2026-10-30 sync. Upstream commit `ae0f6bd11` ("Map: share one MapFile
+between sessions") replaced the model it was patching:
 
-**Why:** This fork supports multiple concurrent game sessions in one client process
-(`src/nurgling/sessions/**`). Per-session-exclusive locking would make two sessions touching the same
-map data fight each other or corrupt state; the shared-lock model lets them cooperate.
+- `MapFile.load(store, filename)` now returns **one cached `MapFile` per `(ResCache, filename)`**
+  (static `loaded` map, `synchronized`), so every session in the process shares the same segments,
+  markers, index and lock. Upstream's reason: separate per-session instances each cached the segment
+  index and wrote it back whole, so two sessions lost each other's grids and markers — a lost-write
+  problem the fork's shared lock serialized but never fixed.
+- `BackCache.cached/get/put/remove` became `synchronized`, because several UI threads now hold
+  `MapFile`'s read lock on the same instance at once.
 
-**Minimum hook that must survive:** lock acquisition must remain keyed by the `(ResCache, filename)`
-pair, not by session identity.
+The only `MapFile` construction path is `MapFile.load` (`GameUI` is its sole caller; nothing calls
+`new MapFile` elsewhere), so with one instance per pair the fork's cross-instance lock had nothing left
+to share. Fork readers (`mapv4.Requestor`'s `mapfile.lock.readLock()`, `FishLocationService`,
+`TreeLocationService`, `WaypointMovementService`, `MapMerge`) work unchanged against the shared
+instance.
 
-**Verify:** run two sessions against overlapping map data; confirm no lock contention crash and no map
-corruption.
+**Replacement invariant (upstream-owned, watch it in future syncs):** one `MapFile` per
+`(ResCache, filename)` per process, reached only through `MapFile.load`. If upstream ever reintroduces
+a per-session `new MapFile(...)` path, the lost-write problem returns and this entry must be revived.
 
-**Superseded when:** upstream adopts multi-session support natively with its own cross-session map
-coordination — at that point this override should be reassessed against whatever upstream's model is,
-not assumed to still be the better choice.
+**Verify:** two sessions on the same world: explore and place markers in both, log both out, log back
+in, confirm no grids or markers were lost.
 
 ## Explicit-session area/scenario/explored-area persistence
 
@@ -176,6 +185,21 @@ multi-session case.
 session's player position, not the other's. As of 2026-09-30: also open two sessions with different
 timer sets and different labeled marks, switch the foreground tab, and confirm each minimap keeps
 drawing and hit-testing only its own session's timers and marks, never the other session's.
+
+As of the 2026-10-30 sync, the same rule covers the Base planner's one-shot map selectors in
+`src/nurgling/NMapView.java`. Upstream added `PlanningBuildSelector` (Blueprint Builder "Build
+region") and a `fromWorld` mode to `PlanningPresetSelector`; git's auto-merge moved the fork's
+owning-session fix out of `PlanningPresetSelector.mmouseup` and into the new `PlanningBuildSelector`,
+leaving the preset selector ambient (`NUtils.getGameUI().basePlanner`) with no conflict marker. Both
+selectors now resolve the planner through `NMapView.ownerBasePlanner()` (`ui.gui` of the map view
+itself). Watch this pair in every sync: the two `mmouseup` bodies are near-identical, which is
+exactly what lets a hunk land in the wrong one. The arming checks in `NMapView.mousedown` and the
+"clear in area" selector still read `NUtils.getGameUI().basePlanner`; that is pre-existing code,
+deliberately left as is (mouse input only reaches the rendered session's map).
+
+The same sync also corrected two upstream-new UI-thread lookups to their widget's own session:
+`NMakewindow.craftAll()` (`getparent(NGameUI.class)`, as its sibling `craft()` path in the storage
+snapshot already did) and `CattleRoster.areaName()` (`getparent(GameUI.class)`).
 
 **Superseded when:** same condition as `NGameUI` teardown, above. **Not yet superseded** — see the
 note at the end of this document on upstream's partial multi-session convergence: upstream removed
@@ -309,7 +333,10 @@ hard invariant.
 
 **Verify:** diff entry count before/after any sync; confirm every fork bot id is still present with its
 registered class, correct `BotType`, and in a reasonable position within its category's button
-ordering.
+ordering. Count **live** registrations (`BotRegistry.all()`), not `bots.add` text lines: the file
+carries one commented-out `//bots.add(...testzonepatroller...)` line that a text grep counts. As of
+the 2026-10-30 sync: 207 live (198 at the merge base + 6 fork + 3 upstream), asserted by
+`test/nurgling/actions/bots/registry/SyncRegistryInventoryTest.java`.
 
 **Superseded when:** never wholesale — same open-ended nature as the config keys above.
 
@@ -463,6 +490,29 @@ and toggling threshold takes effect without a client restart.
 **Superseded when:** upstream ships an equivalent configurable-threshold, DrinkMeter-based, bot-agnostic
 Auto-drink of its own — at which point this override should be diffed against upstream's approach rather
 than assumed to still be correct.
+
+**Partial upstream convergence (2026-10-30 sync).** Upstream commit `b74c81705` independently added
+the same `NConfig.Key.autoDrinkThreshold` key, a QoL slider for it (10-95%, default 50%), and an
+`AutoDrink.getThreshold()` read — but kept the `waitBot` blanket pause and the Belt/bucket water walk.
+Resolution: the enum entry merged as one key; **upstream's slider UI and label wording
+(`qol.auto_drink_threshold` = "Trigger at stamina:") are adopted, with the fork's range 1-100% and
+default 75%**; the fork's `AutoDrink.java` is kept entire (latch, DrinkMeter check, backoff,
+no `waitBot` gate) and upstream's `getThreshold()` was dropped as a duplicate of
+`getThresholdPercent()`; the fork's tooltip text stays. Saved values are untouched: the key name and
+unit (percent) are the same on both sides, `NConfig`'s constructor seeds 75 and `read()` only
+overrides keys the file carries.
+
+**Drinker bot coordination (2026-10-30 sync).** Upstream's new Drinker bot sips through the same
+`gfx/borka/drinkan` pose and the session's last-error slot that Auto-drink uses: its `WaitSip`
+counts *any* drinking pose as a finished sip and *any* error as a refused one, and Auto-drink calls
+`dropLastError()` before pressing Drink. Running both would make each misread the other. The fork
+adds a per-session `nurgling.actions.AutoDrinkGate` (`NCore.autoDrinkGate`, passed to `AutoDrink`'s
+constructor): `DrinkerBot.run` holds a lease, via try-with-resources, around its sip loop only (not
+cup fetching/returning), and first waits — bounded — for an Auto-drink Drink already in flight;
+Auto-drink keeps its latch but does not press Drink while a lease is held. No static state; another
+session's Drinker never affects this session; any other bot still runs alongside Auto-drink exactly
+as before. Hooks: `NCore` (field + constructor argument), `DrinkerBot.run` (lease block +
+`WaitAutoDrinkIdle`). Tests: `test/nurgling/actions/AutoDrinkGateTest.java`.
 
 **i18n note (added 2026-09-17 sync):** upstream may carry its own `qol.auto_drink_tip`-style tooltip
 wording describing *upstream's* older Auto-drink behavior (fixed threshold, paused while any bot
@@ -1015,6 +1065,18 @@ extensions" entry above for the standing rule; full design and the "future relea
 `docs/inventory-grid-system.md` §3, which is canonical for this subsystem — do not re-derive the
 reconciliation rules here.
 
+**Second reconciliation, `0002-stack-seed-reconcile-2026-10-30` (2026-10-30 sync).** `0001` runs
+once per database, so a later upstream correction to the static table never reaches a database that
+already ran it — the DB row shadows the fix and learning cannot lower it. Upstream `2ce51342e`
+changed Adder Skeleton 4 → 3 and dropped Block of Trombone Chantrelle, Beech Seed and the mislabelled
+"Mammoth Meat" (a Bullfinch entry) from categories they never belonged to; renames (Cherry →
+Cherries, Larch Cone → Larch Cones, Witherstand Seed → Withercorn, …) only add names. A new ledger
+id calls the same `reconcileStackSizes` (same provenance/tombstone rules, version bump per changed
+row); on a database `0001` just seeded it is a no-op. Proved on disposable SQLite in
+`MigrationLineageTest.reconcile20261030CorrectsSeedRowsOnADatabaseThatAlreadyRan0001`. Rule for
+future syncs: when upstream changes an existing static stack fact (not just adds names), add a new
+`000N-stack-seed-reconcile-<date>` id rather than editing an old one.
+
 **`version` increment requirement for sync propagation.** Any write that changes a row's stored
 value — passive learning, manual calibration, or migration-time reconciliation — must increment
 `version` in the same statement. `StackSizeService.runDeltaPoll()` only refetches a row when the
@@ -1092,6 +1154,16 @@ depends on it); `NAlarmWdg.isMapFullyLoaded()` (if upstream renames the private 
 Session ownership is explicit: `GobScanner`, `MapScreenshotProvider` and `WatchStatus` take the owning
 `NGameUI`; nothing resolves a session through `NUtils.getGameUI()` except the Scenario-panel button,
 which prefers `panel.ui`.
+
+**Renderer dependency (2026-10-30 sync).** Screenshots ride `MapView.delay2` + `GOut.getimage` inside
+the map's UI-thread draw. Upstream's opt-in, Vulkan-only **smooth renderer** (`PresentLoop`; the 3D
+pass moves to a present thread, the UI thread draws only 2D overlays) and **frame bridge**
+(`BridgeToolkit`; the map draws into a separate margin-padded scene image) both break that assumption.
+`MapScreenshotProvider.rendererReason(...)` refuses a screenshot in either mode — up front via
+`BridgeToolkit.of(ui)` / `PresentLoop.wanted()`, and again inside the `delay2` callback via
+`PresentLoop.of(ui)` — so the alert goes out text-only with the reason, never with a blank or
+interface-only image. Normal rendering is unaffected. If upstream changes `delay2`, `PView.draw`,
+`PresentLoop.of` or `BridgeToolkit.of`, re-check this guard.
 
 **Verify:** after a sync, `ant jar && ant test` (the `nurgling.watch`, `nurgling.notifications` and
 `VillageWatchBotSettingsTest` tests), `village_watch` present exactly once in `BotRegistry`, and the

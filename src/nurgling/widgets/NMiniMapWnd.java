@@ -44,7 +44,7 @@ public class NMiniMapWnd extends Widget{
         }
 
         private boolean usesAutoExposure() {
-            return ui != null && NGfx.supported(ui.getenv());
+            return ui != null && NGfx.effective(ui.getenv()).enabled;
         }
 
         @Override
@@ -481,6 +481,14 @@ public class NMiniMapWnd extends Widget{
             return(super.allowzoomout());
         }
 
+    }
+
+    /** Adds a button to the end of the toggle panel (for plugins); it wraps, and hides with the collapse control, like the built-in ones. */
+    public void addToggle(Widget btn) {
+        if(buttons.contains(btn))
+            return;
+        buttons.add(btn);
+        applyToggleVisibility();
     }
 
     /* Show or hide everything but the collapse control itself. */

@@ -217,7 +217,7 @@ public class LpExplorer {
         return new UndiscoveredCategories(seed, leaf, bough, bark);
     }
 
-    private static boolean isLeafProduct(String product) {
+    public static boolean isLeafProduct(String product) {
         return product.contains("Leaf") || product.contains("Leaves");
     }
 
@@ -228,7 +228,7 @@ public class LpExplorer {
     // - bough-equivalents aren't seasonal/bit-gated) and making the bot's LpActionMatcher classify
     // it as SEED, where findSeedPetal() (which only matches "Pick "-prefixed petals) could never
     // find its actual petal, "Take branch".
-    private static boolean isBoughProduct(String product) {
+    public static boolean isBoughProduct(String product) {
         return product.contains("Bough") || product.equals("Olive Branch");
     }
 
@@ -321,7 +321,7 @@ public class LpExplorer {
     // Whether this exact product is still undiscovered for this gob - package-visible so
     // ProductListHarvestSpec (the log/stone always-on overlay) can tint individual icons the same
     // way the tree/bush categories already do.
-    static boolean isProductUndiscovered(String gobResName, String product) {
+    public static boolean isProductUndiscovered(String gobResName, String product) {
         NCharacterInfo info = charInfo();
         if (info == null || gobResName == null || product == null)
             return false;
@@ -412,7 +412,7 @@ public class LpExplorer {
         if (gobName == null)
             return;
 
-        if (!recentHarvestClick(gui.map))
+        if (!recentHarvestClick(gui.map) && !recentBotHarvestClick())
             return;
 
         if (!info.IsLpExplorerContains(gobName, name)) {
@@ -457,6 +457,19 @@ public class LpExplorer {
             timedClickAt = now;
         }
         return (now - timedClickAt) < HARVEST_CLICK_WINDOW;
+    }
+
+    /**
+     * The same check for clicks sent by bots. They right-click through map.wdgmsg, which never
+     * sets MapView.clickedGob, so without this a bot's harvests are never credited and a bot
+     * hunting undiscovered products would keep returning to the same gob. NCore sees every
+     * right-click and stamps it with its own time.
+     */
+    private static boolean recentBotHarvestClick() {
+        if (NUtils.getUI() == null || NUtils.getUI().core == null)
+            return false;
+        Gob gob = NUtils.getUI().core.recentClickedGob(HARVEST_CLICK_WINDOW);
+        return gob != null && gob.ngob != null && HarvestSpecs.forResource(gob.ngob.name) != null;
     }
 
     private static NCharacterInfo charInfo() {

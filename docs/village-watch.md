@@ -109,6 +109,27 @@ moved).
 | **A. Separate client windows**, one lookout each | Supported. Each window captures its own map view. |
 | **B. Several sessions in one window** — the on-screen session | Supported (same as A). |
 | **B. Several sessions in one window** — any background session | **Not supported.** Text alert only, with *Screenshot: Not attached: this session is in the background…* in the embed. |
+| **Smooth renderer** on (Graphics settings, Vulkan) | **Not supported** (since the 2026-10-30 upstream sync). Text alert only, with the reason. |
+| **Frame bridge** on (Graphics settings, Vulkan) | **Not supported** (since the 2026-10-30 upstream sync). Text alert only, with the reason. |
+
+Why the two upstream render modes are refused (code read, not live-tested): with the smooth renderer
+the 3D world is drawn by a separate present thread (`PresentLoop`), and the map's UI-thread draw — where
+`delay2` runs — only draws 2D overlays, so `getimage` would read back the interface layer without the
+world. With the frame bridge the map draws into its own margin-padded scene image (`BridgeToolkit`).
+Neither has been shown to give a real picture, and an empty or interface-only image would look like a
+real screenshot, so `MapScreenshotProvider.rendererReason(...)` refuses both: once before scheduling
+the capture (`BridgeToolkit.of(ui)`, `PresentLoop.wanted()`), and again inside the draw for the mode
+actually in use that frame (`PresentLoop.of(ui)`). The same applies to **Test screenshot**.
+
+Runtime matrix for this guard (all `NOT RUN`):
+
+| Mode | Expected | Status |
+|---|---|---|
+| Normal OpenGL | Screenshot attached, shows the world | NOT RUN |
+| Normal Vulkan | Screenshot attached, shows the world | NOT RUN |
+| Vulkan + smooth renderer | Text-only, "the smooth renderer is on…" | NOT RUN |
+| Vulkan + frame bridge | Text-only, "the frame bridge is on…" | NOT RUN |
+| Smooth renderer on, but it fell back (present loop failed) | Text-only via the up-front check (conservative) | NOT RUN |
 
 Why background sessions can't (code read, not live-tested): `SessionContext.demoteToHeadless()` stops
 rendering the session, and `promoteToVisual(env)` hands it the window's single GL environment; the

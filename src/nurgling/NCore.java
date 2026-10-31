@@ -30,6 +30,8 @@ public class NCore extends Widget
     boolean isinspect = false;
     public NMappingClient mappingClient;
     public volatile AutoDrink autoDrink = null;
+    /** This session's Auto-drink / Drinker coordination; see AutoDrinkGate. */
+    public final nurgling.actions.AutoDrinkGate autoDrinkGate = new nurgling.actions.AutoDrinkGate();
     public volatile AutoSaveTableware autoSaveTableware = null;
     private volatile Thread autoDrinkThread = null;
     private volatile Thread autoSaveTablewareThread = null;
@@ -222,6 +224,15 @@ public class NCore extends Widget
             return null;
         clickedGobId = -1;
         return gob;
+    }
+
+    /** As takeClickedGob, but with a caller-chosen age limit and without forgetting the click. */
+    public Gob recentClickedGob(long maxAgeMs)
+    {
+        long id = clickedGobId;
+        if (id < 0 || System.currentTimeMillis() - clickedGobAt > maxAgeMs || ui == null || ui.sess == null)
+            return null;
+        return ui.sess.glob.oc.getgob(id);
     }
 
 
@@ -428,7 +439,7 @@ public class NCore extends Widget
         {
             synchronized (autoHelperLock) {
                 if (!autoHelpersDisposed && autoDrink == null) {
-                    AutoDrink action = new AutoDrink();
+                    AutoDrink action = new AutoDrink(autoDrinkGate);
                     autoDrink = action;
                     autoDrinkThread = BotExecutor.runTask("AutoDrink", () -> {
                         try {

@@ -7,6 +7,11 @@ import nurgling.actions.bots.H4DMarketScanner;
 import nurgling.actions.bots.SetSpeedBot;
 import nurgling.actions.bots.WaitBot;
 import nurgling.actions.bots.areamover.AreaMoverBot;
+import nurgling.actions.bots.drinker.DrinkerBot;
+import nurgling.actions.bots.drinker.Vessels;
+import nurgling.actions.bots.blueprint.BlueprintBuilder;
+import nurgling.planning.PlanningFolder;
+import nurgling.planning.PlanningNode;
 import nurgling.actions.bots.registry.BotDescriptor;
 import nurgling.actions.bots.registry.BotRegistry;
 import nurgling.conf.NForagerProp;
@@ -180,6 +185,57 @@ public class StepSettingsPanel extends Widget {
             y += UI.scale(30);
             add(new Label("Blank = H4D_MARKET_INGEST_TOKEN"), new Coord(UI.scale(8), y));
             y += UI.scale(28);
+        }
+        if (desc.id.equals("blueprint_builder")) {
+            hasAnySetting = true;
+            add(new Label(L10n.get("bbuilder.step.node")), new Coord(UI.scale(8), y));
+            y += UI.scale(24);
+
+            // Folders and layers of the Base planner, layers indented under their folder.
+            List<PlanningNode> nodes = new ArrayList<>();
+            for (PlanningNode n : NUtils.getUI().core.planningLayer.getRoots()) {
+                nodes.add(n);
+                if (n instanceof PlanningFolder) nodes.addAll(((PlanningFolder) n).layers);
+            }
+            String current = (String) step.getSetting(BlueprintBuilder.SETTING_NODE);
+            PlanningNode selectedNode = null;
+            for (PlanningNode n : nodes) {
+                if (n.id.equals(current)) {
+                    selectedNode = n;
+                    break;
+                }
+            }
+            if (selectedNode == null && !nodes.isEmpty()) {
+                selectedNode = nodes.get(0);
+            }
+
+            NDropbox<PlanningNode> nodeDropdown = new NDropbox<PlanningNode>(
+                    UI.scale(200),
+                    Math.min(nodes.size(), 10),
+                    UI.scale(22)
+            ) {
+                @Override
+                protected PlanningNode listitem(int i) { return nodes.get(i); }
+                @Override
+                protected int listitems() { return nodes.size(); }
+                @Override
+                protected void drawitem(GOut g, PlanningNode item, int i) {
+                    g.text((item.parentId != null ? "  " : "") + item.name, Coord.z);
+                }
+                @Override
+                public void change(PlanningNode item) {
+                    super.change(item);
+                    if (item != null) {
+                        step.setSetting(BlueprintBuilder.SETTING_NODE, item.id);
+                    }
+                }
+            };
+            if (selectedNode != null) {
+                nodeDropdown.change(selectedNode);
+            }
+
+            add(nodeDropdown, new Coord(UI.scale(8), y));
+            y += UI.scale(40);
         }
         if (desc.id.equals("forager")) {
             hasAnySetting = true;
@@ -669,6 +725,50 @@ public class StepSettingsPanel extends Widget {
 
             add(targetEntry, new Coord(UI.scale(8), y));
             y += UI.scale(30);
+        }
+        if (desc.id.equals("drinker")) {
+            hasAnySetting = true;
+            add(new Label("Cup and sips per drink (0 = skip):"), new Coord(UI.scale(8), y));
+            y += UI.scale(24);
+            List<String> cupNames = new ArrayList<>();
+            for (Vessels.Cup c : Vessels.CUPS)
+                cupNames.add(c.name);
+            for (Vessels.Drink d : Vessels.DRINKS) {
+                String sipsKey = DrinkerBot.SETTING_PREFIX + d.name;
+                String cupKey = DrinkerBot.CUP_PREFIX + d.name;
+                Object current = step.getSetting(sipsKey);
+                int sips = current instanceof Number ? ((Number) current).intValue() : 0;
+                step.setSetting(sipsKey, sips);
+                Object currentCup = step.getSetting(cupKey);
+                String cup = currentCup instanceof String && Vessels.isCup((String) currentCup) ? (String) currentCup : d.cup;
+                step.setSetting(cupKey, cup);
+                add(new Label(d.name), new Coord(UI.scale(8), y + UI.scale(3)));
+                Dropbox<String> cupBox = add(new Dropbox<String>(UI.scale(150), cupNames.size(), UI.scale(16)) {
+                    @Override
+                    protected String listitem(int i) { return cupNames.get(i); }
+                    @Override
+                    protected int listitems() { return cupNames.size(); }
+                    @Override
+                    protected void drawitem(GOut g, String item, int i) { g.text(item, Coord.z); }
+                    @Override
+                    public void change(String item) {
+                        super.change(item);
+                        step.setSetting(cupKey, item);
+                    }
+                }, new Coord(UI.scale(90), y));
+                cupBox.sel = cup;
+                add(new TextEntry(UI.scale(50), String.valueOf(sips)) {
+                    @Override
+                    protected void changed() {
+                        try {
+                            step.setSetting(sipsKey, Math.max(0, Integer.parseInt(text().trim())));
+                        } catch (NumberFormatException e) {
+                            // Ignore invalid input
+                        }
+                    }
+                }, new Coord(UI.scale(250), y));
+                y += UI.scale(24);
+            }
         }
         if (desc.id.equals("area_mover")) {
             hasAnySetting = true;

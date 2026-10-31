@@ -73,7 +73,8 @@ public class StepListWidget extends Widget {
                     boolean hasSettings = desc != null && ("goto_area".equals(desc.id) || "forager".equals(desc.id)
                             || "gate".equals(desc.id) || "set_speed".equals(desc.id)
                             || H4DMarketScanner.BOT_ID.equals(desc.id) || "area_mover".equals(desc.id)
-                            || nurgling.actions.bots.VillageWatchBot.BOT_ID.equals(desc.id));
+                            || nurgling.actions.bots.VillageWatchBot.BOT_ID.equals(desc.id)
+                            || "drinker".equals(desc.id) || "blueprint_builder".equals(desc.id));
                     String marker = hasSettings ? " ✪" : "";
                     Label label = new Label(botId + marker);
 
