@@ -41,7 +41,7 @@ weather replacement, reset and effect disposal.
 
 ## Movement hiccup capture (OpenGL and Vulkan)
 
-Press **Ctrl+F9** immediately after a movement hitch. The client keeps a bounded
+Press **Ctrl+Shift+F9** immediately after a movement hitch. The client keeps a bounded
 in-memory trace and saves ten seconds before the keypress plus two seconds after
 it to `diagnostics/movement-*.zip` relative to the client's working directory
 (`bin/diagnostics` for the development launcher). A game message confirms the

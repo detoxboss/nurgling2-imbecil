@@ -55,7 +55,7 @@ public class MovementTraceTest {
         require(empty.invalid==4&&empty.worst.isEmpty()&&Double.isNaN(empty.low(.01))&&empty.report().contains("average_fps=unavailable"),"Missing/invalid frame reporting");
         require(new FrameStats(samples.subList(0,3)).tailCount(.001)==1,"Short capture low must retain one sample");
         Canvas source=new Canvas();
-        require(MovementTrace.capture.key().match(new KeyEvent(source,KeyEvent.KEY_PRESSED,0,InputEvent.CTRL_DOWN_MASK,KeyEvent.VK_F9,KeyEvent.CHAR_UNDEFINED)),"Ctrl+F9 not bound");
+        require(MovementTrace.capture.key().match(new KeyEvent(source,KeyEvent.KEY_PRESSED,0,InputEvent.CTRL_DOWN_MASK|InputEvent.SHIFT_DOWN_MASK,KeyEvent.VK_F9,KeyEvent.CHAR_UNDEFINED)),"Ctrl+Shift+F9 not bound");
         require(!MovementTrace.capture.key().match(new KeyEvent(source,KeyEvent.KEY_PRESSED,0,0,KeyEvent.VK_F9,KeyEvent.CHAR_UNDEFINED)),"Plain F9 intercepted");
         MovementTrace.Ring small=new MovementTrace.Ring(3);
         for(int i=0;i<5;i++)small.add("frame",MovementTrace.row(i),null);
@@ -162,7 +162,7 @@ public class MovementTraceTest {
         Path retry=Files.createDirectory(dir.resolve("retry"));
         require(failure.request(retry),"Write failure permanently blocked subsequent captures");
         awaitArchive(retry);failure.dispose();
-        System.out.println("Movement trace PASS: Ctrl+F9, ring retention/wrap, session and mount filtering, pre/post trigger ZIP, repeat guard, UTF-8 and disposal");
+        System.out.println("Movement trace PASS: Ctrl+Shift+F9, ring retention/wrap, session and mount filtering, pre/post trigger ZIP, repeat guard, UTF-8 and disposal");
         System.out.println("Archive: "+archive);
         System.exit(0);
     }

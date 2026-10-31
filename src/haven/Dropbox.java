@@ -63,7 +63,9 @@ public abstract class Dropbox<T> extends ListWidget<T> {
         }
 
         public void change(T item) {
-            Dropbox.this.change(item);
+            /* A click outside the rows or on an empty row yields null; just close the popup. */
+            if(item != null)
+                Dropbox.this.change(item);
             reqdestroy();
         }
     }

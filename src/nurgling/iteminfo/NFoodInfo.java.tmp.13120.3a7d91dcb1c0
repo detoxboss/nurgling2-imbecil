@@ -1,0 +1,859 @@
+package nurgling.iteminfo;
+
+import haven.*;
+import static haven.BAttrWnd.Constipations.tflt;
+import static haven.CharWnd.iconfilter;
+import static haven.PUtils.convolvedown;
+import haven.resutil.*;
+import nurgling.*;
+import nurgling.iteminfo.food.FoodModifierReader;
+import nurgling.iteminfo.food.FoodModifiers;
+import nurgling.styles.TooltipStyle;
+import nurgling.tools.NSearchItem;
+import nurgling.widgets.*;
+
+import java.awt.*;
+import java.awt.image.*;
+import java.util.*;
+import java.util.List;
+
+public class NFoodInfo extends FoodInfo  implements GItem.OverlayInfo<Tex>, NSearchable
+{
+    public NFoodInfo(Owner owner, double end, double glut, double sev, Event[] evs, Effect[] efs, int[] types)
+    {
+        this(owner, end, glut, sev, 0, evs, efs, types);
+    }
+
+    public static boolean show;
+
+    // Account bonuses (1.5 subscribed, 1.2 verified) now live in FoodModifiers.
+    static double coefVar = 0.3999;
+    String name;
+    String s_end;
+    String s_glut;
+    String s_end_glut;
+    public double fepSum = 0;
+    boolean isVarity;
+    double expeted_fep;
+    double needed;
+    public boolean needToolTip = false;
+    private static final double FEP_EPSILON = 0.005;
+
+    public void consumedTooltip() {
+        needToolTip = false;
+    }
+    double delta = 0;
+    // Identity of the modifiers the last tooltip build showed (every factor, status and the Deep Worm
+    // flag), so any displayed change triggers a rebuild even if the predicted FEP happens not to move
+    int shownModifiers = 0;
+    HashMap<String, Double> searchImage = new HashMap<>();
+
+    double energy;
+
+    // Cached foundries for Open Sans tooltip rendering
+    private static Text.Foundry labelFoundry = null;
+    private static Text.Foundry valueFoundry = null;
+
+    private static Text.Foundry getLabelFoundry() {
+        if (labelFoundry == null) {
+            labelFoundry = TooltipStyle.createFoundry(false, TooltipStyle.FONT_SIZE_BODY, Color.WHITE);
+        }
+        return labelFoundry;
+    }
+
+    private static Text.Foundry getValueFoundry() {
+        if (valueFoundry == null) {
+            valueFoundry = TooltipStyle.createFoundry(true, TooltipStyle.FONT_SIZE_BODY, Color.WHITE);
+        }
+        return valueFoundry;
+    }
+
+    /** Render label text (Open Sans Regular, white) */
+    static BufferedImage label(String text) {
+        return getLabelFoundry().render(text, Color.WHITE).img;
+    }
+
+    /** Render label text with custom color (Open Sans Regular, colored) */
+    static BufferedImage labelColored(String text, Color color) {
+        return getLabelFoundry().render(text, color).img;
+    }
+
+    /** Render value text (Open Sans Semibold, colored) */
+    static BufferedImage value(String text, Color color) {
+        return getValueFoundry().render(text, color).img;
+    }
+
+    /**
+     * The game UI of the session this food belongs to. Recipes (info with no item owner) have no
+     * session of their own and use the active one. With several sessions open, an item must never read
+     * another session's character, satiation or table, so an item that has no UI yet gets null, not a
+     * guess.
+     */
+    NGameUI gui() {
+        if (owner instanceof NGItem) {
+            UI itemUi = ((NGItem) owner).ui;
+            return (itemUi instanceof NUI) ? ((NUI) itemUi).gui : null;
+        }
+        return NUtils.getGameUI();
+    }
+
+    /**
+     * Result of composing elements - contains image and text positioning info.
+     */
+    private static class IconLineResult {
+        final BufferedImage image;
+        final int textTopOffset;     // Pixels from image top to text top
+        final int textBottomOffset;  // Pixels from text bottom to image bottom
+
+        IconLineResult(BufferedImage image, int textTopOffset, int textBottomOffset) {
+            this.image = image;
+            this.textTopOffset = textTopOffset;
+            this.textBottomOffset = textBottomOffset;
+        }
+    }
+
+    /**
+     * Element for composing lines with mixed text and icons.
+     */
+    private static class LineElement {
+        final BufferedImage image;
+        final boolean isIcon;
+
+        LineElement(BufferedImage image, boolean isIcon) {
+            this.image = image;
+            this.isIcon = isIcon;
+        }
+
+        static LineElement text(BufferedImage img) {
+            return new LineElement(img, false);
+        }
+
+        static LineElement icon(BufferedImage img) {
+            return new LineElement(img, true);
+        }
+    }
+
+    /**
+     * Compose multiple elements (text and icons) horizontally.
+     * TEXT elements define the line height - icons are centered vertically.
+     * Returns the composed image and text top offset for spacing calculations.
+     */
+    private static IconLineResult composeElements(int gap, List<LineElement> elements) {
+        if (elements.isEmpty()) {
+            return new IconLineResult(TexI.mkbuf(new Coord(1, 1)), 0, 0);
+        }
+
+        // Get font descent - text images include descent below baseline
+        // We need to account for this when centering to align visual text center with icon center
+        int descent = TooltipStyle.getFontDescent(TooltipStyle.FONT_SIZE_BODY);
+
+        // First pass: find max text height (only from non-icon elements)
+        int maxTextHeight = 0;
+        for (LineElement elem : elements) {
+            if (!elem.isIcon) {
+                maxTextHeight = Math.max(maxTextHeight, elem.image.getHeight());
+            }
+        }
+
+        // If no text elements, fall back to max of all heights
+        if (maxTextHeight == 0) {
+            for (LineElement elem : elements) {
+                maxTextHeight = Math.max(maxTextHeight, elem.image.getHeight());
+            }
+        }
+
+        // Find max icon height to determine total line height
+        int maxIconHeight = 0;
+        for (LineElement elem : elements) {
+            if (elem.isIcon) {
+                maxIconHeight = Math.max(maxIconHeight, elem.image.getHeight());
+            }
+        }
+
+        // Total height: text height + any icon extension above/below
+        int iconExtension = Math.max(0, (maxIconHeight - maxTextHeight) / 2);
+        int totalHeight = maxTextHeight + iconExtension * 2;
+
+        // Calculate actual text Y position (accounting for descent shift for visual alignment)
+        // Text is centered then shifted down by descent/2
+        int textTopOffset = (totalHeight - maxTextHeight) / 2 + descent / 2;
+        // Text bottom offset is NOT the same due to descent shift
+        int textBottomOffset = totalHeight - textTopOffset - maxTextHeight;
+
+        // Calculate total width
+        int totalWidth = 0;
+        for (int i = 0; i < elements.size(); i++) {
+            totalWidth += elements.get(i).image.getWidth();
+            if (i > 0) totalWidth += gap;
+        }
+
+        // Create result image
+        BufferedImage result = TexI.mkbuf(new Coord(totalWidth, totalHeight));
+        Graphics g = result.getGraphics();
+
+        int x = 0;
+        for (int i = 0; i < elements.size(); i++) {
+            LineElement elem = elements.get(i);
+            int y;
+            if (elem.isIcon) {
+                // Center icon vertically
+                y = (totalHeight - elem.image.getHeight()) / 2;
+            } else {
+                // Center text, but adjust for descent so visual text center aligns with icon center
+                // Text visual center is at (height - descent) / 2 from top, not height / 2
+                // So we shift text DOWN by descent / 2 to compensate
+                y = (totalHeight - elem.image.getHeight()) / 2 + descent / 2;
+            }
+
+            g.drawImage(elem.image, x, y, null);
+            x += elem.image.getWidth();
+            if (i < elements.size() - 1) x += gap;
+        }
+
+        g.dispose();
+
+        return new IconLineResult(result, textTopOffset, textBottomOffset);
+    }
+
+    /**
+     * Compose a single icon with a text line.
+     * Convenience wrapper for composeElements with just icon + text.
+     */
+    private static IconLineResult composeIconLine(BufferedImage icon, BufferedImage textLine) {
+        return composeIconLine(icon, textLine, UI.scale(2));
+    }
+
+    private static IconLineResult composeIconLine(BufferedImage icon, BufferedImage textLine, int gap) {
+        List<LineElement> elements = new ArrayList<>();
+        elements.add(LineElement.icon(icon));
+        elements.add(LineElement.text(textLine));
+        return composeElements(gap, elements);
+    }
+
+
+    /**
+     * Scale an icon to the standard tooltip icon size (75% of 16px = 12px).
+     */
+    private static BufferedImage scaleIcon(BufferedImage icon) {
+        if (icon == null) return null;
+        return convolvedown(icon, UI.scale(new Coord(TooltipStyle.ICON_SIZE, TooltipStyle.ICON_SIZE)), iconfilter);
+    }
+
+    public NFoodInfo(Owner owner, double end, double glut, double sev, double cons, Event[] evs, Effect[] efs, int[] types)
+    {
+        super(owner, end, glut, sev, cons, evs, efs, types);
+        s_end = Utils.odformat2(end * 100, 2);
+        this.energy = end;
+        s_glut = Utils.odformat2(glut * 100, 2);
+        s_end_glut = Utils.odformat2(end / glut, 2);
+        for (Event event : evs)
+        {
+            fepSum += event.a;
+        }
+        for (Event ev : evs)
+        {
+            double probability = ev.a / fepSum;
+            fepVis.add(new FepVis(ev.img, ev.ev.nm, String.format("%s (%s%%)", Utils.odformat2(ev.a, 2), Utils.odformat2(probability * 100, 2)), Utils.blendcol(ev.ev.col, Color.WHITE, 0.5)));
+            searchImage.put(fep_map.get(ev.ev.nm), probability * 100);
+        }
+    }
+
+    /**
+     * The modifiers that apply to this food right now, read from this item's own session. This is the
+     * single source for the FEP prediction: {@link #calcExpectedFep()} and the tooltip's extra rows
+     * both use it, so the numbers cannot disagree.
+     */
+    FoodModifiers modifiers()
+    {
+        return FoodModifierReader.read(gui(), (owner instanceof NGItem) ? (NGItem) owner : null, types);
+    }
+
+    /**
+     * The FEP at which the bar completes if this food is eaten: the cap, less the variety bonus the
+     * food would add (the same figure {@link #calcNeededFep()} uses). NaN when the bar is unknown.
+     */
+    double barTarget()
+    {
+        NGameUI gui = gui();
+        double cur = FoodModifierReader.currentFep(gui);
+        if (Double.isNaN(cur))
+            return Double.NaN;
+        return cur + calcNeededFep();
+    }
+
+    /**
+     * The weighted total the server sent, or 0 when it is missing or implausible. It is the sum of the
+     * food's events with the "+2" ones counted double, so it can only lie between the plain sum and twice
+     * that; anything else means the number is not the weighted total (the two optional numbers of the
+     * food tooltip message are read by position, see the docs) and showing it would be wrong.
+     */
+    double weightedTotal()
+    {
+        final double slack = 0.01;
+        if (sev > 0 && sev >= fepSum * (1 - slack) && sev <= fepSum * 2 * (1 + slack))
+            return sev;
+        return 0;
+    }
+
+    /**
+     * Live expected FEP yield: the listed FEP times {@link FoodModifiers#fepMultiplier()}, i.e. the
+     * account/realm bonus, hunger-bar efficacy, table bonus and satiation (plus salt satiation for salted
+     * food). 0 when the character's data is not available.
+     */
+    double calcExpectedFep()
+    {
+        FoodModifiers mods = modifiers();
+        return mods.available() ? mods.predictedFep(fepSum) : 0;
+    }
+
+    double calcNeededFep()
+    {
+        NGameUI gui = gui();
+        if (gui != null && gui.chrwdg != null && gui.chrwdg.battr!=null)
+        {
+            double cur_fep = 0;
+            for (BAttrWnd.FoodMeter.El el : gui.chrwdg.battr.feps.els)
+            {
+                cur_fep += el.a;
+            }
+            if (isVarity)
+            {
+                return (gui.chrwdg.battr.feps.cap - Math.sqrt(coefVar * gui.getMaxBase() * gui.chrwdg.battr.glut.gmod / (gui.getCharInfo().varity.size() + 1)) - cur_fep);
+            }
+            else
+            {
+                return gui.chrwdg.battr.feps.cap - cur_fep;
+            }
+        }
+        return 0;
+    }
+
+    public boolean check()
+    {
+        NGameUI gui = gui();
+        if (gui != null && gui.chrwdg != null && gui.chrwdg.battr!=null)
+        {
+
+            NCharacterInfo ci = gui.getCharInfo();
+            if (ci != null)
+            {
+                if (name == null)
+                {
+                    name = ((NGItem) owner).name();
+                }
+                boolean res = !(isVarity == !ci.varity.contains(name));
+                if (res)
+                {
+                    needToolTip = true;
+                    return true;
+                }
+            }
+            FoodModifiers mods = modifiers();
+            double newExpected = mods.available() ? mods.predictedFep(fepSum) : 0;
+            double newNeeded = calcNeededFep();
+            // Compared by identity of every displayed factor, not by the predicted FEP alone: two
+            // factors can move in opposite directions and leave the prediction unchanged while the
+            // breakdown, the hunger side or the Deep Worm warning on screen is now stale.
+            boolean modifiersChanged = mods.signature() != shownModifiers;
+            if (Math.abs(expeted_fep - newExpected) > FEP_EPSILON || Math.abs(needed - newNeeded) > FEP_EPSILON || modifiersChanged)
+            {
+                expeted_fep = newExpected;
+                needed = newNeeded;
+                needToolTip = true;
+            }
+        }
+        return false;
+    }
+
+    final static HashMap<String, String> fep_map = new HashMap<>();
+
+    static
+    {
+        synchronized (fep_map)
+        {
+            fep_map.put("Strength +2", "str2");
+            fep_map.put("Strength +1", "str");
+            fep_map.put("Agility +2", "agi2");
+            fep_map.put("Agility +1", "agi");
+            fep_map.put("Constitution +1", "con");
+            fep_map.put("Constitution +2", "con2");
+            fep_map.put("Perception +2", "per2");
+            fep_map.put("Perception +1", "per");
+            fep_map.put("Will +1", "wil");
+            fep_map.put("Will +2", "wil2");
+            fep_map.put("Psyche +1", "psy");
+            fep_map.put("Psyche +2", "psy2");
+            fep_map.put("Intelligence +1", "int");
+            fep_map.put("Intelligence +2", "int2");
+            fep_map.put("Dexterity +1", "dex");
+            fep_map.put("Dexterity +2", "dex2");
+            fep_map.put("Charisma +1", "csm");
+            fep_map.put("Charisma +2", "csm");
+        }
+    }
+
+
+    @Override
+    public boolean search()
+    {
+        NGameUI gui = gui();
+        if(name!=null && gui!=null) {
+            calcData();
+            NSearchItem si = gui.itemsForSearch;
+            if(!si.food.isEmpty()) {
+                for (NSearchItem.Stat fep : si.food) {
+                    if (searchImage.get(fep.v) == null || (fep.a!=0 && !(fep.isMore == (searchImage.get(fep.v) > fep.a))))
+                        return false;
+                }
+                if (si.fgs)
+                    return (delta > 0);
+                if(!si.name.isEmpty())
+                {
+                    return name.toLowerCase().contains(si.name.toLowerCase());
+                }
+                return true;
+            }
+            if (si.fgs)
+                return (delta > 0);
+        }
+        return false;
+    }
+
+    public double energy() {
+        return energy;
+    }
+
+    class FepVis
+    {
+        BufferedImage img;
+        String nm;
+        String str;
+        Color col;
+
+        public FepVis(BufferedImage img, String nm, String str, Color col)
+        {
+            this.img = img;
+            this.nm = nm;
+            this.str = str;
+            this.col = col;
+        }
+    }
+
+    ArrayList<FepVis> fepVis = new ArrayList<>();
+
+
+    BufferedImage headImg = null;
+
+    public BufferedImage headImg()
+    {
+        if (headImg == null)
+        {
+            String head = String.format("Energy: $col[128,128,255]{%s%%}, Hunger: $col[255,192,128]{%s%%}, Energy/Hunger: $col[128,128,255]{%s%%}", s_end, s_glut, s_end_glut);
+
+            headImg = RichText.render(head, 0).img;
+        }
+        return headImg;
+    }
+
+    ArrayList<BufferedImage> fepImgs = null;
+
+    public ArrayList<BufferedImage> fepImg()
+    {
+        if (fepImgs == null)
+        {
+            fepImgs = new ArrayList<>();
+            for (FepVis value : fepVis)
+            {
+                fepImgs.add(catimgsh(5, value.img, RichText.render(String.format("%s: $col[%d,%d,%d]{%s}", value.nm, value.col.getRed(), value.col.getGreen(), value.col.getBlue(), value.str), 0).img));
+            }
+        }
+        return fepImgs;
+    }
+
+    ArrayList<BufferedImage> effImgs = null;
+
+    public ArrayList<BufferedImage> effImg()
+    {
+        if (effImgs == null)
+        {
+            effImgs = new ArrayList<>();
+            for (Effect ef : efs)
+            {
+                BufferedImage efi = ItemInfo.longtip(ef.info);
+                if (ef.p != 1)
+                    efi = catimgsh(5, efi, RichText.render(String.format("$i{($col[192,192,255]{%d%%} chance)}", (int) Math.round(ef.p * 100)), 0).img);
+                effImgs.add(efi);
+            }
+        }
+        return effImgs;
+    }
+
+    BufferedImage extentTitle = null;
+
+    public BufferedImage extentTitle()
+    {
+        if (extentTitle == null)
+        {
+            extentTitle = RichText.render(String.format("$col[0,255,255]{%s}:", "Extended info"), 0).img;
+        }
+        return extentTitle;
+    }
+
+    void calcData()
+    {
+        if (name != null)
+        {
+            expeted_fep = calcExpectedFep();
+            needed = calcNeededFep();
+            delta = expeted_fep - needed;
+        }
+    }
+    @Override
+    public void layout(Layout l) {
+        NGameUI gui = gui();
+        if (owner instanceof GItem && gui != null) {
+            name = ((NGItem) owner).name();
+            if (name == null)
+                return;
+
+            NCharacterInfo ci = gui.getCharInfo();
+            if (ci != null) {
+                isVarity = !ci.varity.contains(name);
+            }
+            calcData();
+        }
+
+        // Holding Shift shows the listed (unmodified) values instead of this character's modified ones.
+        // Recipes have no item and so no modifiers.
+        final boolean unmodified = FoodDetailsLayout.shiftHeld(owner);
+        final FoodModifiers mods = (owner instanceof GItem) ? modifiers() : FoodModifiers.unavailable();
+        shownModifiers = mods.signature();
+        final double hungerPct = glut * 100 * ((!unmodified && mods.available()) ? mods.hungerMultiplier() : 1.0);
+
+        // Get font descent for baseline-relative spacing (like NCuriosity)
+        int descent = TooltipStyle.getFontDescent(TooltipStyle.FONT_SIZE_BODY);
+        int groupSpacing = UI.scale(TooltipStyle.SECTION_SPACING) - descent;  // 10px between groups
+        int lineSpacing = UI.scale(TooltipStyle.INTERNAL_SPACING) - descent;  // 7px within groups
+
+        // ===== GROUP 1: Energy + FEP Sum =====
+        // Line 1: Energy + Hunger
+        BufferedImage energyLine = TooltipStyle.cropTopOnly(catimgsh(0,
+            label("Energy: "), value(Utils.odformat2(end * 100, 2) + "%", TooltipStyle.COLOR_FOOD_ENERGY),
+            label("  Hunger: "), value(Utils.odformat2(hungerPct, 2) + "%", TooltipStyle.COLOR_FOOD_HUNGER)));
+
+        // If there's already content in the layout (e.g., curio info), add section spacing before food info
+        int yPos = l.cmp.sz.y;
+        if (yPos > 0) {
+            yPos += groupSpacing;  // Add 10px section spacing between curio and food info
+        }
+        l.cmp.add(energyLine, Coord.of(0, yPos));
+
+        // Line 2: FEP Sum + FEP/Hunger (7px after energy line)
+        BufferedImage fepLine = TooltipStyle.cropTopOnly(catimgsh(0,
+            label("FEP Sum: "), value(Utils.odformat2(fepSum, 2), TooltipStyle.COLOR_FOOD_FEP_SUM),
+            label("  FEP/Hunger: "), value(Utils.odformat2(fepSum / (100 * glut), 2), TooltipStyle.COLOR_FOOD_FEP_HUNGER)));
+        l.cmp.add(fepLine, Coord.of(0, l.cmp.sz.y + lineSpacing));
+
+        // ===== Food Effects (10px after FEP Sum, 10px before stats) =====
+        // Extract FoodBuff effects from Effect.info arrays and render with custom font
+        // Track text offsets for proper baseline-relative spacing
+        int prevTextBottomOffset = 0;  // FEP Sum is text-only, so offset is 0
+
+        for (int i = 0; i < efs.length; i++) {
+            if (efs[i].info == null) continue;
+
+            // Find FoodBuff tip in the effect's info list
+            ItemInfo.Tip foodBuffTip = null;
+            for (ItemInfo ii : efs[i].info) {
+                String className = ii.getClass().getName();
+                if (className.contains("FoodBuff") || className.contains("ft_buff")) {
+                    if (ii instanceof ItemInfo.Tip) {
+                        foodBuffTip = (ItemInfo.Tip) ii;
+                        break;
+                    }
+                }
+            }
+
+            if (foodBuffTip != null) {
+                // Render the full effect line (icon + text)
+                Layout effectLayout = new Layout(foodBuffTip.owner);
+                foodBuffTip.layout(effectLayout);
+                BufferedImage rawImg = effectLayout.render();
+
+                if (rawImg != null) {
+                    // Extract icon from left side (16 pixels at scale 1)
+                    int rawIconSize = UI.scale(16);
+                    BufferedImage rawIcon = rawImg.getSubimage(0, 0,
+                        Math.min(rawIconSize, rawImg.getWidth()),
+                        rawImg.getHeight());
+                    BufferedImage scaledIcon = scaleIcon(rawIcon);
+
+                    // Extract the text string from the Resource
+                    String effectText = null;
+                    try {
+                        // Get the val$res field which contains the buff resource
+                        java.lang.reflect.Field resField = foodBuffTip.getClass().getDeclaredField("val$res");
+                        resField.setAccessible(true);
+                        Object resIndir = resField.get(foodBuffTip);
+
+                        // Indir has a get() method to get the actual Resource
+                        if (resIndir instanceof Indir) {
+                            Resource res = ((Indir<Resource>) resIndir).get();
+                            // Get the tooltip text from the resource
+                            effectText = res.flayer(Resource.tooltip).text();
+                        }
+                    } catch (Exception e) {
+                        // Couldn't extract text, will fall back to image extraction
+                    }
+
+                    BufferedImage textImg;
+                    if (effectText != null && !effectText.isEmpty()) {
+                        // Render with Open Sans regular 11px
+                        textImg = TooltipStyle.cropTopOnly(
+                            TooltipStyle.createFoundry(false, 11, Color.WHITE).render(effectText).img
+                        );
+                    } else {
+                        // Fallback: extract text from original rendered image
+                        int textStartX = rawIconSize;
+                        textImg = rawImg.getSubimage(
+                            Math.min(textStartX, rawImg.getWidth() - 1), 0,
+                            Math.max(1, rawImg.getWidth() - textStartX),
+                            rawImg.getHeight()
+                        );
+                        textImg = TooltipStyle.cropTopOnly(textImg);
+                    }
+
+                    // Compose icon and text with 3px gap
+                    IconLineResult result = composeIconLine(scaledIcon, textImg, UI.scale(3));
+
+                    // Apply baseline-relative spacing: 10px from FEP Sum line
+                    int adjustedSpacing = groupSpacing - result.textTopOffset - prevTextBottomOffset;
+                    l.cmp.add(result.image, Coord.of(0, l.cmp.sz.y + adjustedSpacing));
+
+                    // Track for next section (stats)
+                    prevTextBottomOffset = result.textBottomOffset;
+                }
+            }
+        }
+
+        // ===== GROUP 2: Stats (10px gap before, 7px between each stat) =====
+        // prevTextBottomOffset is already tracked from effect line above
+
+        // First pass: calculate column widths for tabular alignment
+        int maxNameWidth = 0;
+        int maxValueWidth = 0;
+        int columnGap = UI.scale(TooltipStyle.HORIZONTAL_SPACING);
+
+        for (int i = 0; i < evs.length; i++) {
+            BufferedImage nameImg = label(evs[i].ev.nm);
+            BufferedImage valueImg = value(Utils.odformat2(evs[i].a, 2), Color.WHITE);
+            maxNameWidth = Math.max(maxNameWidth, nameImg.getWidth());
+            maxValueWidth = Math.max(maxValueWidth, valueImg.getWidth());
+        }
+
+        // Second pass: render stats with aligned columns
+        boolean firstStat = true;
+        for (int i = 0; i < evs.length; i++) {
+            Color col = Utils.blendcol(evs[i].ev.col, Color.WHITE, 0.5);
+
+            // Render each part separately
+            BufferedImage nameImg = label(evs[i].ev.nm);
+            BufferedImage valueImg = value(Utils.odformat2(evs[i].a, 2), col);
+            BufferedImage pctImg = labelColored("(" + Utils.odformat2(evs[i].a / fepSum * 100, 0) + "%)", TooltipStyle.COLOR_PERCENTAGE);
+
+            // Calculate positions for tabular layout
+            // Name is left-aligned, value is right-aligned within its column, percentage follows
+            int nameColWidth = maxNameWidth;
+            int valueColWidth = maxValueWidth;
+
+            int totalWidth = nameColWidth + columnGap + valueColWidth + columnGap + pctImg.getWidth();
+            int maxHeight = Math.max(Math.max(nameImg.getHeight(), valueImg.getHeight()), pctImg.getHeight());
+
+            BufferedImage textPart = TexI.mkbuf(new Coord(totalWidth, maxHeight));
+            Graphics g = textPart.getGraphics();
+
+            // Draw name (left-aligned in column)
+            int x = 0;
+            g.drawImage(nameImg, x, (maxHeight - nameImg.getHeight()) / 2, null);
+
+            // Draw value (right-aligned in column)
+            x = nameColWidth + columnGap + (valueColWidth - valueImg.getWidth());
+            g.drawImage(valueImg, x, (maxHeight - valueImg.getHeight()) / 2, null);
+
+            // Draw percentage (after value column)
+            x = nameColWidth + columnGap + valueColWidth + columnGap;
+            g.drawImage(pctImg, x, (maxHeight - pctImg.getHeight()) / 2, null);
+
+            g.dispose();
+
+            textPart = TooltipStyle.cropTopOnly(textPart);
+
+            // Scale stat icon and compose with text
+            BufferedImage scaledIcon = scaleIcon(evs[i].img);
+            IconLineResult result = composeIconLine(scaledIcon, textPart);
+
+            // Adjust spacing: subtract current line's textTopOffset and previous line's textBottomOffset
+            int baseSpacing = firstStat ? groupSpacing : lineSpacing;
+            int adjustedSpacing = baseSpacing - result.textTopOffset - prevTextBottomOffset;
+
+            l.cmp.add(result.image, Coord.of(0, l.cmp.sz.y + adjustedSpacing));
+
+            // Use text bottom offset for next iteration (not same as top due to descent shift)
+            prevTextBottomOffset = result.textBottomOffset;
+            firstStat = false;
+        }
+
+        // ===== GROUP 3: Expected FEP + Expected total (10px gap before, 7px between) =====
+        // Skip expected FEP for recipes (owner is GItem for real items, not for recipes), while Shift
+        // shows the unmodified values, and while the modifiers are incomplete (a prediction from partial
+        // data would look final).
+        if (owner instanceof GItem && !unmodified && mods.available()) {
+            double error = expeted_fep * 0.005;
+            String deltaStr = (delta >= 0 ? "+" : "") + String.format("%.2f", delta) + " \u00B1 " + String.format("%.2f", error);
+            BufferedImage expectedLine = TooltipStyle.cropTopOnly(catimgsh(0,
+                label("Expected FEP: "), value(String.format("%.2f", expeted_fep), TooltipStyle.COLOR_FOOD_FEP_HUNGER),
+                label(" "), labelColored("(" + deltaStr + ")", TooltipStyle.COLOR_PERCENTAGE)));
+            // Adjust for previous icon line's text bottom offset
+            int expectedSpacing = groupSpacing - prevTextBottomOffset;
+            l.cmp.add(expectedLine, Coord.of(0, l.cmp.sz.y + expectedSpacing));
+            prevTextBottomOffset = 0;  // Reset for text-only line
+
+            // Expected total (7px after expected FEP)
+            if (gui != null && gui.chrwdg != null && gui.chrwdg.battr != null) {
+                double cur_fep = FoodModifierReader.currentFep(gui);
+                BufferedImage totalLine = TooltipStyle.cropTopOnly(catimgsh(0,
+                    label("Expected total: "), value(String.format("%.2f", expeted_fep + cur_fep), TooltipStyle.COLOR_FOOD_FEP_SUM)));
+                l.cmp.add(totalLine, Coord.of(0, l.cmp.sz.y + lineSpacing));
+                // prevTextBottomOffset stays 0 for text-only line
+            }
+        }
+
+        // ===== GROUP 3b: weighted totals, predicted FEP/hunger, FEP bar after eating, modifier breakdown
+        // (or, with Shift held, the unmodified weighted totals) =====
+        if (owner instanceof GItem) {
+            if (FoodDetailsLayout.layout(this, l, mods, unmodified, groupSpacing - prevTextBottomOffset, lineSpacing,
+                    FoodModifierReader.currentFep(gui), barTarget(), FoodModifierReader.fepCap(gui))) {
+                prevTextBottomOffset = 0;  // text-only rows
+            }
+        }
+
+        // ===== GROUP 4: Food types with icons (10px gap before, 7px between each type) =====
+        // Find FoodTypes ItemInfo and extract types using reflection
+        // The item's own session supplies the data tables; another active session's tables or none must
+        // never be used for this item.
+        final NUI itemUi = (gui != null && gui.ui instanceof NUI) ? (NUI) gui.ui : null;
+        if (owner instanceof GItem && itemUi != null) {
+
+            Resource[] foodTypeResources = null;
+
+            // Find FoodTypes in item info list and extract types via reflection
+            try {
+                List<ItemInfo> infos = ((GItem) owner).info();
+                for (ItemInfo info : infos) {
+                    if (info.getClass().getName().contains("FoodTypes")) {
+                        // types field is Resource[] not int[]
+                        java.lang.reflect.Field typesField = info.getClass().getDeclaredField("types");
+                        typesField.setAccessible(true);
+                        foodTypeResources = (Resource[]) typesField.get(info);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            if (foodTypeResources != null && foodTypeResources.length > 0) {
+                boolean firstFoodType = true;
+                for (Resource typeRes : foodTypeResources) {
+                    if (typeRes == null) continue;
+
+                    // Get food type name from resource tooltip
+                    String foodTypeName = null;
+                    Resource.Tooltip tt = typeRes.layer(Resource.tooltip);
+                    if (tt != null) {
+                        foodTypeName = tt.t;
+                    }
+                    if (foodTypeName == null) continue;
+
+                    // Get food type icon from resource image (scaled to 80%)
+                    BufferedImage typeIcon = null;
+                    Resource.Image img = typeRes.layer(Resource.imgc);
+                    if (img != null) {
+                        typeIcon = convolvedown(img.img, UI.scale(new Coord(TooltipStyle.ICON_SIZE, TooltipStyle.ICON_SIZE)), tflt);
+                    }
+
+                    // Build elements list with proper icon/text marking
+                    List<LineElement> elements = new ArrayList<>();
+
+                    // Add food type icon
+                    if (typeIcon != null) {
+                        elements.add(LineElement.icon(typeIcon));
+                    }
+
+                    // Add food type name (text, cropped)
+                    elements.add(LineElement.text(TooltipStyle.cropTopOnly(value(foodTypeName, TooltipStyle.COLOR_FOOD_TYPE))));
+
+                    // Add drinks with vessel icons (if dataTables available)
+                    if (NUtils.getUI().dataTables != null) {
+                        List<String> drinks = NUtils.getUI().dataTables.data_drinks.get(foodTypeName);
+                        if (drinks != null && !drinks.isEmpty()) {
+                            for (String drink : drinks) {
+                                String vessel = NUtils.getUI().dataTables.data_vessel.getOrDefault(drink, "");
+                                if (vessel == null) vessel = "Any";
+                                String vesselRes = NUtils.getUI().dataTables.vessel_res.get(vessel);
+                                if (vesselRes != null) {
+                                    BufferedImage vesselIcon = convolvedown(Resource.loadsimg(vesselRes), UI.scale(new Coord(TooltipStyle.ICON_SIZE, TooltipStyle.ICON_SIZE)), iconfilter);
+                                    elements.add(LineElement.icon(vesselIcon));
+                                }
+                                elements.add(LineElement.text(TooltipStyle.cropTopOnly(value(drink, TooltipStyle.COLOR_FOOD_VESSEL))));
+                            }
+                        }
+                    }
+
+                    // Compose all elements - TEXT defines height, icons centered
+                    IconLineResult result = composeElements(UI.scale(2), elements);
+
+                    int baseSpacing = firstFoodType ? groupSpacing : lineSpacing;
+                    int adjustedSpacing = baseSpacing - result.textTopOffset - prevTextBottomOffset;
+                    l.cmp.add(result.image, Coord.of(0, l.cmp.sz.y + adjustedSpacing));
+                    prevTextBottomOffset = result.textBottomOffset;
+
+                    firstFoodType = false;
+                }
+            }
+        }
+    }
+
+    public static Tex var_img = Resource.loadtex("nurgling/hud/items/overlays/varity");
+
+    @Override
+    public Tex overlay()
+    {
+        return var_img;
+    }
+
+    @Override
+    public void drawoverlay(GOut g, Tex data)
+    {
+        if (show && isVarity)
+        {
+             g.aimage(data, data.sz(), 1, 1);
+        }
+    }
+
+    @Override
+    public boolean tick(double dt)
+    {
+        NGameUI gui = gui();
+        if(gui==null)
+            return false;
+        NCharacterInfo ci = gui.getCharInfo();
+        if (ci != null)
+        {
+            name = ((NGItem) owner).name();
+            if (name != null)
+            {
+                isVarity = !ci.varity.contains(name);
+            }
+        }
+        return check();
+    }
+}

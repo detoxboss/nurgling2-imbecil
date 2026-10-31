@@ -18,7 +18,7 @@ import nurgling.i18n.L10n;
 
 /** Bounded, in-memory diagnostics. Never changes movement or waits for disk on a game thread. */
 public final class MovementTrace implements Disposable {
-    public static final KeyBinding capture = KeyBinding.get("movement-trace", KeyMatch.forcode(KeyEvent.VK_F9, KeyMatch.C));
+    public static final KeyBinding capture = KeyBinding.get("movement-trace", KeyMatch.forcode(KeyEvent.VK_F9, KeyMatch.C | KeyMatch.S));
     static final double HISTORY = 10, TAIL = 2, RETENTION = 15;
     /* Stall stacks are thread dumps: each stops every thread at a safepoint, which took
      * 20-100 ms in play and so turned each slow frame it sampled into a long hitch. */
@@ -290,7 +290,7 @@ public final class MovementTrace implements Disposable {
         if(pending || disposed) return false;
         pending = true;
         final double mark = Utils.rtime();
-        ring.add("mark", row(mark), "Ctrl+F9");
+        ring.add("mark", row(mark), "Ctrl+Shift+F9");
         worker.schedule(() -> {
             try {
                 List<Row> rows = ring.snapshot(mark - HISTORY, mark + TAIL);

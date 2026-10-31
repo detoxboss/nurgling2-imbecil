@@ -434,7 +434,7 @@ public class NSettingsWindow extends Widget {
             s = L10n.get("nsettings.search.none");
         else
             s = L10n.get("nsettings.search.count", hits.size(), index().size());
-        if(!s.equals(infotext)) {
+        if(infotex == null || !s.equals(infotext)) {
             if(infotex != null)
                 infotex.dispose();
             infotex = fit(crumbfnd, s, crumbcol, UI.scale(SIDE_W));
@@ -490,6 +490,7 @@ public class NSettingsWindow extends Widget {
         if(infotex != null) {
             infotex.dispose();
             infotex = null;
+            infotext = null;
         }
     }
 
