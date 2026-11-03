@@ -61,6 +61,8 @@ public final class AimDiagnostic {
     public static final long ARM_TIMEOUT_MS = 60_000;
     /** How long after the shot click a progress-triggered or draw-confirmed test may wait. */
     public static final long DRAW_TIMEOUT_MS = 6_000;
+    /** Longest correction delay accepted; a measured draw lasts about 0.9 s from the click. */
+    public static final long MAX_DELAY_MS = 2_000;
     /** How long to keep observing after the correction went out. */
     public static final long OBSERVE_MS = 3_000;
     /** Spacing of the bounded orientation/pose samples. */
@@ -247,7 +249,8 @@ public final class AimDiagnostic {
         state = State.ARMED;
         env.log("=== ARMED: " + c.describe());
         env.log("cursor at arm: " + env.cursor() + "; player " + env.sample());
-        env.status("Armed. Activate Shoot and click the original spot.");
+        env.status("Armed (" + (c.trigger == Trigger.DELAY ? "delay " + c.delayMs + " ms" : "progress " + c.progressPct + "%")
+            + "). Activate Shoot and click the original spot.");
         int g = gen;
         armTimeout = env.schedule(() -> timeout(g, "no shot click within " + ARM_TIMEOUT_MS / 1000 + " s"), ARM_TIMEOUT_MS);
         return null;
@@ -257,8 +260,8 @@ public final class AimDiagnostic {
     String validate(Config c) {
         if (c == null || c.method == null || c.trigger == null)
             return "Incomplete settings.";
-        if (c.trigger == Trigger.DELAY && (c.delayMs < 0 || c.delayMs > DRAW_TIMEOUT_MS))
-            return "Delay must be 0.." + DRAW_TIMEOUT_MS + " ms.";
+        if (c.trigger == Trigger.DELAY && (c.delayMs < 0 || c.delayMs > MAX_DELAY_MS))
+            return "Delay " + c.delayMs + " ms is outside 0.." + MAX_DELAY_MS + " ms (a draw lasts about 900 ms). Clear the field and retype it.";
         if (c.trigger == Trigger.PROGRESS && (c.progressPct < 1 || c.progressPct > 99))
             return "Progress threshold must be 1..99 %.";
         switch (c.method) {

@@ -1,7 +1,8 @@
 # Archery aim diagnostic (mid-draw re-aim experiment)
 
-**Status: current — describes a temporary, opt-in diagnostic. Its in-game behavior has not been run
-live yet. Nothing in this document proves that mid-draw re-aiming is possible or impossible.**
+**Status: current — describes a temporary, opt-in diagnostic. Only method A (ground click) has been
+run live, and it was ignored (§7). Nothing here proves re-aiming is possible or impossible by the
+other paths.**
 
 This document owns two things: the code trace of how a bow shot is started and targeted in this
 client, and how to run the diagnostic that tests whether a shot can be redirected while the bow is
@@ -186,11 +187,44 @@ started the draw, with the cursor), `prog START/RESET/END`, `CORRECTION SENT (on
 correction as it went out), `facing`, `pose`, `incoming Fightview "cur"`, `ABORT`/`TIMEOUT`/`CANCELLED`
 and `=== END` (automatic results and the verdict, kept separate from the manual observation).
 
-## 7. Verification status
+## 7. Live results
+
+### 2026-11-03, method A (ground click), out of combat, one session
+
+Runtime evidence from the diagnostic log; arrow direction is the player's own observation.
+
+- **Shoot identified.** Activation is `MenuGrid "act", "shoot", 0`. The server then sets the cursor to
+  `gfx/hud/curs/shoot`. The player's pose becomes `gfx/borka/drawbow` as soon as Shoot is active,
+  before any shot click, so the pose marks "Shoot mode", not "drawing". When idle with a bow, the
+  pose is `carrybow` + `idle`.
+- **The cursor stays `gfx/hud/curs/shoot` during and after the shot.** Mid-draw clicks are therefore
+  not walk orders.
+- **Timing (4 shots):**
+  - The server turns the player toward the clicked spot about 200 ms after the click.
+  - The first `prog` (0 %) arrives 160–220 ms after the click.
+  - Progress then steps 16, 33, 58, 75 %, about 120 ms apart.
+  - `prog` ends 894–993 ms after the click.
+- **Ground corrections at +303 ms and +503 ms** went out with the Shoot cursor still active. In both:
+  - facing did not change after the correction;
+  - progress kept rising with no reset;
+  - the player saw the arrow go to the original spot.
+
+  A mid-draw ground click is ignored by the server. That is the expected baseline.
+- **Shoot clicks within about 3 s of the previous release did not draw again.** Several clicks with
+  the cursor still `shoot` produced no new `prog`.
+- **Two runs aborted without sending.** Their delays (5001 ms, 3001 ms) were longer than the draw.
+  The delay field does not clear when clicked, so typing appended to the old value. Delays are now
+  capped at 2000 ms, and the armed delay is shown in the status line.
+
+**Still untested:** method B (gob click), method D (portrait), the belt-key path, and a correction
+before the first `prog` (about 0–150 ms). For that last one, untick "Require draw progress", or the
+test aborts as "draw not confirmed".
+
+## 8. Verification status
 
 - `ant jar` and `ant test` pass. Unit tests (`test/nurgling/archery/**`) cover message
   classification, one correction per armed test, refusal without a valid target or relation, risk
   acknowledgement, aborts, cancellation, session end, per-instance isolation, and that no verdict
   reports re-aim success without the player's observation.
-- **Not run live.** No in-game test has been done; the diagnostic window, the Shoot detection and the
-  server's response are all unverified.
+- **Run live for method A only** (§7). Methods B and D, and early (pre-progress) timing, are
+  unverified.

@@ -375,6 +375,14 @@ class AimDiagnosticTest {
     }
 
     @Test
+    void delay_longer_than_a_draw_is_refused() {
+        FakeEnv e = env();
+        assertNotNull(e.diag.arm(ground(Trigger.DELAY, 5001, 50)));
+        assertEquals(State.IDLE, e.diag.state());
+        assertNull(e.diag.arm(ground(Trigger.DELAY, AimDiagnostic.MAX_DELAY_MS, 50)));
+    }
+
+    @Test
     void angle_diff_wraps() {
         assertEquals(0.2, AimDiagnostic.angleDiff(0.1, 2 * Math.PI - 0.1), 1e-9);
         assertEquals(-0.2, AimDiagnostic.angleDiff(2 * Math.PI - 0.1, 0.1), 1e-9);
