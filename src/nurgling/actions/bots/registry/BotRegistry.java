@@ -134,6 +134,17 @@ public class BotRegistry {
                 "villagewatchcfg",
                 false
         ));
+        bots.add(new BotDescriptor(
+                ArcheryAimDiagnosticAction.BOT_ID,
+                BotDescriptor.BotType.UTILS,
+                "Archery Aim Diagnostic",
+                "Temporary experiment: sends one aim-correction message during one manually started bow shot and logs what happens. Off until enabled in its window",
+                false,
+                true,
+                ArcheryAimDiagnosticAction.class,
+                "tools",
+                false
+        ));
 
         // RESOURCES (using localization keys: bot.<id>.title and bot.<id>.desc)
         bots.add(new BotDescriptor("choper", BotDescriptor.BotType.RESOURCES, "bot.chopper.title", "bot.chopper.desc", false, true, Chopper.class, "choper", false));

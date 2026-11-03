@@ -335,7 +335,8 @@ hard invariant.
 registered class, correct `BotType`, and in a reasonable position within its category's button
 ordering. Count **live** registrations (`BotRegistry.all()`), not `bots.add` text lines: the file
 carries one commented-out `//bots.add(...testzonepatroller...)` line that a text grep counts. As of
-the 2026-10-30 sync: 207 live (198 at the merge base + 6 fork + 3 upstream), asserted by
+the 2026-10-30 sync: 207 live (198 at the merge base + 6 fork + 3 upstream); 208 after the archery
+aim diagnostic entry was added. Asserted by
 `test/nurgling/actions/bots/registry/SyncRegistryInventoryTest.java`.
 
 **Superseded when:** never wholesale — same open-ended nature as the config keys above.
@@ -1171,6 +1172,25 @@ manual checklist in `docs/village-watch.md` for anything touching sessions or re
 
 **Superseded when:** upstream ships an equivalent lookout/Discord-attachment feature — then retire
 this section and migrate saved `village_watch` Scenario steps.
+
+## Archery aim diagnostic (temporary)
+
+**Files:** feature-owned — `src/nurgling/archery/**`,
+`src/nurgling/actions/bots/ArcheryAimDiagnosticAction.java`. Full description:
+`docs/archery-aim-diagnostic.md`.
+
+**Shared-file hooks:** one `BotDescriptor` in `actions/bots/registry/BotRegistry.java` (id
+`archery_aim_diagnostic`, right after the Village Watch Settings entry, reusing the existing `tools`
+icon). No `src/haven/**` edits: it listens through the existing `nurgling.plugins.UiEvents` seam.
+
+**Why:** a temporary, opt-in experiment to find out whether a bow shot can be re-aimed mid-draw before
+any aim-assist feature is designed.
+
+**Minimum hook that must survive:** the registry entry. If upstream changes `UiEvents` or the argument
+layout of `MapView`/`MiniMap`/`Fightview` clicks, re-check `AimProtocol`.
+
+**Superseded when:** the experiment is answered — then remove the feature (or replace it with whatever
+the evidence supports) and drop this section.
 
 ## A note on upstream's multi-session convergence (2026-09-30 sync)
 
