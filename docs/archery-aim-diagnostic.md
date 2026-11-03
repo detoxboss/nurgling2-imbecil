@@ -229,9 +229,27 @@ Runtime evidence from the diagnostic log; arrow direction is the player's own ob
 - **Five corrections at 100 ms delay aborted unsent.** "Require draw progress" was on, and progress
   had not started yet. Arming now refuses a delay under 250 ms while that box is ticked.
 
+### 2026-11-03, method D (combat portrait), sparring one opponent
+
+- **Two portrait-click corrections, at +1115 and +1051 ms, were ignored.** Each was
+  `Fightview "click", <opponent gob>, 1`, sent at 58 % progress with the Shoot cursor active. The
+  shot clicks were ground points away from the opponent. Facing did not turn toward the opponent, and
+  the player saw the arrow go to the original spot with no restart (one observation recorded).
+- **The opponent was already the current target.** It was the only relation, and no `Fightview "cur"`
+  came back, so the click changed nothing server-side. The result still shows the shot does not
+  follow the current combat target: it goes to the clicked point.
+- **The portrait click carries no position and does not use the cursor.** It is a Fightview widget
+  message, so the Shoot cursor has no effect on it.
+- **The draw is slower in combat.** `prog` steps 0, 16, 37, 58, 79 % about 300 ms apart and ends
+  about 1650 ms after the click (out of combat: about 900 ms).
+- **Right-click ends Shoot mode.** A right-click at +2.9 s was followed by the cursor reverting to
+  `gfx/hud/curs/arw` and the pose to `carrybow` + `idle`.
+- **Player report:** a Shoot click made after the arrow is released, while still in Shoot mode, gets
+  the server error "You cannot shoot with combat cooldown." until the cooldown ends.
+
 **Still untested:** a correction before the first `prog` (0–150 ms, with "Require draw progress"
-unticked), method D (combat portrait) and the belt-key path. Every map-click correction sent between
-+300 and +680 ms (2 ground, 3 gob) has been ignored.
+unticked) and the belt-key path. Every correction sent after progress started has been ignored:
+2 ground and 3 gob clicks between +300 and +680 ms, and 2 portrait clicks at about +1100 ms.
 
 ## 8. Verification status
 
@@ -239,5 +257,5 @@ unticked), method D (combat portrait) and the belt-key path. Every map-click cor
   classification, one correction per armed test, refusal without a valid target or relation, risk
   acknowledgement, aborts, cancellation, session end, per-instance isolation, and that no verdict
   reports re-aim success without the player's observation.
-- **Run live for method A only** (§7). Methods B and D, and early (pre-progress) timing, are
+- **Run live for methods A, B and D** (§7). Early (pre-progress) timing and the belt-key path are
   unverified.
