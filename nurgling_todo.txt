@@ -1,0 +1,7 @@
+NURGLING TODO:
+
+1. fix the problem of open-but-unfocused windows taking focus when another window is closed which then causes the input fields in that window to take every key press after closing a window as input for that field rather than fire the key they are bound to. 
+
+2. is there a way to create inventory and item operations filtered by a threshold of quality with a simple keybind press? like can i shift click all items of this type that are quality 100 and above into a container, then shift click whatever was under the threshold into a different storage container?
+
+3. 
