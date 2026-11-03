@@ -216,9 +216,22 @@ Runtime evidence from the diagnostic log; arrow direction is the player's own ob
   The delay field does not clear when clicked, so typing appended to the old value. Delays are now
   capped at 2000 ms, and the armed delay is shown in the status line.
 
-**Still untested:** method B (gob click), method D (portrait), the belt-key path, and a correction
-before the first `prog` (about 0–150 ms). For that last one, untick "Require draw progress", or the
-test aborts as "draw not confirmed".
+### 2026-11-03, method B (gob click) and a second method A run
+
+- **Gob-click corrections at +635, +656 and +678 ms were ignored.** These are the method B message,
+  identical in shape to a minimap icon click. Each went out at 58 % progress, with the Shoot cursor
+  still active. Facing did not change, progress did not reset, and the player saw the arrow go to the
+  original spot. A further ground correction at +650 ms behaved the same.
+- **The first shot click may itself be a gob click.** One shot was started by clicking a gob directly
+  (gob args with mesh id 2, a real hit-test). The arrow went to the clicked target.
+- **Progress steps are coarse: 0, 16, 33, 58, 75 %, then end.** Any threshold from 34 to 58 % fires at
+  58 %. The earliest progress-triggered correction is at 16 %, about 290 ms after the click.
+- **Five corrections at 100 ms delay aborted unsent.** "Require draw progress" was on, and progress
+  had not started yet. Arming now refuses a delay under 250 ms while that box is ticked.
+
+**Still untested:** a correction before the first `prog` (0–150 ms, with "Require draw progress"
+unticked), method D (combat portrait) and the belt-key path. Every map-click correction sent between
++300 and +680 ms (2 ground, 3 gob) has been ignored.
 
 ## 8. Verification status
 

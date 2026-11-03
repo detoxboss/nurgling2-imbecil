@@ -158,7 +158,7 @@ class AimDiagnosticTest {
     @Test
     void default_cursor_click_is_not_taken_as_the_shot() {
         FakeEnv e = env();
-        e.diag.arm(ground(Trigger.DELAY, 0, 50));
+        e.diag.arm(ground(Trigger.DELAY, 300, 50));
         e.diag.onOutgoing(Sender.MAP, "click", new Object[] {Coord.z, Coord.of(1, 1), 1, 0});
         assertEquals(State.ARMED, e.diag.state());
         e.advance(1000);
@@ -224,7 +224,7 @@ class AimDiagnosticTest {
     @Test
     void progress_reset_is_recorded() {
         FakeEnv e = env();
-        e.diag.arm(ground(Trigger.DELAY, 200, 50));
+        e.diag.arm(ground(Trigger.DELAY, 300, 50));
         userShot(e);
         e.diag.onProgress(10.0);
         e.advance(200);
@@ -328,17 +328,17 @@ class AimDiagnosticTest {
     void missing_sender_widget_aborts() {
         FakeEnv e = env();
         e.widgetsPresent = false;
-        e.diag.arm(ground(Trigger.DELAY, 0, 50));
+        e.diag.arm(ground(Trigger.DELAY, 300, 50));
         userShot(e);
         e.diag.onProgress(1.0);
-        e.advance(10);
+        e.advance(310);
         assertFalse(e.diag.lastResult().correctionSent());
     }
 
     @Test
     void separate_sessions_do_not_share_state() {
         FakeEnv a = env(), b = env();
-        a.diag.arm(ground(Trigger.DELAY, 100, 50));
+        a.diag.arm(ground(Trigger.DELAY, 300, 50));
         userShot(b);
         assertEquals(State.ARMED, a.diag.state());
         assertEquals(State.IDLE, b.diag.state());
@@ -347,10 +347,10 @@ class AimDiagnosticTest {
     @Test
     void verdict_needs_the_players_observation() {
         FakeEnv e = env();
-        e.diag.arm(ground(Trigger.DELAY, 0, 50));
+        e.diag.arm(ground(Trigger.DELAY, 300, 50));
         userShot(e);
         e.diag.onProgress(1.0);
-        e.advance(AimDiagnostic.OBSERVE_MS + 100);
+        e.advance(AimDiagnostic.OBSERVE_MS + 1000);
         AimDiagnostic.Result r = e.diag.lastResult();
         assertTrue(r.correctionSent());
         assertEquals(Verdict.AWAITING_OBSERVATION, AimDiagnostic.verdict(r));
@@ -380,6 +380,17 @@ class AimDiagnosticTest {
         assertNotNull(e.diag.arm(ground(Trigger.DELAY, 5001, 50)));
         assertEquals(State.IDLE, e.diag.state());
         assertNull(e.diag.arm(ground(Trigger.DELAY, AimDiagnostic.MAX_DELAY_MS, 50)));
+    }
+
+    @Test
+    void early_delay_needs_draw_check_off_and_then_sends_before_progress() {
+        FakeEnv e = env();
+        assertNotNull(e.diag.arm(ground(Trigger.DELAY, 100, 50)));
+        assertNull(e.diag.arm(new Config(Method.GROUND, Trigger.DELAY, 100, 50, false, true, B, -1, -1, "")));
+        userShot(e);
+        e.advance(100);
+        assertEquals(1, e.sent.size());
+        assertFalse(e.diag.lastResult().drawConfirmed);
     }
 
     @Test

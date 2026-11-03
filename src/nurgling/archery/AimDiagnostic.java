@@ -63,6 +63,8 @@ public final class AimDiagnostic {
     public static final long DRAW_TIMEOUT_MS = 6_000;
     /** Longest correction delay accepted; a measured draw lasts about 0.9 s from the click. */
     public static final long MAX_DELAY_MS = 2_000;
+    /** Measured: the first "prog" arrives 157-223 ms after the shot click. */
+    public static final long PROG_START_MS = 250;
     /** How long to keep observing after the correction went out. */
     public static final long OBSERVE_MS = 3_000;
     /** Spacing of the bounded orientation/pose samples. */
@@ -262,6 +264,8 @@ public final class AimDiagnostic {
             return "Incomplete settings.";
         if (c.trigger == Trigger.DELAY && (c.delayMs < 0 || c.delayMs > MAX_DELAY_MS))
             return "Delay " + c.delayMs + " ms is outside 0.." + MAX_DELAY_MS + " ms (a draw lasts about 900 ms). Clear the field and retype it.";
+        if (c.trigger == Trigger.DELAY && c.requireDraw && c.delayMs < PROG_START_MS)
+            return "Delay " + c.delayMs + " ms is before the progress ring appears (~160-220 ms); untick \"Require draw progress\" to test that early.";
         if (c.trigger == Trigger.PROGRESS && (c.progressPct < 1 || c.progressPct > 99))
             return "Progress threshold must be 1..99 %.";
         switch (c.method) {
