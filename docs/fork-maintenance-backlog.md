@@ -30,8 +30,9 @@ a design problem to solve from scratch.
 ## 2. Broader multi-session architecture/reliability investigation
 
 **Where:** `src/nurgling/sessions/**` and everything the session-ownership invariants in
-`docs/fork-customization-ledger.md` currently patch around (`MapFile` locking, `NGameUI` teardown,
-`NMiniMap` resolution, explicit-session persistence).
+`docs/fork-customization-ledger.md` currently patch around (`NGameUI` teardown, `NMiniMap`
+resolution, explicit-session persistence; `MapFile` locking was retired in the 2026-10-30 sync when
+upstream moved to one shared `MapFile` per process).
 
 **Problem:** those ledger entries are targeted fixes for specific symptoms of running multiple
 sessions in one process. Whether the underlying multi-session architecture has other, not-yet-observed
@@ -47,6 +48,36 @@ item tracks: upstream has not shipped a general multi-session architecture, and 
 also introduced a *new* ambient-lookup regression in `NMiniMap.drawTimers()` that had to be
 corrected during the merge (see the ledger's `NMiniMap` entry). The audit this item asks for remains
 open.
+
+Update (2026-10-30 sync): upstream converged one level further — a single shared `MapFile` per
+`(ResCache, filename)` and per-UI alarm sounds (`NAlarmManager.play(UI, ...)`) — while new upstream
+code added more ambient lookups. Fixed in the merge, as directly affected UI-thread cases:
+`NMapView.PlanningPresetSelector` (a regression git's auto-merge introduced), `NMakewindow.craftAll()`,
+`CattleRoster.areaName()`. Left as upstream wrote them (bot-thread or legacy pattern, thread-bound
+`NUtils` resolves the right session there): `DrinkerBot`, `NDrinkerProp.get`, `LpExplorer.recentBotHarvestClick`,
+`NPFMap`, `TakeFromStorageIndex`, `Leveler`, `ExtendRoad`, `BlueprintBuilder*`, `NBasePlannerWidget`,
+`StepSettingsPanel`'s Blueprint Builder block (runs in the panel's constructor, before `ui` is set).
+
+Pre-commit safety review of those deferred lookups (2026-10-30). The basis: `NUtils.getUI()` returns
+the thread's `ThreadLocalUI` when one is bound, else the active UI. `BotExecutor.runAsync/runTask/
+runTracked/runWithSupports` bind the spawning session for the bot thread's whole life, and
+`NUI.tick/draw/keydown/mousedown/mouseup/mousewheel/mousemove` bind `this` around their dispatch, so
+widget ticks, NTask checks (run from `NCore.tick`) and widget click handlers of a background session
+resolve that session, not the active one. Classification — **none unsafe**:
+
+| Site | Thread / context | Class |
+|---|---|---|
+| `DrinkerBot` (5) | bot thread, bound at spawn; NTask checks in owner `NCore.tick` | Safe |
+| `NDrinkerProp.get` | only caller is `DrinkerBot` (bot thread) | Safe; low-risk cleanup: takes `sessInfo` but reads the char id ambiently |
+| `NPFMap.build/blockCliffs` | only built by `PathFinder` (bot threads, incl. map-click paths that bind via `ThreadLocalUI`) | Safe; same pattern as the pre-existing `build()` lookups |
+| `LpExplorer.recentBotHarvestClick` | `NGItem.tick()` inside `NUI.tick` | Safe; resolves the same session as `checkLpExplorer`'s own `gui` |
+| `BlueprintBuilder` / `BlueprintBuilderWindow` / `NBasePlannerWidget` | bot thread, or widget click/tick inside `NUI` dispatch | Safe; low-risk cleanup: `ui.gui`/owner would be explicit |
+| `StepSettingsPanel` Blueprint block | constructed from a click/tick of the Scenario editor (bound) | Safe |
+
+Residual risk (low, deferred): all of these depend on the binding being in place. A future call from
+an unbound thread — the server message reader, an AWT/Swing callback (`JFileChooser`), `Defer` loader
+threads, or upstream's new `PresentLoop` present thread — would fall back to the active UI. Prefer
+explicit owners when touching these files for other reasons.
 
 Update (2026-10-13 sync): the range added **46** more ambient `NUtils.getGameUI()`/`getUI()` references.
 The five in new upstream code where the owner was directly available were fixed in the merge (listed in

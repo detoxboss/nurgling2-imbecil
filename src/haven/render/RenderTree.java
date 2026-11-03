@@ -91,6 +91,10 @@ public class RenderTree implements RenderList.Adapter, Disposable {
 	return(new Locked(this.lock));
     }
 
+    public Locked trylock() {
+	return(Locked.tryof(this.lock));
+    }
+
     private static class Client<R> {
 	final Class<? extends R> type;
 	final RenderList<R> list;
@@ -405,6 +409,12 @@ public class RenderTree implements RenderList.Adapter, Disposable {
 	private SlotRemoved(TreeSlot slot) {
 	    this(null, slot);
 	}
+    }
+
+    /* nurgling: whether a slot's state is defined in a state group,
+     * without reading it; group pipes of other kinds never change. */
+    public static boolean defines(Pipe group, State.Slot<?> slot) {
+	return(!(group instanceof TreeSlot.SlotPipe) || ((TreeSlot.SlotPipe)group).defines(slot));
     }
 
     static class TreeSlot implements Slot {
@@ -728,6 +738,11 @@ public class RenderTree implements RenderList.Adapter, Disposable {
 		if((bk.states.length <= idx) || !bk.def[idx])
 		    NUtils.getGameUI().error("Reading undefined slot " + slot + " from slot-pipe");
 		return((T)bk.states[idx]);
+	    }
+
+	    public boolean defines(State.Slot<?> slot) {
+		DepInfo bk = dstate();
+		return((slot.id < bk.states.length) && bk.def[slot.id]);
 	    }
 
 	    public Pipe copy() {

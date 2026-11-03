@@ -231,7 +231,8 @@ class MigrationLineageTest {
             assertEquals(15, count(conn, "SELECT COUNT(*) FROM schema_version"));
             assertEquals(0, count(conn, "SELECT COUNT(*) FROM schema_version WHERE version < 1"),
                 "no fork migration may write a row into schema_version");
-            assertEquals(1, count(conn, "SELECT COUNT(*) FROM " + ForkMigrationManager.LEDGER_TABLE));
+            // One ledger row per fork migration: 0001 bridge + 0002 reconcile.
+            assertEquals(2, count(conn, "SELECT COUNT(*) FROM " + ForkMigrationManager.LEDGER_TABLE));
             assertEquals(count(conn, "SELECT COUNT(*) FROM stack_sizes"),
                 count(conn, "SELECT COUNT(DISTINCT name) FROM stack_sizes"),
                 "seeding must not duplicate names");
@@ -392,11 +393,15 @@ class MigrationLineageTest {
             try (Statement st = conn.createStatement();
                  ResultSet rs = st.executeQuery("SELECT id FROM "
                      + ForkMigrationManager.LEDGER_TABLE)) {
-                assertTrue(rs.next(), "expected a ledger row");
-                String id = rs.getString(1);
-                assertNotNull(id);
-                assertFalse(id.matches("-?\\d+"), "fork migration ids must not be bare integers: " + id);
-                assertEquals(ForkMigrationManager.MIGRATION_STACK_SIZES_BRIDGE, id);
+                java.util.Set<String> ids = new java.util.HashSet<>();
+                while (rs.next()) {
+                    String id = rs.getString(1);
+                    assertNotNull(id);
+                    assertFalse(id.matches("-?\\d+"), "fork migration ids must not be bare integers: " + id);
+                    ids.add(id);
+                }
+                assertEquals(java.util.Set.of(ForkMigrationManager.MIGRATION_STACK_SIZES_BRIDGE,
+                    ForkMigrationManager.MIGRATION_STACK_SEED_RECONCILE_2026_10_30), ids);
             }
         }
     }
@@ -486,6 +491,62 @@ class MigrationLineageTest {
             assertEquals(4, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Lynx Claws'"));
             assertEquals(1, count(conn, "SELECT stackable FROM stack_sizes WHERE name = 'Lynx Claws'"));
             assertEquals(2, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Brain'"));
+        }
+    }
+
+    /**
+     * A database that already ran 0001 under an older static table (the common real case: every
+     * fork client since the bridge) gets the 2026-10-30 upstream corrections only through 0002 -
+     * 0001 is never re-run. Seed rows are corrected with a version bump; a player's manual row for
+     * the same kind of fact and a learned row stay exactly as they were.
+     */
+    @Test
+    void reconcile20261030CorrectsSeedRowsOnADatabaseThatAlreadyRan0001(@TempDir Path dir) throws Exception {
+        try (Connection conn = open(dir, "r2.db")) {
+            migrate(conn);
+            assertTrue(forkApplied(conn, ForkMigrationManager.MIGRATION_STACK_SIZES_BRIDGE));
+            // The state before this sync: 0001 applied, 0002 not, seeded by the older static table.
+            exec(conn, "DELETE FROM " + ForkMigrationManager.LEDGER_TABLE + " WHERE id = '"
+                + ForkMigrationManager.MIGRATION_STACK_SEED_RECONCILE_2026_10_30 + "'");
+            exec(conn, "UPDATE stack_sizes SET max_stack = 4, stackable = 1, provenance = 'seed', version = 2 "
+                + "WHERE name = 'Adder Skeleton'");
+            exec(conn, "INSERT INTO stack_sizes (profile, name, max_stack, stackable, provenance, version) "
+                + "VALUES ('global', 'Block of Trombone Chantrelle', 4, 1, 'seed', 1)");
+            exec(conn, "UPDATE stack_sizes SET max_stack = 7, provenance = 'manual', version = 3 WHERE name = 'Reeds'");
+            exec(conn, "UPDATE stack_sizes SET max_stack = 9, provenance = 'learned', version = 6 WHERE name = 'Indigo Cap'");
+            // A player-deleted row, even for a name the new static table knows, stays deleted.
+            exec(conn, "UPDATE stack_sizes SET max_stack = 2, deleted_at = CURRENT_TIMESTAMP, provenance = 'seed', "
+                + "version = 5 WHERE name = 'Cave Louse Leg'");
+            // A stale tombstone for a corrected name is not rewritten either.
+            exec(conn, "INSERT INTO stack_sizes (profile, name, max_stack, stackable, provenance, version, deleted_at) "
+                + "VALUES ('global', 'Mammoth Meat', 5, 1, 'seed', 4, CURRENT_TIMESTAMP)");
+
+            assertTrue(forkMigrate(conn).isEmpty());
+
+            assertTrue(forkApplied(conn, ForkMigrationManager.MIGRATION_STACK_SEED_RECONCILE_2026_10_30));
+            assertEquals(3, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Adder Skeleton'"));
+            assertEquals(3, count(conn, "SELECT version FROM stack_sizes WHERE name = 'Adder Skeleton'"));
+            // Dropped from the static table: rewritten to the static fallback, not deleted.
+            assertEquals(1, count(conn,
+                "SELECT COUNT(*) FROM stack_sizes WHERE name = 'Block of Trombone Chantrelle' AND stackable = 0"));
+            assertEquals(7, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Reeds'"));
+            assertEquals(3, count(conn, "SELECT version FROM stack_sizes WHERE name = 'Reeds'"));
+            assertEquals(9, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Indigo Cap'"));
+            assertEquals(6, count(conn, "SELECT version FROM stack_sizes WHERE name = 'Indigo Cap'"));
+            assertEquals(1, count(conn,
+                "SELECT COUNT(*) FROM stack_sizes WHERE name = 'Cave Louse Leg' AND deleted_at IS NOT NULL"));
+            assertEquals(1, count(conn, "SELECT COUNT(*) FROM stack_sizes WHERE name = 'Cave Louse Leg'"));
+            assertEquals(2, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Cave Louse Leg'"));
+            assertEquals(5, count(conn, "SELECT version FROM stack_sizes WHERE name = 'Cave Louse Leg'"));
+            assertEquals(5, count(conn, "SELECT max_stack FROM stack_sizes WHERE name = 'Mammoth Meat'"));
+            assertEquals(4, count(conn, "SELECT version FROM stack_sizes WHERE name = 'Mammoth Meat'"));
+            assertEquals(15, version(conn));
+
+            // Applied once: a second start changes nothing.
+            int ledgerRows = count(conn, "SELECT COUNT(*) FROM " + ForkMigrationManager.LEDGER_TABLE);
+            assertTrue(forkMigrate(conn).isEmpty());
+            assertEquals(ledgerRows, count(conn, "SELECT COUNT(*) FROM " + ForkMigrationManager.LEDGER_TABLE));
+            assertEquals(3, count(conn, "SELECT version FROM stack_sizes WHERE name = 'Adder Skeleton'"));
         }
     }
 

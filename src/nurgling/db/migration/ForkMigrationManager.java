@@ -74,6 +74,17 @@ public class ForkMigrationManager {
      */
     public static final String MIGRATION_STACK_SIZES_BRIDGE = "0001-stack-sizes-lineage-bridge";
 
+    /**
+     * Re-run of the generated-row reconciliation after the 2026-10-30 upstream sync (target
+     * 2ce51342e), whose static table corrects facts an existing database already holds as 'seed'
+     * rows - Adder Skeleton 4 -> 3, and names upstream dropped from a category they never belonged to
+     * (Block of Trombone Chantrelle, Beech Seed, the mislabelled Mammoth Meat). {@link
+     * #MIGRATION_STACK_SIZES_BRIDGE} already ran on those databases, so without a new id nothing
+     * would ever correct them: the DB is consulted first and learning only raises a max_stack.
+     * Same rules as that reconciliation - manual, learned and tombstoned rows are never touched.
+     */
+    public static final String MIGRATION_STACK_SEED_RECONCILE_2026_10_30 = "0002-stack-seed-reconcile-2026-10-30";
+
     private final Connection connection;
     private final DatabaseAdapter adapter;
 
@@ -296,6 +307,19 @@ public class ForkMigrationManager {
                     createStackSizesTable(adapter);
                     seedStackSizes(adapter);
                 } else {
+                    reconcileStackSizes(adapter);
+                }
+            }
+        });
+
+        /* Reconciliation is idempotent, so on a database 0001 has just seeded from the current
+         * static table this changes nothing. Only reached once 0001 is applied: the loop stops at
+         * the first failure. */
+        migrations.add(new ForkMigration(MIGRATION_STACK_SEED_RECONCILE_2026_10_30,
+                "Reconcile generated stack_sizes rows with the static table after the 2026-10-30 upstream sync") {
+            @Override
+            void run(DatabaseAdapter adapter) throws SQLException {
+                if (adapter.tableExists("stack_sizes")) {
                     reconcileStackSizes(adapter);
                 }
             }

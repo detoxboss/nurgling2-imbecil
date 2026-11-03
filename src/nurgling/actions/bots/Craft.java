@@ -56,6 +56,21 @@ public class Craft implements Action {
     boolean isGlobalMode = false;
 
     /**
+     * Fetch inputs that have no input area from the Storage Items index. Set by the craft window's
+     * "Use storage items" toggle only; preset bots leave it off.
+     */
+    public boolean useStorage = false;
+    /**
+     * Read on the UI thread by whoever sets useStorage; storage outside the village it describes is
+     * never fetched from.
+     */
+    public nurgling.widgets.storage.VillageStorage village = null;
+    private Set<Long> villageChunks = null;
+    private TakeFromStorageIndex.Source storage = null;
+    /** Exact names of the inputs this run takes from storage instead of an area. */
+    private final Set<String> fromStorage = new HashSet<>();
+
+    /**
      * Режим prefilled - ингредиенты уже загружены в инвентарь.
      * Пропускает TakeItems2 при крафте.
      */
@@ -110,31 +125,38 @@ public class Craft implements Action {
     private Results mwnd_run(NGameUI gui) throws InterruptedException {
         NContext ncontext = new NContext(gui);
         int size = 0;
+        // Pick category ingredients first, so the storage lookup below sees every input's name
+        for (NMakewindow.Spec s : mwnd.inputs) {
+            if (s.categories && s.ing == null) {
+                selectIngredientFromCategory(s);
+            }
+        }
+        if (useStorage) {
+            resolveStorageInputs();
+        }
         for (NMakewindow.Spec s : mwnd.inputs) {
             // Skip ignored optional ingredients
             if (s.ing != null && s.ing.isIgnored) {
                 continue;
             }
 
+            String name;
+            java.awt.image.BufferedImage img;
             if (!s.categories) {
-                ncontext.addInItem(s.name, ItemTex.create(ItemTex.save(s.spr)));
-                if (!ncontext.isInBarrel(s.name)) {
-                    size += s.count;
-                }
+                name = s.name;
+                img = ItemTex.create(ItemTex.save(s.spr));
             } else if (s.ing != null) {
-                ncontext.addInItem(s.ing.name, s.ing.img);
-                if (!ncontext.isInBarrel(s.ing.name)) {
-                    size += s.count;
-                }
+                name = s.ing.name;
+                img = s.ing.img;
             } else {
-                // Auto-select any available ingredient from category
-                selectIngredientFromCategory(s);
-                if (s.ing != null && !s.ing.isIgnored) {
-                    ncontext.addInItem(s.ing.name, s.ing.img);
-                    if (!ncontext.isInBarrel(s.ing.name)) {
-                        size += s.count;
-                    }
-                }
+                continue;
+            }
+            // A storage input has no area; addInItem would ask the player to draw one
+            if (!fromStorage.contains(name)) {
+                ncontext.addInItem(name, img);
+            }
+            if (!ncontext.isInBarrel(name)) {
+                size += s.count;
             }
         }
 
@@ -144,7 +166,8 @@ public class Craft implements Action {
                 if (!s.categories) {
                     if(!ncontext.isInBarrel(s.name))
                         size += s.count;
-                    ncontext.addOutItem(s.name, ItemTex.create(ItemTex.save(s.spr)), 1);
+                    // Butter put away by kind needs no plain "Butter" area to be drawn
+                    ncontext.addOutItem(s.name, hasKindOutArea(ncontext, s.name) ? null : ItemTex.create(ItemTex.save(s.spr)), 1);
                 } else if (s.ing != null) {
                     if(!ncontext.isInBarrel(s.ing.name))
                         size += s.count;
@@ -292,7 +315,17 @@ public class Craft implements Action {
                 }
             } else if (!prefilled) {
                 // В режиме prefilled ингредиенты уже в инвентаре, пропускаем TakeItems2
-                if (!new TakeItems2(ncontext, s.ing == null ? s.name : s.ing.name, s.count * for_craft).run(gui).IsSuccess()) {
+                if (ItemVariants.isKey(item)) {
+                    Results cleared = clearOtherKinds(ncontext, gui, item);
+                    if (!cleared.IsSuccess()) {
+                        return cleared;
+                    }
+                }
+                if (fromStorage.contains(item)) {
+                    if (!new TakeFromStorageIndex(storage, item, s.count * for_craft).run(gui).IsSuccess()) {
+                        return Results.ERROR("Failed to take items from storage: " + item);
+                    }
+                } else if (!new TakeItems2(ncontext, s.ing == null ? s.name : s.ing.name, s.count * for_craft).run(gui).IsSuccess()) {
                     return Results.ERROR("Failed to take items: " + item);
                 }
             }
@@ -328,7 +361,7 @@ public class Craft implements Action {
             
             String item = s.ing == null ? s.name : s.ing.name;
             if (ncontext.isInBarrel(item)) {
-                double val = gui.findBarrelContent(windows, new NAlias(item));
+                double val = barrelAmount(gui, windows, item);
                 
                 // Handle case when barrel content not found (-1 means not found)
                 if (val < 0) {
@@ -573,15 +606,23 @@ public class Craft implements Action {
                 
                 if (ncontext.isInBarrel(itemName)) {
                     // Check barrel content
-                    double val = gui.findBarrelContent(barrelWindows, new NAlias(itemName));
+                    double val = barrelAmount(gui, barrelWindows, itemName);
                     if (val < 0 || val * 100 < required) {
                         return false;
                     }
                 } else {
                     // Check inventory
-                    ArrayList<WItem> items = gui.getInventory().getItems(new NAlias(itemName));
+                    ArrayList<WItem> items = gui.getInventory().getItems(new NAlias(ItemVariants.base(itemName)));
                     int available = 0;
                     for (WItem item : items) {
+                        // Storage inputs are matched by exact name: "Flax" must not count "Flax Fibres"
+                        if (fromStorage.contains(itemName) && !itemName.equals(((NGItem) item.item).name())) {
+                            continue;
+                        }
+                        // One kind of butter counts only that kind
+                        if (ItemVariants.isKey(itemName) && !ItemVariants.matches((NGItem) item.item, itemName)) {
+                            continue;
+                        }
                         available += getActualItemCount(item);
                     }
                     if (available < required) {
@@ -651,14 +692,80 @@ public class Craft implements Action {
         return ids;
     }
 
+    /**
+     * Litres of an input in the open barrels. A kind of milk must be exactly that liquid: a plain
+     * name match would let "Milk" stand for every kind.
+     */
+    private static double barrelAmount(NGameUI gui, ArrayList<Window> windows, String item) {
+        String liquid = ItemVariants.liquidOf(item);
+        if (liquid == null) {
+            return gui.findBarrelContent(windows, new NAlias(item));
+        }
+        for (Window wnd : windows) {
+            LiquidContent content = LiquidContent.read(wnd);
+            if (content != null && liquid.equals(content.name)) {
+                return content.amount;
+            }
+        }
+        return -1;
+    }
+
+    /** Whether an output that comes in kinds has a PUT area for any of its kinds. */
+    private static boolean hasKindOutArea(NContext ncontext, String name) throws InterruptedException {
+        for (String key : ItemVariants.keys(name)) {
+            if (ncontext.addOutItem(key, null, 1)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The server picks which butter in the inventory a recipe uses, so before one kind is fetched
+     * every other kind is put away. Fails when one has no area to go to.
+     */
+    private Results clearOtherKinds(NContext ncontext, NGameUI gui, String key) throws InterruptedException {
+        String name = ItemVariants.base(key);
+        ArrayList<WItem> held = gui.getInventory().getItems(new NAlias(name));
+        NUtils.addTask(new NTask() {
+            @Override
+            public boolean check() {
+                return !ItemVariants.anyUnread(held);
+            }
+        });
+        HashSet<String> targets = new HashSet<>();
+        for (WItem witem : held) {
+            NGItem item = (NGItem) witem.item;
+            if (name.equals(item.name()) && !ItemVariants.matches(item, key)) {
+                double q = item.quality != null ? item.quality : 1;
+                String route = ncontext.outKey(item, q);
+                if (ncontext.addOutItem(route, null, q)) {
+                    targets.add(route);
+                }
+            }
+        }
+        if (!targets.isEmpty()) {
+            new TransferItems2(ncontext, targets).run(gui);
+        }
+        for (WItem witem : gui.getInventory().getItems(new NAlias(name))) {
+            NGItem item = (NGItem) witem.item;
+            if (name.equals(item.name()) && !ItemVariants.matches(item, key)) {
+                String kind = ItemVariants.keyOf(item);
+                return Results.ERROR("The inventory holds " + (kind != null ? ItemVariants.describe(kind) : name)
+                        + " with no area to put it in; it would go into the craft instead of " + ItemVariants.describe(key));
+            }
+        }
+        return Results.SUCCESS();
+    }
+
     private void selectIngredientFromCategory(NMakewindow.Spec spec) {
         if (!spec.categories || spec.ing != null) {
             return;
         }
 
-        ArrayList<org.json.JSONObject> categoryItems = VSpec.categories.get(spec.name);
+        ArrayList<org.json.JSONObject> categoryItems = CraftCategories.options(spec.name);
         if (categoryItems == null || categoryItems.isEmpty()) {
-            NUtils.getGameUI().msg("Category '" + spec.name + "' not found in VSpec.categories");
+            NUtils.getGameUI().msg("Category '" + spec.name + "' has no known items");
             return;
         }
 
@@ -684,7 +791,61 @@ public class Craft implements Action {
             }
         }
 
+        // Last, the Storage Items index (exact names only)
+        if (useStorage) {
+            List<String> names = new ArrayList<>();
+            for (org.json.JSONObject obj : categoryItems) {
+                names.add((String) obj.get("name"));
+            }
+            TakeFromStorageIndex.Source src = TakeFromStorageIndex.Source.load(names, villageChunks());
+            for (org.json.JSONObject obj : categoryItems) {
+                String itemName = (String) obj.get("name");
+                if (src.has(itemName)) {
+                    NUtils.getGameUI().msg("Found in storage: " + itemName + " for category " + spec.name);
+                    spec.ing = mwnd.new Ingredient(obj);
+                    return;
+                }
+            }
+        }
+
         NUtils.getGameUI().msg("No available ingredients found for category: " + spec.name);
+    }
+
+    /** The village's chunks, worked out once per run. */
+    private Set<Long> villageChunks() {
+        if (villageChunks == null) {
+            villageChunks = (village != null) ? village.village() : Collections.emptySet();
+        }
+        return villageChunks;
+    }
+
+    private static String inputName(NMakewindow.Spec s) {
+        if (s.ing != null) {
+            return s.ing.isIgnored ? null : s.ing.name;
+        }
+        return s.categories ? null : s.name;
+    }
+
+    /**
+     * Decide which inputs come from the Storage Items index: those with no input area anywhere
+     * that the index lists under exactly their name. All names go in one query.
+     */
+    private void resolveStorageInputs() {
+        Set<String> candidates = new LinkedHashSet<>();
+        for (NMakewindow.Spec s : mwnd.inputs) {
+            String name = inputName(s);
+            if (name != null && NContext.findIn(name) == null && NContext.findInGlobal(name) == null) {
+                candidates.add(name);
+            }
+        }
+        storage = TakeFromStorageIndex.Source.load(candidates, villageChunks());
+        fromStorage.clear();
+        for (String name : candidates) {
+            if (storage.has(name)) {
+                fromStorage.add(name);
+                System.out.println("[Craft] " + name + ": no input area, taking it from storage");
+            }
+        }
     }
 
     /**
@@ -800,10 +961,9 @@ public class Craft implements Action {
                 // category/ingredient selection and the barrel logistics the bot relies on.
                 // Set this before re-applying ingredients, since Spec.categories is
                 // recomputed from autoMode on tick.
-                mwnd.autoMode = savedAutoMode;
+                mwnd.setAutoMode(savedAutoMode);
                 if (mwnd.noTransfer != null) {
                     mwnd.noTransfer.a = savedNoTransfer;
-                    mwnd.noTransfer.visible = savedAutoMode;
                 }
                 // Restore the requested target quantity. A freshly re-opened recipe has an
                 // empty quantity field; if the bot is later relaunched it would read that
@@ -853,7 +1013,7 @@ public class Craft implements Action {
             }
             
             int itemsNeeded = s.count * numCrafts;
-            int stackSize = StackSupporter.getFullStackSize(itemName);
+            int stackSize = StackSupporter.getFullStackSize(ItemVariants.base(itemName));
             
             // Calculate slots needed: ceil(itemsNeeded / stackSize)
             int slotsForItem = (itemsNeeded + stackSize - 1) / stackSize;

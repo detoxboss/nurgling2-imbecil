@@ -8,6 +8,8 @@ import nurgling.actions.bots.silk.RefillSilkwormFeedingCupboards;
 import nurgling.actions.bots.silk.SilkProductionBot;
 import nurgling.actions.bots.cheeseconveyor.CheeseConveyorBot;
 import nurgling.actions.bots.areamover.AreaMoverBot;
+import nurgling.actions.bots.drinker.DrinkerBot;
+import nurgling.actions.bots.blueprint.BlueprintBuilder;
 import nurgling.actions.bots.CollectSwillInArea;
 import nurgling.actions.bots.swillpiles.SwillPilesToTroughsBot;
 import nurgling.actions.bots.farmers.WheatFarmer;
@@ -143,6 +145,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("bough", BotDescriptor.BotType.RESOURCES, "bot.bough.title", "bot.bough.desc", false, true, CollectBough.class, "bough", false));
         bots.add(new BotDescriptor("leaf", BotDescriptor.BotType.RESOURCES, "bot.leaf.title", "bot.leaf.desc", false, true, CollectLeaf.class, "leaf", false));
         bots.add(new BotDescriptor("leaf_zone", BotDescriptor.BotType.RESOURCES, "bot.leaf_zone.title", "bot.leaf_zone.desc", true, true, CollectLeafZone.class, "leaf_zone", false));
+        bots.add(new BotDescriptor("lp_gatherer", BotDescriptor.BotType.RESOURCES, "bot.lp_gatherer.title", "bot.lp_gatherer.desc", true, true, LpGatherer.class, "lp_gatherer", false));
         bots.add(new BotDescriptor("fisher", BotDescriptor.BotType.RESOURCES, "bot.fisher.title", "bot.fisher.desc", false, true, Fishing.class, "fisher", true));
         bots.add(new BotDescriptor("plower", BotDescriptor.BotType.RESOURCES, "bot.plower.title", "bot.plower.desc", false, true, Plower.class, "plower", true));
         bots.add(new BotDescriptor("plant_trees", BotDescriptor.BotType.RESOURCES, "bot.plant_trees.title", "bot.plant_trees.desc", false, true, PlantTrees.class, "treePlanter", false));
@@ -295,6 +298,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("swap", BotDescriptor.BotType.UTILS, "Swap Vehicles", "Swaps between vehicles.", false, true, TransferFromVehToVeh.class, "swap", false));
         bots.add(new BotDescriptor("eater", BotDescriptor.BotType.UTILS, "Eating bot", "Eat in the food area.", true, true, Eater.class, "eater", false));
         bots.add(new BotDescriptor("table_eat_optimizer", BotDescriptor.BotType.UTILS, "Optimize table eating", "Eats through an already-open table's food grid, maximizing attribute gain (optionally biased toward up to 3 priority stats).", true, true, OptimizeTableEatingBot.class, "eater", false));
+        bots.add(new BotDescriptor("drinker", BotDescriptor.BotType.UTILS, "bot.drinker.title", "bot.drinker.desc", true, true, DrinkerBot.class, "drinker", false));
         bots.add(new BotDescriptor("zoneminer", BotDescriptor.BotType.UTILS, "Mine in area", "Mine rocks in the area.", false, true, MineAction.class, "zoneminer", true));
         bots.add(new BotDescriptor("bed", BotDescriptor.BotType.UTILS, "Go to bed", "Go to any free bed in a bed area nearby.", true, false, Sleep.class, "bed", false));
         bots.add(new BotDescriptor("soil", BotDescriptor.BotType.UTILS, "Create piles with soil", "Create piles with soil in area.", false, true, CreateSoilPiles.class, "soil", false));
@@ -348,6 +352,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("htable", BotDescriptor.BotType.BUILD, "Build Herbalist Tables", "Builds herbalist tables.", false, true, BuildHerbalistTable.class, "htable", true));
         bots.add(new BotDescriptor("moundbed", BotDescriptor.BotType.BUILD, "Build Mound Bed", "Builds mound bed.", false, true, BuildMoundBed.class, "moundbed", true));
         bots.add(new BotDescriptor("crate", BotDescriptor.BotType.BUILD, "Build Crate", "Builds crates.", false, true, BuildCrate.class, "crate", true));
+        bots.add(new BotDescriptor("blueprint_builder", BotDescriptor.BotType.BUILD, "bot.blueprint_builder.title", "bot.blueprint_builder.desc", true, true, BlueprintBuilder.class, "blueprint", false));
 
         // TOOLS (for debug)
         bots.add(new BotDescriptor("test1", BotDescriptor.BotType.TOOLS, "Test 1", "Debug test 1.", false, true, TESTMapv4.class, "test1", false));

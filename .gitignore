@@ -31,3 +31,4 @@ CLAUDE.local.md
 __pycache__/
 *.pyc
 /plugins/
+/tools/web/

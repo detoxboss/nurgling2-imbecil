@@ -96,7 +96,9 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
     private RenderTree.Slot gridWallSlot = null;
     private Set<Coord> gridWallLastCoords = null;
     private Color gridWallLastColor = null;
+    private Color gridDiagonalLastColor = null;
     private static final Color GRID_WALL_DEFAULT_COLOR = new Color(255, 140, 0, 217);
+    private static final Color GRID_DIAGONAL_DEFAULT_COLOR = new Color(0, 190, 255, 217);
 
     public NMapView(Coord sz, Glob glob, Coord2d cc, long plgob)
     {
@@ -234,7 +236,7 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
     }
 
     private nurgling.render.NPostFX.Manager postfx = null;
-    private nurgling.render.PointShadows pshadows = null;
+    private volatile nurgling.render.PointShadows pshadows = null;
 
     /* Photo mode: focus on the clicked point of the map. */
     private void photofocus(Coord2d mc) {
@@ -284,14 +286,13 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         if ((n <= 0) || (instancer == null)) {
             if (pshadows != null) {
                 basic(nurgling.render.PointShadows.class, null);
-                pshadows.dispose();
+                retire(pshadows);
                 pshadows = null;
             }
             return;
         }
         if ((pshadows == null) || (pshadows.master() != instancer)) {
-            if (pshadows != null)
-                pshadows.dispose();
+            retire(pshadows);
             pshadows = new nurgling.render.PointShadows(instancer);
         }
         Coord3f cc;
@@ -305,13 +306,15 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
 
     @Override
     protected void maindraw(haven.render.Render out) {
-        if (pshadows != null)
-            pshadows.draw(out);
+        nurgling.render.PointShadows ps = pshadows;
+        if (ps != null)
+            ps.draw(out);
         super.maindraw(out);
     }
 
     @Override
     public void draw(GOut g) {
+        g = bridgescene(g);
         // Initialize overlays only once on first draw (when GameUI is ready)
         if (!overlaysInitialized) {
             getRockTileOverlay(); // Initialize rock tile highlighting overlay
@@ -322,13 +325,14 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         // Graphics options: keep the post-processing chain in sync with the settings.
         if (postfx == null)
             postfx = new nurgling.render.NPostFX.Manager(this, this::basic, () -> {
-                if (back instanceof haven.render.vk.VkDrawList)
-                    ((haven.render.vk.VkDrawList) back).refresh();
+                haven.render.DrawList list = haven.render.DeferredDrawList.unwrap(back);
+                if (list instanceof haven.render.vk.VkDrawList)
+                    ((haven.render.vk.VkDrawList) list).refresh();
             });
         postfx.sync(g.out.env());
         // Use this view's effective settings and one immutable camera per draw.
         // UI ticks do not advance the temporal sampling sequence.
-        super.basic(Camera.class, nurgling.render.Temporal.cameraFrame(this, rendersz(), camera,
+        camstate(nurgling.render.Temporal.cameraFrame(this, rendersz(), camera,
                 nurgling.render.NGfx.effective(g.out.env()).taa));
         updpshadows();
         postfx.tick(this, (amblight == null) ? -1 : lights.index(amblight));
@@ -1471,14 +1475,15 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
 
     /**
      * Reconciles the combined grid-wall overlay against currently loaded grids
-     * and the configured wall color. Builds one combined mesh, one draw call,
-     * dedupes shared edges between adjacent grids; rebuilds only when the grid
-     * set or color changes.
+     * and the configured wall and diagonal colors. Builds one combined mesh, one
+     * draw call, dedupes shared edges between adjacent grids; rebuilds only when
+     * the grid set, a color, or which layers are shown changes.
      */
     private void updateGridWalls()
     {
-        boolean enabled = (Boolean) NConfig.get(NConfig.Key.gridbox);
-        if (!enabled) {
+        boolean walls = (Boolean) NConfig.get(NConfig.Key.gridbox);
+        boolean diagonals = (Boolean) NConfig.get(NConfig.Key.gridDiagonals);
+        if (!walls && !diagonals) {
             if (gridWallSlot != null) {
                 clearGridWalls();
             }
@@ -1489,7 +1494,8 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         synchronized (glob.map.grids) {
             currentGridCoords = new HashSet<>(glob.map.grids.keySet());
         }
-        Color currentColor = NConfig.getColor(NConfig.Key.gridWallColor, GRID_WALL_DEFAULT_COLOR);
+        Color currentColor = walls ? NConfig.getColor(NConfig.Key.gridWallColor, GRID_WALL_DEFAULT_COLOR) : null;
+        Color currentDiagonalColor = diagonals ? NConfig.getColor(NConfig.Key.gridDiagonalColor, GRID_DIAGONAL_DEFAULT_COLOR) : null;
 
         // Only include grids whose corners have loaded terrain; the rest are
         // retried on later ticks as their data arrives.
@@ -1503,16 +1509,18 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         boolean needRebuild = (gridWallOverlay == null)
                 || gridWallLastCoords == null
                 || !readyCoords.equals(gridWallLastCoords)
-                || !currentColor.equals(gridWallLastColor);
+                || !Objects.equals(currentColor, gridWallLastColor)
+                || !Objects.equals(currentDiagonalColor, gridDiagonalLastColor);
 
         if (!needRebuild) return;
 
         if (gridWallOverlay == null) {
             gridWallOverlay = new NGridWallOverlay();
         }
-        gridWallOverlay.rebuild(glob.map, readyCoords, currentColor);
+        gridWallOverlay.rebuild(glob.map, readyCoords, currentColor, currentDiagonalColor);
         gridWallLastCoords = readyCoords;
         gridWallLastColor = currentColor;
+        gridDiagonalLastColor = currentDiagonalColor;
 
         if (gridWallSlot == null) {
             try {
@@ -1534,6 +1542,7 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
         gridWallOverlay = null;
         gridWallLastCoords = null;
         gridWallLastColor = null;
+        gridDiagonalLastColor = null;
     }
 
     public void toggleol(String tag, boolean a)
@@ -1623,7 +1632,21 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
             // SAVE REGION armed: same one-shot rectangle, saved as a preset on release.
             if (planner.isSavePresetRegionArmed() && ev.b == 1) {
                 if (selection == null) {
-                    selection = new PlanningPresetSelector();
+                    selection = new PlanningPresetSelector(false);
+                }
+                return super.mousedown(ev);
+            }
+            // FROM WORLD armed: same rectangle, saving what is built there.
+            if (planner.isSaveWorldRegionArmed() && ev.b == 1) {
+                if (selection == null) {
+                    selection = new PlanningPresetSelector(true);
+                }
+                return super.mousedown(ev);
+            }
+            // BUILD REGION armed: same one-shot rectangle, handed to the Blueprint Builder on release.
+            if (planner.isBuildRegionArmed() && ev.b == 1) {
+                if (selection == null) {
+                    selection = new PlanningBuildSelector();
                 }
                 return super.mousedown(ev);
             }
@@ -2322,11 +2345,17 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
 
     /**
      * One-shot rectangle selector armed by the Base planner "Save region" button. On release, asks
-     * for a name and saves the ghosts of every visible layer inside the rectangle as a preset.
+     * for a name and saves the ghosts of every visible layer inside the rectangle as a preset; with
+     * {@code fromWorld} (Planner presets "From world"), what is built there as well.
      */
     public class PlanningPresetSelector extends Selector
     {
-        public PlanningPresetSelector() { super(null); }
+        private final boolean fromWorld;
+
+        public PlanningPresetSelector(boolean fromWorld) {
+            super(null);
+            this.fromWorld = fromWorld;
+        }
 
         @Override
         public void mmousemove(Coord mc) {
@@ -2346,11 +2375,64 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
                     Coord ec = mc.div(MCache.tilesz2);
                     Coord t1 = new Coord(Math.min(ec.x, sc.x), Math.min(ec.y, sc.y));
                     Coord t2 = new Coord(Math.max(ec.x, sc.x), Math.max(ec.y, sc.y)).add(1, 1);
-                    NGameUI owner = (NMapView.this.ui != null) ? (NGameUI) NMapView.this.ui.gui : null;
-                    nurgling.widgets.NBasePlannerWidget planner = (owner != null) ? owner.basePlanner : null;
-                    if (planner != null) {
+                    nurgling.widgets.NBasePlannerWidget planner = ownerBasePlanner();
+                    if (planner != null && fromWorld) {
+                        planner.disarmSaveWorldRegion();
+                        planner.saveWorldRegion(t1.mul(MCache.tilesz), t2.mul(MCache.tilesz));
+                    } else if (planner != null) {
                         planner.disarmSavePresetRegion();
                         planner.savePresetRegion(t1.mul(MCache.tilesz), t2.mul(MCache.tilesz));
+                    }
+                    xl.mv = false;
+                    tt = null;
+                    currentSelectionCoords = null;
+                    glob.map.remove(ol);
+                    mgrab.remove();
+                    sc = null;
+                    destroy();
+                    selection = null;
+                }
+                return true;
+            }
+        }
+    }
+
+    /**
+     * The Base planner of the session that owns this map view - never the ambient active session,
+     * which with several sessions open can be another one. Null while detached or before the
+     * planner exists.
+     */
+    nurgling.widgets.NBasePlannerWidget ownerBasePlanner() {
+        return (ui != null && ui.gui instanceof NGameUI) ? ((NGameUI) ui.gui).basePlanner : null;
+    }
+
+    /** One-shot rectangle selector armed by the Base planner "Build region" button. */
+    public class PlanningBuildSelector extends Selector
+    {
+        public PlanningBuildSelector() { super(null); }
+
+        @Override
+        public void mmousemove(Coord mc) {
+            super.mmousemove(mc);
+            if (sc != null) {
+                Coord tc = getec(mc);
+                Coord c1 = new Coord(Math.min(tc.x, sc.x), Math.min(tc.y, sc.y));
+                Coord c2 = new Coord(Math.max(tc.x, sc.x), Math.max(tc.y, sc.y));
+                currentSelectionCoords = new Pair<>(c1, c2.add(1, 1));
+            }
+        }
+
+        @Override
+        public boolean mmouseup(Coord mc, int button) {
+            synchronized (NMapView.this) {
+                if (sc != null) {
+                    Coord ec = mc.div(MCache.tilesz2);
+                    Coord t1 = new Coord(Math.min(ec.x, sc.x), Math.min(ec.y, sc.y));
+                    Coord t2 = new Coord(Math.max(ec.x, sc.x), Math.max(ec.y, sc.y)).add(1, 1);
+                    nurgling.widgets.NBasePlannerWidget planner = ownerBasePlanner();
+                    if (planner != null) {
+                        planner.disarmBuildRegion();
+                        planner.buildRegion(t1.mul(MCache.tilesz), t2.mul(MCache.tilesz));
                     }
                     xl.mv = false;
                     tt = null;
@@ -2884,8 +2966,10 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
                 int a = oa;
                 Plob ret = null;
                 public Plob get() {
-                    if(ret == null)
+                    if(ret == null) {
                         ret = new NPlob(res, new MessageBuf(sdt)); // Use NPlob here
+                        nurgling.actions.bots.blueprint.BuildPaginae.notePlaced(res.get().name);
+                    }
                     while(a < args.length) {
                         int a2 = a;
                         Indir<Resource> ores = ui.sess.getresv(args[a2++]);

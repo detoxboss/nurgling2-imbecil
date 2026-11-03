@@ -1,5 +1,6 @@
 package nurgling.widgets;
 
+import nurgling.actions.bots.drinker.Vessels;
 import haven.*;
 import haven.Button;
 import haven.Scrollbar;
@@ -9,6 +10,7 @@ import nurgling.*;
 import nurgling.areas.*;
 import nurgling.i18n.L10n;
 import nurgling.overlays.NAreaLabel;
+import nurgling.tools.ItemVariants;
 import org.json.*;
 
 import java.awt.*;
@@ -181,7 +183,9 @@ public class IngredientContainer extends BaseIngredientContainer {
             }
             if(!find) {
                 res.put("name", name);
-                res.put("type", NArea.Ingredient.Type.CONTAINER.toString());
+                // A kind of milk, or a drink, only ever comes in a barrel
+                boolean liquid = ItemVariants.liquidOf(name) != null || Vessels.isDrink(name);
+                res.put("type", (liquid ? NArea.Ingredient.Type.BARREL : NArea.Ingredient.Type.CONTAINER).toString());
                 addIcon(res);
                 data.put(res);
                 
@@ -242,7 +246,9 @@ public class IngredientContainer extends BaseIngredientContainer {
     @Override
     public boolean drop(Drop ev) {
         if(id != -1) {
-            String name = ((NGItem) ev.src.item).name();
+            // A butter is listed as its own kind ("Butter (Cowsmilk)"); the catalog lists plain "Butter"
+            String key = ItemVariants.keyOf((NGItem) ev.src.item);
+            String name = (key != null) ? key : ((NGItem) ev.src.item).name();
             JSONObject res = ItemTex.save(((NGItem) ev.src.item).spr);
             addItem(name, res);
         }

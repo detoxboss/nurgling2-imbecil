@@ -441,6 +441,7 @@ public class VkExec {
 	}
 	if(unit != null)
 	    submit(false, 0);
+	flushgpufences();
 	List<VkObject> reap = env.reapable();
 	if(!reap.isEmpty()) {
 	    Slot last = inflight.peekLast();
@@ -450,6 +451,60 @@ public class VkExec {
 		for(VkObject obj : reap)
 		    obj.destroy0();
 	    }
+	}
+    }
+
+    /* nurgling: callbacks for when the GPU has finished all work
+     * submitted before them (Render.gpufence). After each batch, an
+     * empty submission signals a fence of their own, which a waiter
+     * thread waits on; the units' fences are reset as soon as their
+     * slot is reused, so nothing else can wait on those. */
+    private List<Runnable> gpupend = new ArrayList<>();
+    private final java.util.concurrent.LinkedBlockingQueue<Object[]> gpuwait = new java.util.concurrent.LinkedBlockingQueue<>();
+    private Thread gpuwaiter = null;
+
+    void gpufence(Runnable cb) {
+	gpupend.add(cb);
+    }
+
+    private void flushgpufences() {
+	if(gpupend.isEmpty())
+	    return;
+	try(MemoryStack st = stackPush()) {
+	    LongBuffer lp = st.mallocLong(1);
+	    VkEnvironment.check(vkCreateFence(dev, VkFenceCreateInfo.calloc(st).sType$Default(), null, lp), "vkCreateFence");
+	    long fence = lp.get(0);
+	    VkEnvironment.check(vkQueueSubmit(env.queue, (VkSubmitInfo.Buffer)null, fence), "vkQueueSubmit");
+	    gpuwait.add(new Object[] {fence, gpupend});
+	}
+	gpupend = new ArrayList<>();
+	if(gpuwaiter == null) {
+	    gpuwaiter = new HackThread(this::gpuwaitloop, "Vulkan GPU fence waiter");
+	    gpuwaiter.setDaemon(true);
+	    gpuwaiter.start();
+	}
+    }
+
+    @SuppressWarnings("unchecked")
+    private void gpuwaitloop() {
+	try {
+	    while(true) {
+		Object[] w = gpuwait.take();
+		if(w.length == 0)
+		    return;
+		long fence = (Long)w[0];
+		while(true) {
+		    int rv = vkWaitForFences(dev, fence, true, 1000000000L);
+		    if(rv == VK_SUCCESS)
+			break;
+		    if(rv != VK_TIMEOUT)
+			throw(new VkEnvironment.VkException("vkWaitForFences", rv));
+		}
+		vkDestroyFence(dev, fence, null);
+		for(Runnable cb : (List<Runnable>)w[1])
+		    env.callback(cb);
+	    }
+	} catch(InterruptedException e) {
 	}
     }
 
@@ -467,7 +522,7 @@ public class VkExec {
 		 * nested renders do not need a command buffer. Beginning a
 		 * unit here can wait on an old GPU fence just to deliver a
 		 * CPU callback, then submit an otherwise empty buffer. */
-		if((cmd instanceof FenceCmd) || (cmd instanceof SubCmd)) {
+		if((cmd instanceof FenceCmd) || (cmd instanceof GpuFenceCmd) || (cmd instanceof SubCmd)) {
 		    cmd.exec(this, r);
 		    continue;
 		}
@@ -613,6 +668,16 @@ public class VkExec {
 		   VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
 		   0, tex.levels, 0, tex.layers);
 	tex.layout = to;
+    }
+
+    /* nurgling: makes what another process wrote to shared memory
+     * visible to what follows (see Render.extsync). */
+    void extsync() {
+	endpass();
+	unit.mused = true;
+	try(MemoryStack st = stackPush()) {
+	    fullbarrier(st, unit.mcb);
+	}
     }
 
     private void fullbarrier(MemoryStack st, VkCommandBuffer cb) {
@@ -853,19 +918,21 @@ public class VkExec {
 	    }
 	    VkProgram.VertexKey vk = d.key.vk;
 	    if(vk.nbind > 0) {
-		LongBuffer bufs = st.mallocLong(vk.nbind), offs = st.mallocLong(vk.nbind);
+		/* Raw stack memory, not LongBuffers: two buffer wrappers per
+		 * draw were nearly all of this thread's garbage. */
+		long bufs = st.nmalloc(8, vk.nbind * 8), offs = st.nmalloc(8, vk.nbind * 8);
 		for(int b = 0; b < vk.nbind; b++) {
 		    int src = vk.bsrc[b];
 		    Object o = (src < 0) ? dummyvtx : d.geo.vsrc[src];
 		    if(o instanceof VkBuf) {
-			bufs.put(b, ((VkBuf)o).buf);
-			offs.put(b, 0);
+			memPutLong(bufs + (b * 8L), ((VkBuf)o).buf);
+			memPutLong(offs + (b * 8L), 0);
 		    } else {
-			bufs.put(b, abuf);
-			offs.put(b, aoff + (Integer)o);
+			memPutLong(bufs + (b * 8L), abuf);
+			memPutLong(offs + (b * 8L), aoff + (Integer)o);
 		    }
 		}
-		vkCmdBindVertexBuffers(cb, 0, bufs, offs);
+		nvkCmdBindVertexBuffers(cb, 0, vk.nbind, bufs, offs);
 	    }
 	    Geometry geo = d.geo;
 	    if(geo.isrc != null) {
@@ -914,6 +981,42 @@ public class VkExec {
 
     /* Readback */
 
+    /* nurgling: readback buffers by size, reused. Every-frame readbacks
+     * (the frame bridge) otherwise allocated and freed a frame-sized
+     * buffer each time. Each entry is {buffer, allocation, address}. */
+    private final Map<Integer, ArrayDeque<long[]>> rbpool = new HashMap<>();
+
+    private long[] rbtake(int bsz) {
+	synchronized(rbpool) {
+	    ArrayDeque<long[]> q = rbpool.get(bsz);
+	    if((q != null) && !q.isEmpty())
+		return(q.pop());
+	}
+	try(MemoryStack st = stackPush()) {
+	    VkBufferCreateInfo bci = VkBufferCreateInfo.calloc(st).sType$Default().size(bsz)
+		.usage(VK_BUFFER_USAGE_TRANSFER_DST_BIT).sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+	    VmaAllocationCreateInfo aci = VmaAllocationCreateInfo.calloc(st).usage(VMA_MEMORY_USAGE_AUTO)
+		.flags(VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+	    LongBuffer bp = st.mallocLong(1);
+	    PointerBuffer ap = st.mallocPointer(1);
+	    VmaAllocationInfo info = VmaAllocationInfo.calloc(st);
+	    VkEnvironment.check(vmaCreateBuffer(env.vma, bci, aci, bp, ap, info), "vmaCreateBuffer (readback)");
+	    return(new long[] {bp.get(0), ap.get(0), info.pMappedData()});
+	}
+    }
+
+    /* Any thread: VMA synchronizes itself. */
+    private void rbgive(int bsz, long[] rb) {
+	synchronized(rbpool) {
+	    ArrayDeque<long[]> q = rbpool.computeIfAbsent(bsz, k -> new ArrayDeque<>());
+	    if(q.size() < 4) {
+		q.push(rb);
+		return;
+	    }
+	}
+	vmaDestroyBuffer(env.vma, rb[0], rb[1]);
+    }
+
     void pget(PGetCmd p) {
 	endpass();
 	Attach att = resolve(p.img);
@@ -934,19 +1037,9 @@ public class VkExec {
 	unit.mused = true;
 	int tsz = tex.fmt.size();
 	int bsz = w * h * tsz;
-	long rbuf, ralloc, raddr;
+	long[] rb = rbtake(bsz);
+	long rbuf = rb[0], ralloc = rb[1], raddr = rb[2];
 	try(MemoryStack st = stackPush()) {
-	    VkBufferCreateInfo bci = VkBufferCreateInfo.calloc(st).sType$Default().size(bsz)
-		.usage(VK_BUFFER_USAGE_TRANSFER_DST_BIT).sharingMode(VK_SHARING_MODE_EXCLUSIVE);
-	    VmaAllocationCreateInfo aci = VmaAllocationCreateInfo.calloc(st).usage(VMA_MEMORY_USAGE_AUTO)
-		.flags(VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
-	    LongBuffer bp = st.mallocLong(1);
-	    PointerBuffer ap = st.mallocPointer(1);
-	    VmaAllocationInfo info = VmaAllocationInfo.calloc(st);
-	    VkEnvironment.check(vmaCreateBuffer(env.vma, bci, aci, bp, ap, info), "vmaCreateBuffer (readback)");
-	    rbuf = bp.get(0);
-	    ralloc = ap.get(0);
-	    raddr = info.pMappedData();
 
 	    int from = tex.layout;
 	    if(from != VK_IMAGE_LAYOUT_GENERAL) {
@@ -971,6 +1064,19 @@ public class VkExec {
 	    fullbarrier(st, unit.mcb);
 	}
 	VkFormats.TexFmt tfmt = tex.fmt;
+	/* nurgling: the whole image, already in the requested format: one
+	 * bulk copy, done on the callback thread so the render thread goes
+	 * straight on. The general path converts pixel by pixel here. */
+	boolean whole = (x0 == area.ul.x) && (y0 == area.ul.y) && (x1 == area.br.x) && (y1 == area.br.y);
+	if(whole && !tex.rgb && (tfmt.nc == p.fmt.nc) && (tfmt.cf == p.fmt.cf) && p.dst.isDirect()) {
+	    unit.completions.add(() -> env.callback(() -> {
+		    vmaInvalidateAllocation(env.vma, ralloc, 0, VK_WHOLE_SIZE);
+		    memCopy(raddr, memAddress(p.dst), bsz);
+		    rbgive(bsz, rb);
+		    p.cb.accept(p.dst);
+		}));
+	    return;
+	}
 	unit.completions.add(() -> {
 		vmaInvalidateAllocation(env.vma, ralloc, 0, VK_WHOLE_SIZE);
 		ByteBuffer src = memByteBuffer(raddr, bsz);
@@ -991,7 +1097,7 @@ public class VkExec {
 			VkFormats.opaquealpha(drow, p.fmt, w);
 		    }
 		}
-		vmaDestroyBuffer(env.vma, rbuf, ralloc);
+		rbgive(bsz, rb);
 		env.callback(() -> p.cb.accept(p.dst));
 	    });
     }
@@ -1244,7 +1350,16 @@ public class VkExec {
     void dispose() {
 	if(unit != null)
 	    submit(false, 0);
+	flushgpufences();
 	idle();
+	if(gpuwaiter != null) {
+	    gpuwait.add(new Object[0]);
+	    try {
+		gpuwaiter.join();
+	    } catch(InterruptedException e) {
+		Thread.currentThread().interrupt();
+	    }
+	}
 	for(VkObject obj : env.reapable())
 	    obj.destroy0();
 	if(swap != null)

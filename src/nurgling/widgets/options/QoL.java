@@ -17,7 +17,8 @@ public class QoL extends Panel {
     private HSlider nightVisionBrightnessSlider;
     private Label nightVisionBrightnessLabel;
     private CheckBox autoDrink;
-    private TextEntry autoDrinkThresholdEntry;
+    private HSlider autoDrinkThresholdSlider;
+    private Label autoDrinkThresholdLabel;
     private CheckBox autoSaveTableware;
     private CheckBox showCritterCircles;
     private CheckBox showCSprite;
@@ -332,9 +333,19 @@ public class QoL extends Panel {
         rightPrev = rightColumn.add(new Label("● " + L10n.get("qol.section.qol")), rightPrev.pos("bl").adds(0, 15));
         rightPrev = autoDrink = rightColumn.add(new CheckBox(L10n.get("qol.auto_drink")), rightPrev.pos("bl").adds(0, 5));
         autoDrink.settip(L10n.get("qol.auto_drink_tip"));
-        rightPrev = rightColumn.add(new Label(L10n.get("qol.auto_drink_threshold")), rightPrev.pos("bl").adds(0, 5));
-        rightPrev = autoDrinkThresholdEntry = rightColumn.add(new TextEntry.NumberValue(50, "75"), rightPrev.pos("bl").adds(0, 5));
-        rightPrev = autoSaveTableware = rightColumn.add(new CheckBox(L10n.get("qol.auto_save_tableware")), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = rightColumn.add(new Label(L10n.get("qol.auto_drink_threshold")), rightPrev.pos("bl").adds(10, 5));
+        {
+            // Fork range and default (1-100%, 75%); see AutoDrink.getThresholdPercent().
+            autoDrinkThresholdLabel = new Label("75%");
+            autoDrinkThresholdSlider = new HSlider(UI.scale(150), 1, 100, 75) {
+                public void changed() {
+                    autoDrinkThresholdLabel.settext(String.format("%d%%", this.val));
+                }
+            };
+            rightColumn.addhlp(rightPrev.pos("bl").adds(0, 2), UI.scale(5), autoDrinkThresholdSlider, autoDrinkThresholdLabel);
+            rightPrev = autoDrinkThresholdSlider;
+        }
+        rightPrev = autoSaveTableware = rightColumn.add(new CheckBox(L10n.get("qol.auto_save_tableware")), rightPrev.pos("bl").adds(-10, 8));
         rightPrev = questNotified = rightColumn.add(new CheckBox(L10n.get("qol.quest_notified")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = lpassistent = rightColumn.add(new CheckBox(L10n.get("qol.lp_assistant")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = disableMenugridKeys = rightColumn.add(new CheckBox(L10n.get("qol.disable_menugrid")), rightPrev.pos("bl").adds(0, 5));
@@ -397,7 +408,8 @@ public class QoL extends Panel {
         Object autoDrinkThresholdPref = NConfig.get(NConfig.Key.autoDrinkThreshold);
         int autoDrinkThresholdValue = (autoDrinkThresholdPref instanceof Number) ? ((Number) autoDrinkThresholdPref).intValue() : 75;
         if (autoDrinkThresholdValue < 1 || autoDrinkThresholdValue > 100) autoDrinkThresholdValue = 75;
-        autoDrinkThresholdEntry.settext(String.valueOf(autoDrinkThresholdValue));
+        autoDrinkThresholdSlider.val = autoDrinkThresholdValue;
+        autoDrinkThresholdLabel.settext(String.format("%d%%", autoDrinkThresholdValue));
         autoSaveTableware.a = getBool(NConfig.Key.autoSaveTableware);
         showCritterCircles.a = getBool(NConfig.Key.showCritterCircles);
         showCSprite.a = getBool(NConfig.Key.nextshowCSprite);
@@ -531,10 +543,7 @@ public class QoL extends Panel {
         }
         
         NConfig.set(NConfig.Key.autoDrink, autoDrink.a);
-        int autoDrinkThreshold = parseIntOrDefault(autoDrinkThresholdEntry.text(), 75);
-        if (autoDrinkThreshold < 1) autoDrinkThreshold = 1;
-        if (autoDrinkThreshold > 100) autoDrinkThreshold = 100;
-        NConfig.set(NConfig.Key.autoDrinkThreshold, autoDrinkThreshold);
+        NConfig.set(NConfig.Key.autoDrinkThreshold, autoDrinkThresholdSlider.val);
         NConfig.set(NConfig.Key.autoSaveTableware, autoSaveTableware.a);
         NConfig.set(NConfig.Key.showCritterCircles, showCritterCircles.a);
         NConfig.set(NConfig.Key.nextshowCSprite, showCSprite.a);

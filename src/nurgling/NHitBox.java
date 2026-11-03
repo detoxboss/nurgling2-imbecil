@@ -149,6 +149,8 @@ public class NHitBox
             put("gfx/terobjs/arch/belltower", new NHitBox(new Coord2d(-15,-19),new Coord2d(15,19)));
             put("gfx/terobjs/still", new NHitBox(new Coord2d(-12,-6),new Coord2d(5,6)));
             put("gfx/terobjs/grandstudydesk", new NHitBox(new Coord2d(-6.2,-11.75),new Coord2d(7.45,11.75)));
+            // Its last obst layer ("tusks": skull + both tusks) has three polygons, so it would get none.
+            put("gfx/kritter/mammoth/mammothskull", new NHitBox(new Coord2d(-22.6,-12.5),new Coord2d(6.5,12.5)));
         }
     };
     public static NHitBox fromObstacle(Coord2d[][] p)
@@ -161,6 +163,44 @@ public class NHitBox
         if(p.length == 1 && p[0].length == 4)
         {
             return new NHitBox(p[0][0].floor(),p[0][2].ceil(), force);
+        }
+        return null;
+    }
+
+    /* Mine tunnel frames: their collision is a post on each side of the
+     * corridor, and they also carry a "build" obstacle that spans the
+     * corridor, which is the one hitBox is taken from. Only the pathfinding
+     * uses the posts; everything else keeps seeing hitBox. */
+    private final static Set<String> passages = Set.of(
+            "gfx/terobjs/timbertunnel", "gfx/terobjs/reinforcedtunnel", "gfx/terobjs/stonearchtunnel");
+
+    /**
+     * The separate solid pieces of a gob that is walked through between
+     * them, one exact box per polygon of its collision obstacle; null for
+     * any other gob.
+     */
+    public static NHitBox[] passageParts(Resource res)
+    {
+        if(res == null || !passages.contains(res.name))
+            return null;
+        for(Resource.Layer lay : res.getLayers())
+        {
+            if(lay instanceof Resource.Obstacle && ((Resource.Obstacle) lay).id.isEmpty())
+            {
+                Coord2d[][] p = ((Resource.Obstacle) lay).p;
+                NHitBox[] parts = new NHitBox[p.length];
+                for(int i = 0; i < p.length; i++)
+                {
+                    Coord2d ul = p[i][0], br = p[i][0];
+                    for(Coord2d c : p[i])
+                    {
+                        ul = Coord2d.of(Math.min(ul.x, c.x), Math.min(ul.y, c.y));
+                        br = Coord2d.of(Math.max(br.x, c.x), Math.max(br.y, c.y));
+                    }
+                    parts[i] = new NHitBox(ul.floor(), br.ceil(), true);
+                }
+                return(parts.length > 0 ? parts : null);
+            }
         }
         return null;
     }

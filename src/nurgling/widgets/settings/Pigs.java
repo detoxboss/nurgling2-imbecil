@@ -1,15 +1,22 @@
 package nurgling.widgets.settings;
 
 import haven.*;
+import haven.res.ui.croster.CattleRoster;
+import nurgling.animals.HerdRulesFactory;
 import nurgling.conf.PigsHerd;
 
 
 public class Pigs extends Window {
     NEntryListSet els;
+    HerdPreviewPanel preview;
     NSettinsSetI totalAdult;
     NSettinsSetI gap;
     NSettinsSetD meatQuality;
     NSettinsSetD hideQuality;
+    NSettinsSetD milkQuality;
+    NSettinsSetD milk1;
+    NSettinsSetD milk2;
+    NSettinsSetD milkth;
     NSettinsSetD truf1;
     NSettinsSetD truf2;
     NSettinsSetD trufth;
@@ -23,7 +30,7 @@ public class Pigs extends Window {
     CheckBox ignorebd;
     CheckBox ignoreqp;
 
-    public Pigs() {
+    public Pigs(CattleRoster<?> roster) {
         super(new Coord(100,100), "Pigs Herds");
         prev = els = add(new NEntryListSet(PigsHerd::getKeySet) {
             @Override
@@ -37,6 +44,10 @@ public class Pigs extends Window {
                     coverbreed.setVal(gh.coverbreed);
                     meatQuality.setVal(gh.meatq);
                     hideQuality.setVal(gh.hideq);
+                    milkQuality.setVal(gh.milkq);
+                    milk1.setVal(gh.milkquan1);
+                    milkth.setVal(gh.milkquanth);
+                    milk2.setVal(gh.milkquan2);
                     truf1.setVal(gh.trufquan1);
                     truf2.setVal(gh.trufquan2);
                     trufth.setVal(gh.trufquanth);
@@ -59,6 +70,10 @@ public class Pigs extends Window {
                     gh.coverbreed = coverbreed.get();
                     gh.meatq = meatQuality.get();
                     gh.hideq = hideQuality.get();
+                    gh.milkq = milkQuality.get();
+                    gh.milkquan1 = milk1.get();
+                    gh.milkquanth = milkth.get();
+                    gh.milkquan2 = milk2.get();
                     gh.meatquan1 = meatq1.get();
                     gh.meatquanth = meatqth.get();
                     gh.meatquan2 = meatq2.get();
@@ -81,6 +96,10 @@ public class Pigs extends Window {
                 coverbreed.setVal(gh.coverbreed);
                 meatQuality.setVal(gh.meatq);
                 hideQuality.setVal(gh.hideq);
+                milkQuality.setVal(gh.milkq);
+                milk1.setVal(gh.milkquan1);
+                milkth.setVal(gh.milkquanth);
+                milk2.setVal(gh.milkquan2);
                 meatq1.setVal(gh.meatquan1);
                 meatqth.setVal(gh.meatquanth);
                 meatq2.setVal(gh.meatquan2);
@@ -146,17 +165,54 @@ public class Pigs extends Window {
         prev = add(new Label("Rank settings:"), prev.pos("bl").add(0, 15));
         prev = add(new Label("All coefficients are arbitrary, only relations between them matters."), prev.pos("bl").add(0, 5));
         prev = meatQuality = add(new NSettinsSetD("Meat:"), prev.pos("bl").add(0, 5));
+        prev = milkQuality = add(new NSettinsSetD("Milk:"), prev.pos("bl").add(0, 5));
         prev = hideQuality = add(new NSettinsSetD("Hide:"), prev.pos("bl").add(0, 5));
         prev = add(new Label("Follow stats may be tracked with different coefficients below and above threshold. If you want to ignore threshold, set both coefficients equal."), prev.pos("bl").add(0, 5));
         prev = add(new Label("If you want to track stat up to threshold, but ignore stat gain over threshold simply set second coefficient to zero."), prev.pos("bl").add(0, 5));
         prev = meatq1 = add(new NSettinsSetD("Meat quantity 1:"), prev.pos("bl").add(0, 5));
         prev = meatqth = add(new NSettinsSetD("Meat quantity threshold:"), prev.pos("bl").add(0, 5));
         prev = meatq2 = add(new NSettinsSetD("Meat quantity 2:"), prev.pos("bl").add(0, 5));
+        prev = milk1 = add(new NSettinsSetD("Milk quantity 1:"), prev.pos("bl").add(0, 5));
+        prev = milkth = add(new NSettinsSetD("Milk quantity threshold:"), prev.pos("bl").add(0, 5));
+        prev = milk2 = add(new NSettinsSetD("Milk quantity 2:"), prev.pos("bl").add(0, 5));
         prev = truf1 = add(new NSettinsSetD("Truffle snort quantity 1:"), prev.pos("bl").add(0, 5));
         prev = trufth = add(new NSettinsSetD("Truffle snort quantity threshold:"), prev.pos("bl").add(0, 5));
         prev = truf2 = add(new NSettinsSetD("Truffle snort quantity 2:"), prev.pos("bl").add(0, 5));
 
+        preview = add(new HerdPreviewPanel(roster, "pigs", () -> els.get(), () -> HerdRulesFactory.of(draft()), () -> HerdRulesFactory.of(saved())),
+                new Coord(HerdPreviewPanel.rightEdge(this) + UI.scale(15), 0));
         pack();
+    }
+
+    /** The preset as currently typed into the window, not saved. */
+    private PigsHerd draft() {
+        PigsHerd gh = new PigsHerd(els.get());
+        gh.adultPigs = totalAdult.get();
+        gh.breedingGap = gap.get();
+        gh.coverbreed = coverbreed.get();
+        gh.meatq = meatQuality.get();
+        gh.hideq = hideQuality.get();
+        gh.milkq = milkQuality.get();
+        gh.milkquan1 = milk1.get();
+        gh.milkquanth = milkth.get();
+        gh.milkquan2 = milk2.get();
+        gh.meatquan1 = meatq1.get();
+        gh.meatquanth = meatqth.get();
+        gh.meatquan2 = meatq2.get();
+        gh.trufquan1 = truf1.get();
+        gh.trufquanth = trufth.get();
+        gh.trufquan2 = truf2.get();
+        gh.disable_killing = dk.a;
+        gh.ignoreBD = ignorebd.a;
+        gh.ignoreChildren = ic.a;
+        gh.disable_q_percentage = ignoreqp.a;
+        return gh;
+    }
+
+    /** The preset as saved, or null when this name has never been saved. */
+    private PigsHerd saved() {
+        String name = els.get();
+        return PigsHerd.getKeySet().contains(name) ? PigsHerd.get(name) : null;
     }
 
     @Override
@@ -180,6 +236,6 @@ public class Pigs extends Window {
     @Override
     public void resize(Coord sz) {
         super.resize(sz);
-        els.resize(sz.x-UI.scale(5), els.sz.y);
+        els.resize((preview == null ? sz.x : preview.c.x - UI.scale(10)) - UI.scale(5), els.sz.y);
     }
 }

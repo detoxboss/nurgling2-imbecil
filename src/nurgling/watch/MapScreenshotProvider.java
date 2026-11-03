@@ -43,6 +43,21 @@ public final class MapScreenshotProvider implements ScreenshotProvider {
         NUI active = sm.getActiveUI();
         if (active != null && active != gui.ui)
             return "this session is not the one being rendered";
+        return rendererReason(haven.iosys.tk.BridgeToolkit.of(gui.ui) != null, haven.PresentLoop.wanted());
+    }
+
+    /**
+     * Why this render mode cannot give a trustworthy frame, or null when it can. With the smooth
+     * renderer the 3D world is drawn by the present thread, not inside the map's UI-thread draw where
+     * the {@code delay2} hook runs, so the hook would read back only the interface layer; with the
+     * frame bridge the map draws into a separate, margin-padded scene image. Neither is verified to
+     * give a real picture, and a wrong picture is worse than a text-only alert, so both are refused.
+     */
+    static String rendererReason(boolean frameBridge, boolean smoothRenderer) {
+        if (frameBridge)
+            return "the frame bridge is on (Graphics settings); screenshots are not supported with it yet";
+        if (smoothRenderer)
+            return "the smooth renderer is on (Graphics settings); screenshots are not supported with it yet";
         return null;
     }
 
@@ -54,11 +69,21 @@ public final class MapScreenshotProvider implements ScreenshotProvider {
         CompletableFuture<BufferedImage> frame = new CompletableFuture<>();
         AtomicBoolean abandoned = new AtomicBoolean();
         try {
-            gui.map.delay2(g -> g.getimage(Coord.z, g.sz(), img -> {
-                // A request that outlived its wait must not deliver a stale frame later.
-                if (!abandoned.get())
-                    frame.complete(img);
-            }));
+            gui.map.delay2(g -> {
+                // Re-checked inside the draw, where the mode actually in use for this frame is known
+                // (the smooth renderer can be wanted but have fallen back, or start after the check).
+                String mode = rendererReason(haven.iosys.tk.BridgeToolkit.of(gui.ui) != null,
+                        haven.PresentLoop.of(gui.ui) != null);
+                if (mode != null) {
+                    frame.completeExceptionally(new IllegalStateException(mode));
+                    return;
+                }
+                g.getimage(Coord.z, g.sz(), img -> {
+                    // A request that outlived its wait must not deliver a stale frame later.
+                    if (!abandoned.get())
+                        frame.complete(img);
+                });
+            });
         } catch (RuntimeException e) {
             return Result.failed("could not schedule capture: " + e.getClass().getSimpleName());
         }
@@ -67,7 +92,11 @@ public final class MapScreenshotProvider implements ScreenshotProvider {
             return Result.ok(ScreenshotEncoder.encode(img));
         } catch (TimeoutException e) {
             return Result.failed("no frame was drawn within " + (timeoutMs / 1000) + "s (window minimized, or the scene is still loading)");
-        } catch (ExecutionException | java.io.IOException e) {
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IllegalStateException)
+                return Result.failed(e.getCause().getMessage());
+            return Result.failed("could not encode frame: " + e.getClass().getSimpleName());
+        } catch (java.io.IOException e) {
             return Result.failed("could not encode frame: " + e.getClass().getSimpleName());
         } finally {
             abandoned.set(true);

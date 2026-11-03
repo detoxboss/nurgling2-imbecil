@@ -25,8 +25,12 @@ public class AutoDrink implements Action
     // Suppresses repeated no-water notifications within a single active cycle.
     private boolean noWaterNotified = false;
 
-    public AutoDrink()
+    // The owning session's Drinker coordination: defer only while a lease is held.
+    private final AutoDrinkGate gate;
+
+    public AutoDrink(AutoDrinkGate gate)
     {
+        this.gate = (gate != null) ? gate : new AutoDrinkGate();
         stop.set(false);
     }
 
@@ -47,6 +51,9 @@ public class AutoDrink implements Action
                         active = false;
                         return false;
                     }
+                    // The Drinker bot is drinking: hold off (the latch is kept) until its lease ends.
+                    if(gate.deferring())
+                        return false;
                     if(!active && stamina <= getThresholdFraction())
                         active = true;
                     return active;
@@ -55,6 +62,9 @@ public class AutoDrink implements Action
             if(stop.get()) {
                 return Results.SUCCESS();
             }
+            // A lease taken between the wait returning and here: go back to waiting.
+            if(gate.deferring())
+                continue;
 
             if(hasDrinkableWater(gui)) {
                 NUtils.getUI().dropLastError();
@@ -75,31 +85,37 @@ public class AutoDrink implements Action
                     NUtils.addTask(cooldown());
                     continue;
                 }
-                drinkPag.button().use(new MenuGrid.Interaction(1, 0));
-                Gob player = NUtils.player();
-                if (player == null) {
-                    NUtils.addTask(cooldown());
-                    continue;
-                }
-                WaitPoseOrMsg wops = new WaitPoseOrMsg(player, "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
-                NUtils.getUI().core.addTask(wops);
-                if (wops.isError()) {
-                    // Drink command failed despite DrinkMeter reporting water (stale read,
-                    // container just emptied, etc). Back off instead of hammering the button.
-                    reportAutoDrinkIssue(gui, "Auto-drink: drink attempt failed, backing off.");
-                    NUtils.addTask(cooldown());
-                    continue;
-                }
-                // Drink actually began -- clear the notification latch so a later, genuine
-                // failure/no-water episode can notify again.
-                noWaterNotified = false;
-                NUtils.addTask(new NTask() {
-                    @Override
-                    public boolean check() {
-                        Gob p = NUtils.player();
-                        return p == null || !NParser.checkName(p.pose(), "gfx/borka/drinkan");
+                // Marked in flight so a Drinker starting now waits for this drink to end first.
+                gate.setAutoDrinking(true);
+                try {
+                    drinkPag.button().use(new MenuGrid.Interaction(1, 0));
+                    Gob player = NUtils.player();
+                    if (player == null) {
+                        NUtils.addTask(cooldown());
+                        continue;
                     }
-                });
+                    WaitPoseOrMsg wops = new WaitPoseOrMsg(player, "gfx/borka/drinkan", new NAlias("You have nothing on your hotbelt to drink."));
+                    NUtils.getUI().core.addTask(wops);
+                    if (wops.isError()) {
+                        // Drink command failed despite DrinkMeter reporting water (stale read,
+                        // container just emptied, etc). Back off instead of hammering the button.
+                        reportAutoDrinkIssue(gui, "Auto-drink: drink attempt failed, backing off.");
+                        NUtils.addTask(cooldown());
+                        continue;
+                    }
+                    // Drink actually began -- clear the notification latch so a later, genuine
+                    // failure/no-water episode can notify again.
+                    noWaterNotified = false;
+                    NUtils.addTask(new NTask() {
+                        @Override
+                        public boolean check() {
+                            Gob p = NUtils.player();
+                            return p == null || !NParser.checkName(p.pose(), "gfx/borka/drinkan");
+                        }
+                    });
+                } finally {
+                    gate.setAutoDrinking(false);
+                }
             }
             else
             {

@@ -47,31 +47,12 @@ public class MapFile {
     public final Collection<Long> knownsegs = new HashSet<>();
     public final Collection<Marker> markers = new ArrayList<>();
     public volatile int markerseq = 0;
-    public final ReentrantReadWriteLock lock;
+    public final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final Random rnd = new Random();
-
-    /* Nurgling multisession note: two MapFile objects loading the same
-     * (store, filename) - one per concurrent session sharing a world - must
-     * share ONE lock, or each object's own checklock()/writeLock() only
-     * guards against races within itself and never against a sibling
-     * session's object writing the same underlying HashDirCache entries at
-     * the same time. IdentityHashMap keys on the ResCache object itself
-     * (both ResCache.global and HashDirCache.get(id) are long-lived process
-     * singletons), so this doesn't depend on ResCache implementing
-     * equals()/hashCode(). */
-    private static final Map<ResCache, Map<String, ReentrantReadWriteLock>> sessionLocks = new IdentityHashMap<>();
-
-    private static ReentrantReadWriteLock sharedLock(ResCache store, String filename) {
-	synchronized(sessionLocks) {
-	    return(sessionLocks.computeIfAbsent(store, s -> new HashMap<>())
-		   .computeIfAbsent(filename, f -> new ReentrantReadWriteLock()));
-	}
-    }
 
     public MapFile(ResCache store, String filename) {
 	this.store = store;
 	this.filename = filename;
-	this.lock = sharedLock(store, filename);
     }
 
     private void checklock() {
@@ -107,7 +88,23 @@ public class MapFile {
 	warn(null, fmt, args);
     }
 
+    /* Every session in this process that maps the same files gets the
+     * same MapFile. Each instance caches the segment index and writes
+     * it back whole, so two instances over the same files lose each
+     * other's grids and markers. */
+    private static final Map<Pair<ResCache, String>, MapFile> loaded = new HashMap<>();
+
     public static MapFile load(ResCache store, String filename) throws IOException {
+	synchronized(loaded) {
+	    Pair<ResCache, String> key = new Pair<>(store, filename);
+	    MapFile file = loaded.get(key);
+	    if(file == null)
+		loaded.put(key, file = load0(store, filename));
+	    return(file);
+	}
+    }
+
+    private static MapFile load0(ResCache store, String filename) throws IOException {
 	MapFile file = new MapFile(store, filename);
 	InputStream fp;
 	try {
