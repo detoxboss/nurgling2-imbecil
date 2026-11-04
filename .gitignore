@@ -32,3 +32,9 @@ __pycache__/
 *.pyc
 /plugins/
 /tools/web/
+nurgling_todo.txt
+tree_garden_blueprints.json
+tree_garden_blueprints.json.bak
+world_blueprints.json
+resources/src/nurgling/hud/buttons/auto/d.res/image/image_0.data
+tree_garden_blueprints.json
