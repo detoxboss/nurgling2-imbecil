@@ -337,6 +337,7 @@ public class NGameUI extends GameUI
     @Override
     public void tick(double dt) {
         super.tick(dt);
+        focusChanged();
         if(atlas != null) atlas.tick(dt);
         if(progressSlot != null) {
             boolean show = nurgling.styles.UITheme.on() && !nurgling.render.Photo.on;
@@ -365,6 +366,7 @@ public class NGameUI extends GameUI
 
     @Override
     public void dispose() {
+        focusGuard.reset();
         if(atlas != null) atlas.flush();
         if(todoStore != null)
             todoStore.flushFile();
@@ -1274,6 +1276,12 @@ public class NGameUI extends GameUI
     public boolean keydown(KeyDownEvent ev) {
         nurgling.tasks.WaitKeyPress.setLastKeyPressed(ev.code);
 
+        // Handled here rather than in globtype so it still works while a text field has focus.
+        if (kb_focusGuard.key().match(ev)) {
+            toggleFocusGuard();
+            return true;
+        }
+
         // F11 - Toggle DB stats overlay
         if (ev.code == KeyEvent.VK_F11 && (Boolean) NConfig.get(NConfig.Key.ndbenable)) {
             if (dbStatsOverlay != null) {
@@ -1287,7 +1295,88 @@ public class NGameUI extends GameUI
             return true;
         }
 
+        if (focusGuard.enabled()) {
+            // A window still animating its hide, or a focus pointer left at a detached
+            // widget, must not keep the keyboard: hand it to the map.
+            if ((focused != null) && !FocusGuard.shown(focused, this) && (map != null) && (map.parent == this))
+                setfocus(map);
+            if (focusGuard.intercept(ev)) {
+                // Stop the focused path without handling the event: UI.keydown then
+                // dispatches the GlobKeyEvent, so the normal hotkeys get the key.
+                ev.stop();
+                return false;
+            }
+        }
+
         return super.keydown(ev);
+    }
+
+    @Override
+    public boolean mousedown(MouseDownEvent ev) {
+        if ((focusGuard == null) || !focusGuard.enabled())
+            return super.mousedown(ev);
+        // Dispatch to the children first, so a clicked field has taken focus before the
+        // guard decides whether the click activated it.
+        boolean handled = ev.propagate(this);
+        focusGuard.clicked(ev.c);
+        return handled || super.mousedown(ev);
+    }
+
+    @Override
+    public void setfocus(Widget w) {
+        super.setfocus(w);
+        focusChanged();
+    }
+
+    @Override
+    public void delfocusable(Widget w) {
+        Widget prev = focused;
+        super.delfocusable(w);
+        // With the guard on, closing or hiding the focused window returns the keyboard to the
+        // map instead of to whichever window happens to be next in z-order.
+        if ((focusGuard != null) && focusGuard.enabled() && (prev != null) && (focused != prev)
+                && (map != null) && (map.parent == this) && !map.hasparent(w) && map.visible())
+            setfocus(map);
+        else
+            focusChanged();
+    }
+
+    /* GameUI's constructor moves focus before this class's fields are initialized. */
+    private void focusChanged() {
+        if (focusGuard != null)
+            focusGuard.observe();
+        if (invFilters != null) {
+            NInventory inv = activeListInventory();
+            if ((inv != null) && !invFilters.isActive(inv))
+                inv.activateListFilters();
+        }
+    }
+
+    /** The list-panel inventory in the focused top-level window, if any. */
+    private NInventory activeListInventory() {
+        Widget top = focused;
+        if (top == null)
+            return null;
+        for (Widget ch = top.child; ch != null; ch = ch.next) {
+            if ((ch instanceof NInventory) && ((NInventory) ch).hasListPanel())
+                return (NInventory) ch;
+        }
+        return null;
+    }
+
+    public void toggleFocusGuard() {
+        boolean on = !focusGuard.enabled();
+        NConfig.set(NConfig.Key.keyboardFocusGuard, on);
+        NConfig.needUpdate();
+        // Whatever field was being typed into is not activated by turning the guard on.
+        focusGuard.reset();
+        focusGuard.observe();
+        msg(nurgling.i18n.L10n.get(on ? "qol.focus_guard.enabled" : "qol.focus_guard.disabled"));
+        if ((opts != null) && (opts.nqolwnd instanceof OptWnd.NSettingsPanel)) {
+            OptWnd.NSettingsPanel panel = (OptWnd.NSettingsPanel) opts.nqolwnd;
+            if ((panel.settingsWindow != null) && (panel.settingsWindow.qol != null))
+                panel.settingsWindow.qol.syncFocusGuard();
+        }
     }
 
     /* Photo mode (a graphics option, Vulkan only): hides the
@@ -1295,6 +1384,12 @@ public class NGameUI extends GameUI
     public static final KeyBinding kb_photo = KeyBinding.get("photo-mode", KeyMatch.forchar('P', KeyMatch.C | KeyMatch.S));
     public static final KeyBinding kb_atlas = KeyBinding.get("craft-atlas", KeyMatch.forchar('K', KeyMatch.C | KeyMatch.S));
     public static final KeyBinding kb_compass = KeyBinding.get("navigation-compass", KeyMatch.nil);
+    public static final KeyBinding kb_focusGuard = KeyBinding.get("keyboard-focus-guard", KeyMatch.nil);
+
+    /* Keyboard Focus Guard and Remember Inventory List Filters (QoL); both hold this
+     * session's state only. See docs/keyboard-focus-guard.md. */
+    public final FocusGuard focusGuard = new FocusGuard(this);
+    public final InventoryListFilters invFilters = new InventoryListFilters();
 
     @Override
     protected Widget progslot() {

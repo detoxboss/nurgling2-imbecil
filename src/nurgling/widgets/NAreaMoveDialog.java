@@ -17,7 +17,7 @@ import static nurgling.i18n.L10n.get;
  * "Move to...": the whole folder tree to pick a destination from, for when dragging is awkward -
  * a far-away folder, or search results, which have no folder rows to drop on.
  */
-public class NAreaMoveDialog extends Window
+public class NAreaMoveDialog extends Window implements nurgling.FocusGuard.TypingDialog
 {
     private final NAreasWidget areas;
     private final List<NArea> movedAreas;

@@ -157,6 +157,7 @@ public class NCraftFlow extends Window {
         NameEntry name=dialog.add(new NameEntry(),UI.scale(10,10));
         dialog.add(new Button(UI.scale(130),t("apply"),name::saveName),UI.scale(190,64));
         dialog.setfocus(name);
+        nurgling.FocusGuard.requestTyping(name);
     }
     private void tool(String key, String icon, int x, Runnable action) {
         IButton button = add(new NIconButton(icon, 32, 22), UI.scale(x, 10));
@@ -659,7 +660,7 @@ public class NCraftFlow extends Window {
                 public void activate(String value) { endEdit(); }
                 public boolean keydown(KeyDownEvent ev) { if(ev.code == KeyEvent.VK_ESCAPE) { endEdit(); return true; } return super.keydown(ev); }
             }, screen(h.node.x + pos.x + 34, h.node.y + pos.y + 25));
-            editor.settip(t("override_tip")); setfocus(editor);
+            editor.settip(t("override_tip")); setfocus(editor); nurgling.FocusGuard.requestTyping(editor);
         }
         void endEdit() { if(editor != null) { TextEntry old = editor; editor = null; old.destroy(); } }
         void editQuantity(CraftFlow.Node node) {
@@ -677,7 +678,7 @@ public class NCraftFlow extends Window {
                 public void activate(String value) { if(count()>0) { endEdit(); source.flush(); } }
                 public boolean keydown(KeyDownEvent ev) { if(ev.code==KeyEvent.VK_ESCAPE) { endEdit(); return true; } return super.keydown(ev); }
             },screen(node.x+132,node.y+69));
-            editor.settip(t("crafts_tip")); setfocus(editor);
+            editor.settip(t("crafts_tip")); setfocus(editor); nurgling.FocusGuard.requestTyping(editor);
         }
         public boolean keydown(KeyDownEvent ev) {
             if(editor == null && ev.code == KeyEvent.VK_DELETE) { deleteSelected(); return true; }

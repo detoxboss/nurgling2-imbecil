@@ -154,6 +154,8 @@ public class NConfig
         studyReportGhosts,   // per-character study report slot history, drawn as ghosts (NStudyInventory)
         showStudyReportGhosts,
         curioFinishedSound,
+        keyboardFocusGuard,     // FocusGuard: text inputs only take keys after being clicked
+        rememberInvListFilters, // InventoryListFilters: new inventories inherit the active one's list filters
         milestones,          // MilestoneRegistry's persisted gobHash -> {location, destinations[]} map
         milestoneTracking,   // Whether MilestoneTracker passively records signpost/milestone travel
         roadTags,            // RoadTags' private per-post road labels shown in milestone windows
@@ -489,6 +491,8 @@ public class NConfig
         conf.put(Key.studyReportGhosts, "");
         conf.put(Key.showStudyReportGhosts, true);
         conf.put(Key.curioFinishedSound, true);
+        conf.put(Key.keyboardFocusGuard, false);
+        conf.put(Key.rememberInvListFilters, false);
         conf.put(Key.milestones, "");
         conf.put(Key.milestoneTracking, true);
         conf.put(Key.roadTags, "");

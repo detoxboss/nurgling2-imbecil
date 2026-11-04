@@ -20,12 +20,13 @@ class NConfigSyncKeysTest {
         for (NConfig.Key k : NConfig.Key.values())
             names.add(k.name());
         assertEquals(NConfig.Key.values().length, names.size());
-        // 296 at the merge base + 12 fork + 7 upstream-only (autoDrinkThreshold was added by both).
-        assertEquals(315, names.size());
+        // 296 at the merge base + 12 fork + 7 upstream-only (autoDrinkThreshold was added by both),
+        // + 2 fork keys since (keyboardFocusGuard, rememberInvListFilters).
+        assertEquals(317, names.size());
         for (String fork : new String[] {"gobInstanceConf", "kinGroupLabels", "villageGroupLabels",
                 "lpassistantbotprop", "autoDrinkThreshold", "showPlayerCoords", "stackSizeLearning",
                 "combatReactorEnabled", "combatReactorDefenseThreshold", "equipBonusesExpanded",
-                "showDurabilityBars", "showSpiceMarks"})
+                "showDurabilityBars", "showSpiceMarks", "keyboardFocusGuard", "rememberInvListFilters"})
             assertTrue(names.contains(fork), "fork key lost: " + fork);
         for (String up : new String[] {"drinkerprop", "gridDiagonals", "gridDiagonalColor",
                 "craftUseStorage", "roadTags", "tunnelingBot", "decoupledRender"})

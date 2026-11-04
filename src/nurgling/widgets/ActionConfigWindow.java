@@ -5,7 +5,7 @@ import nurgling.routes.ForagerAction;
 import java.awt.event.KeyEvent;
 import java.util.function.Consumer;
 
-public class ActionConfigWindow extends Window {
+public class ActionConfigWindow extends Window implements nurgling.FocusGuard.TypingDialog {
     
     private TextEntry objectPatternEntry;
     private Dropbox<ForagerAction.ActionType> actionTypeDropbox;

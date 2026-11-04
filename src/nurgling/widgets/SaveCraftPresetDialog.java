@@ -13,7 +13,7 @@ import java.util.List;
  * Dialog for saving the current crafting configuration as a preset.
  * Captures recipe info, inputs, outputs, and ingredient preferences.
  */
-public class SaveCraftPresetDialog extends Window {
+public class SaveCraftPresetDialog extends Window implements nurgling.FocusGuard.TypingDialog {
 
     private final NMakewindow mwnd;
     private TextEntry nameEntry;

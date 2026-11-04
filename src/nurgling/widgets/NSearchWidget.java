@@ -56,7 +56,10 @@ public class NSearchWidget extends Widget {
             @Override
             public boolean keydown(KeyDownEvent e) {
                 boolean res = super.keydown(e);
-                NUtils.getGameUI().itemsForSearch.install(text());
+                /* This field's own session, not whichever one is in the foreground. */
+                NGameUI gui = (ui != null) ? ui.gui : null;
+                if (gui != null && gui.itemsForSearch != null)
+                    gui.itemsForSearch.install(text());
                 return res;
             }
         };

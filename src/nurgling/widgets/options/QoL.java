@@ -64,6 +64,8 @@ public class QoL extends Panel {
     private CheckBox stoneHarvestOverlay;
     private CheckBox oldtrunkHarvestOverlay;
     private CheckBox syncCamera;
+    private CheckBox keyboardFocusGuard;
+    private CheckBox rememberInvListFilters;
     private CheckBox invGilding;
     private CheckBox invVarOverlay;
     private CheckBox invSlotNumbers;
@@ -353,6 +355,16 @@ public class QoL extends Panel {
         rightPrev = disableDrugEffects = rightColumn.add(new CheckBox(L10n.get("qol.disable_drugs")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = randomAreaColor = rightColumn.add(new CheckBox(L10n.get("qol.random_area_color")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = syncCamera = rightColumn.add(new CheckBox("Sync camera across sessions"), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = keyboardFocusGuard = rightColumn.add(new CheckBox(L10n.get("qol.keyboard_focus_guard")), rightPrev.pos("bl").adds(0, 5));
+        keyboardFocusGuard.settip(L10n.get("qol.keyboard_focus_guard_tip"));
+        {
+            Label hotkeyLabel = rightColumn.add(new Label(L10n.get("qol.keyboard_focus_guard_hotkey")), rightPrev.pos("bl").adds(10, 6));
+            rightColumn.add(new nurgling.widgets.NKeyBindButton(UI.scale(120), nurgling.NGameUI.kb_focusGuard),
+                    hotkeyLabel.pos("ur").adds(10, -4));
+            rightPrev = hotkeyLabel;
+        }
+        rightPrev = rememberInvListFilters = rightColumn.add(new CheckBox(L10n.get("qol.remember_inv_filters")), rightPrev.pos("bl").adds(-10, 8));
+        rememberInvListFilters.settip(L10n.get("qol.remember_inv_filters_tip"));
 
         rightPrev = rightColumn.add(new Label("● " + L10n.get("qol.section.inventory")), rightPrev.pos("bl").adds(0, 15));
         rightPrev = invGilding = rightColumn.add(new CheckBox(L10n.get("qol.inv_gilding_overlay")), rightPrev.pos("bl").adds(0, 5));
@@ -456,6 +468,8 @@ public class QoL extends Panel {
         stoneHarvestOverlay.a = getBool(NConfig.Key.stoneHarvestOverlay);
         oldtrunkHarvestOverlay.a = getBool(NConfig.Key.oldtrunkHarvestOverlay);
         syncCamera.a = getBool(NConfig.Key.sync_camera);
+        keyboardFocusGuard.a = getBool(NConfig.Key.keyboardFocusGuard);
+        rememberInvListFilters.a = getBool(NConfig.Key.rememberInvListFilters);
 
         invGilding.a = getBool(NConfig.Key.showGilding);
         invVarOverlay.a = getBool(NConfig.Key.showVarity);
@@ -528,6 +542,11 @@ public class QoL extends Panel {
     public void syncMiningOverlay() {
         miningOL.a = getBool(NConfig.Key.miningol);
         minesweeperOL.a = getBool(NConfig.Key.minesweeperol);
+    }
+
+    /** The focus-guard hotkey changed the setting; keep a later Save from reverting it. */
+    public void syncFocusGuard() {
+        keyboardFocusGuard.a = getBool(NConfig.Key.keyboardFocusGuard);
     }
 
     @Override
@@ -696,6 +715,8 @@ public class QoL extends Panel {
         }
 
         NConfig.set(NConfig.Key.sync_camera, syncCamera.a);
+        NConfig.set(NConfig.Key.keyboardFocusGuard, keyboardFocusGuard.a);
+        NConfig.set(NConfig.Key.rememberInvListFilters, rememberInvListFilters.a);
 
         int oldTreeDisplayScale = 100;
         Object oldTreeDisplayScaleObj = NConfig.get(NConfig.Key.treeDisplayScale);

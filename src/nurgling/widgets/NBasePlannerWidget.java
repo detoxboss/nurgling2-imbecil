@@ -419,7 +419,7 @@ public class NBasePlannerWidget extends Window {
         w.takeFocus();
     }
 
-    private static class NamePromptWindow extends Window {
+    private static class NamePromptWindow extends Window implements nurgling.FocusGuard.TypingDialog {
         final TextEntry te;
         NamePromptWindow(String title, String suggested, NameCallback cb) {
             super(UI.scale(new Coord(260, 70)), title);

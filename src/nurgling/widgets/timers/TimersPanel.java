@@ -102,6 +102,7 @@ public class TimersPanel extends Window {
         raise();
         parent.setfocus(this);
         setfocus(quick);
+        nurgling.FocusGuard.requestTyping(quick);
     }
 
     private void chip(long ms) {
@@ -109,6 +110,7 @@ public class TimersPanel extends Window {
         String rest = (cur == null) ? quick.text().trim() : cur.rest;
         quick.settext(TimerDurations.formatShort(ms) + (rest.isEmpty() ? " " : " " + rest));
         setfocus(quick);
+        nurgling.FocusGuard.requestTyping(quick);
     }
 
     /** "1h30m check the smelters" → a private reminder. */

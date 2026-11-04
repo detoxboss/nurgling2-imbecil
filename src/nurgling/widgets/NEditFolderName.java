@@ -7,7 +7,7 @@ import nurgling.NUtils;
 import nurgling.areas.AreaPaths;
 import nurgling.i18n.L10n;
 
-public class NEditFolderName extends Window {
+public class NEditFolderName extends Window implements nurgling.FocusGuard.TypingDialog {
     private final TextEntry te;
     String rootPath;
     String path;

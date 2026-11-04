@@ -5,7 +5,7 @@ import nurgling.i18n.L10n;
 import java.awt.event.KeyEvent;
 import java.util.function.Consumer;
 
-public class TextInputWindow extends Window {
+public class TextInputWindow extends Window implements nurgling.FocusGuard.TypingDialog {
     
     private TextEntry textEntry;
     private Button okButton;
