@@ -193,6 +193,7 @@ public class PersonPicker extends Widget {
         raise();
         parent.setfocus(this);
         setfocus(search);
+        nurgling.FocusGuard.requestTyping(search);
     }
 
     public void close() {

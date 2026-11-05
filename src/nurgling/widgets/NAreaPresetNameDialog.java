@@ -7,7 +7,7 @@ import java.util.function.Consumer;
 import static nurgling.i18n.L10n.get;
 
 /** Asks for an area preset's name, for "Save as preset..." and for renaming one. */
-public class NAreaPresetNameDialog extends Window
+public class NAreaPresetNameDialog extends Window implements nurgling.FocusGuard.TypingDialog
 {
     private final TextEntry name;
     private final Consumer<String> onSave;

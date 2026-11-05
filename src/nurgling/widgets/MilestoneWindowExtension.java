@@ -176,6 +176,7 @@ public final class MilestoneWindowExtension {
                 entry = add(new Entry(sz.x, tag == null ? "" : tag), Coord.z);
                 entryFocused = false;
                 setfocus(entry);
+                nurgling.FocusGuard.requestTyping(entry);
                 return true;
             }
             return super.mousedown(ev);

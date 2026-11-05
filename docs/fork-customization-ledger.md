@@ -1172,6 +1172,48 @@ manual checklist in `docs/village-watch.md` for anything touching sessions or re
 **Superseded when:** upstream ships an equivalent lookout/Discord-attachment feature — then retire
 this section and migrate saved `village_watch` Scenario steps.
 
+## Keyboard Focus Guard and remembered inventory list filters
+
+**Files:** feature-owned — `src/nurgling/FocusGuard.java`, `src/nurgling/InventoryListFilters.java`,
+`test/nurgling/FocusGuardTest.java`, `test/nurgling/InventoryListFiltersTest.java`. Full description:
+`docs/keyboard-focus-guard.md`.
+
+**Shared-file hooks:**
+
+| File | Hook |
+|---|---|
+| `NGameUI.java` | `focusGuard`/`invFilters` fields, `kb_focusGuard`; `keydown` (toggle hotkey first, then `ev.stop()` + `return false` for an unarmed text input), `mousedown` (propagate, then `focusGuard.clicked`), `setfocus`/`delfocusable` overrides (observe; map fallback on close), `focusChanged()` from `tick`, reset in `dispose`, `toggleFocusGuard()` |
+| `NInventory.java` | `setupRightPanel` reads the session template; filter callbacks call `reportListFiltersChanged()`; `listFilterState`/`activateListFilters`/`hasListPanel`; quality field built hidden, numeric-only; `applyPanelState` drops the hidden field's focus; `wipeSearch` closes the search and uses the owning session; `currentDisplayType` per instance (`lastDisplayType` static seed) |
+| `NSearchWidget.java` | search field installs into its own session's `itemsForSearch` |
+| `widgets/options/QoL.java` | two checkboxes, inline `NKeyBindButton`, `syncFocusGuard()` |
+| `src/haven/OptWnd.java` | one `addbtn` line in `BindingPanel`'s Special block |
+| 10 text-entry dialogs | `implements FocusGuard.TypingDialog` (list in the feature doc) |
+| `TimersPanel`, `NCraftFlow`, `MilestoneWindowExtension`, `PersonPicker`, `NInventory.focusSearch` | `FocusGuard.requestTyping(entry)` after the existing `setfocus` |
+| `NConfig.java`, `messages*.properties` | keys `keyboardFocusGuard`, `rememberInvListFilters` (both default `false`); strings listed in the feature doc |
+
+**Why:** stock Hafen focus handling sends every printable key to whichever text field happens to be
+focused, auto-focuses fields as windows are built (including hidden ones), and returns focus to the
+next window by z-order on close. The fork makes text entry opt-in per click, without replacing the
+dispatcher: the guard only stops the focused path so `UI.keydown`'s own `GlobKeyEvent` fallback runs.
+
+**Minimum hook that must survive:**
+- `NGameUI.keydown`'s guard block and `mousedown`'s propagate-then-`clicked` order. Calling
+  `clicked` before the children see the click would arm the old field, not the clicked one.
+- The `setfocus`/`delfocusable` overrides. Without them, focus transitions don't disarm, and coming
+  back to a field would type again with no click.
+- The null checks in `focusChanged`, because `GameUI`'s constructor moves focus before the fork's
+  fields exist.
+
+If upstream reworks `Widget.Event.stop()`/`dispatch`, `FocusedKeyEvent.propagation`,
+`Widget.findfocus`/`newfocusable`, or `UI.keydown`'s KeyDown→GlobKey fallback, re-run
+`FocusGuardTest`: it exercises those exact paths.
+
+**Verify:** `ant test` (`FocusGuardTest`, `InventoryListFiltersTest`, `NConfigSyncKeysTest`), and the
+manual checklist in `docs/keyboard-focus-guard.md`.
+
+**Superseded when:** upstream ships an equivalent click-to-type or focus-return behavior. Then
+retire the guard and keep the inventory field fixes if upstream still has the bug.
+
 ## A note on upstream's multi-session convergence (2026-09-30 sync)
 
 Several of the "owning-session, not ambient" entries above note a "superseded when upstream ships

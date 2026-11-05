@@ -7,7 +7,7 @@ import nurgling.i18n.L10n;
 import nurgling.overlays.NAreaLabel;
 import nurgling.overlays.NTexLabel;
 
-public class NEditAreaName extends Window
+public class NEditAreaName extends Window implements nurgling.FocusGuard.TypingDialog
 {
     private final TextEntry te;
     public NEditAreaName()

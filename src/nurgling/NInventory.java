@@ -344,14 +344,59 @@ public class NInventory extends Inventory
         Name, Quality, Info
     }
     
-    // Current display type and grouping
-    private static DisplayType currentDisplayType = DisplayType.Name;
+    // Current display type and grouping. A new inventory starts with the display type last
+    // chosen in any inventory; each open inventory keeps its own choice after that.
+    private static DisplayType lastDisplayType = DisplayType.Name;
+    private DisplayType currentDisplayType = lastDisplayType;
     private Grouping currentGrouping = Grouping.NONE;
     public Dropbox<Grouping> groupingDropbox;
     public Dropbox<DisplayType> displayTypeDropbox;
     private Label spaceLabel; // Shows filled/total slots
     private TextEntry qualityFilterEntry; // Min quality filter
     private Double minQualityFilter = null; // Parsed min quality value
+    private boolean listFiltersReady = false; // setupRightPanel() finished; filter changes are user changes
+
+    public boolean hasListPanel() {
+        return listFiltersReady;
+    }
+
+    /** This inventory's list-panel filters, for {@link InventoryListFilters}. */
+    public InventoryListFilters.State listFilterState() {
+        return new InventoryListFilters.State(
+            (qualityFilterEntry != null) ? qualityFilterEntry.text() : "",
+            currentGrouping.name(), currentDisplayType.name(),
+            compactNameAscending, compactQuantityAscending, compactLastSortType);
+    }
+
+    /** This inventory became the active one in its session (its window took focus). */
+    public void activateListFilters() {
+        InventoryListFilters f = sessionListFilters();
+        if (f != null && listFiltersReady)
+            f.activated(this, listFilterState());
+    }
+
+    private void reportListFiltersChanged() {
+        InventoryListFilters f = sessionListFilters();
+        if (f != null && listFiltersReady)
+            f.changed(this, listFilterState());
+    }
+
+    /* This inventory's own session, not whichever one is in the foreground. */
+    private InventoryListFilters sessionListFilters() {
+        return (ui != null && ui.gui != null) ? ui.gui.invFilters : null;
+    }
+
+    /** Take a remembered state before the list-panel widgets are built from these fields. */
+    private void applyListFilterState(InventoryListFilters.State s) {
+        compactNameAscending = s.nameAscending;
+        compactQuantityAscending = s.quantityAscending;
+        if ("name".equals(s.lastSortType) || "quantity".equals(s.lastSortType))
+            compactLastSortType = s.lastSortType;
+        for (Grouping g : Grouping.values())
+            if (g.name().equals(s.grouping)) currentGrouping = g;
+        for (DisplayType d : DisplayType.values())
+            if (d.name().equals(s.displayType)) currentDisplayType = d;
+    }
 
     @Override
     public void draw(GOut g) {
@@ -1025,6 +1070,8 @@ public class NInventory extends Inventory
 
     private void toggleSearch(boolean show) {
         searchVisible = show;
+        if (searchBtn instanceof NHeaderToggle)
+            ((NHeaderToggle) searchBtn).a = show;
         if (searchwdg != null) {
             searchwdg.visible = show;
             if (show) {
@@ -1058,8 +1105,11 @@ public class NInventory extends Inventory
         if (searchwdg == null || searchwdg.searchF == null)
             return;
         Widget fp = searchwdg.searchF.parent;
-        if (fp != null)
+        if (fp != null) {
             fp.setfocus(searchwdg.searchF);
+            // The user just opened the search to type into it.
+            FocusGuard.requestTyping(searchwdg.searchF);
+        }
     }
 
     public void wipeSearch() {
@@ -1071,13 +1121,27 @@ public class NInventory extends Inventory
         if (searchwdg.searchF != null) {
             searchwdg.searchF.settext("");
         }
-        if (NUtils.getGameUI() != null && NUtils.getGameUI().itemsForSearch != null) {
-            NUtils.getGameUI().itemsForSearch.install("");
+        /* This inventory's own session, not whichever one is in the foreground. */
+        NGameUI owner = (ui != null && ui.gui instanceof NGameUI) ? (NGameUI) ui.gui : null;
+        if (owner != null && owner.itemsForSearch != null) {
+            owner.itemsForSearch.install("");
         }
         // Drop keyboard focus so typing goes back to the game instead of the
         // search field.
         if (searchwdg.parent != null) {
             searchwdg.parent.delfocusable(searchwdg);
+        }
+        // A wiped search is a closed one (this also runs when the inventory window hides):
+        // keep the flag, the panel and the title-bar toggle in agreement.
+        if (searchVisible || searchwdg.visible) {
+            searchVisible = false;
+            searchwdg.visible = false;
+            if (searchBtn instanceof NHeaderToggle)
+                ((NHeaderToggle) searchBtn).a = false;
+            if (parent != null) {
+                parent.pack();
+                positionTitleBarButtons();
+            }
         }
     }
 
@@ -1126,6 +1190,10 @@ public class NInventory extends Inventory
             updateItemListSize();
             rebuildItemList();
         }
+        // Visibility is flipped directly above, which doesn't move focus: a hidden quality
+        // field must not keep the window's keyboard focus.
+        if (qualityFilterEntry != null && qualityFilterEntry.parent != null && !qualityFilterEntry.tvisible())
+            qualityFilterEntry.parent.delfocusable(qualityFilterEntry);
     }
 
     private int panelWidthForState() {
@@ -1184,6 +1252,12 @@ public class NInventory extends Inventory
     private void setupRightPanel() {
         expandedOnlyWidgets.clear();
         simplifiedOnlyWidgets.clear();
+        // Remember Inventory List Filters: start from the session's active inventory. The
+        // widgets below are initialized from these fields, so nothing is rebuilt twice.
+        InventoryListFilters f = sessionListFilters();
+        InventoryListFilters.State initial = (f != null) ? f.template() : null;
+        if (initial != null)
+            applyListFilterState(initial);
         int margin = UI.scale(8);
         int y = margin;
         int elementGap = UI.scale(5);
@@ -1196,9 +1270,10 @@ public class NInventory extends Inventory
                 compactNameAscending = !val;
                 compactLastSortType = "name";
                 rebuildCompactList();
+                reportListFiltersChanged();
             }
         );
-        nameSortBtn.a = false;
+        nameSortBtn.a = !compactNameAscending; // default: name ascending
         nameSortBtn.tip(nurgling.i18n.L10n.get("inventory.tip.sort_by_name"));
         rightPanel.add(nameSortBtn, new Coord(sortBtnX, y));
         simplifiedOnlyWidgets.add(nameSortBtn);
@@ -1210,9 +1285,10 @@ public class NInventory extends Inventory
                 compactQuantityAscending = !val;
                 compactLastSortType = "quantity";
                 rebuildCompactList();
+                reportListFiltersChanged();
             }
         );
-        qtySortBtn.a = true; // default: quantity descending
+        qtySortBtn.a = !compactQuantityAscending; // default: quantity descending
         qtySortBtn.tip(nurgling.i18n.L10n.get("inventory.tip.sort_by_quantity"));
         rightPanel.add(qtySortBtn, new Coord(sortBtnX, y));
         simplifiedOnlyWidgets.add(qtySortBtn);
@@ -1255,9 +1331,10 @@ public class NInventory extends Inventory
                 super.change(item);
                 currentGrouping = item;
                 rebuildItemList();
+                reportListFiltersChanged();
             }
         };
-        groupingDropbox.change(Grouping.NONE);
+        groupingDropbox.change(currentGrouping);
         rightPanel.add(groupingDropbox, new Coord(dropX, y));
         expandedOnlyWidgets.add(groupingDropbox);
 
@@ -1280,7 +1357,9 @@ public class NInventory extends Inventory
                     return;
                 super.change(item);
                 currentDisplayType = item;
+                lastDisplayType = item;
                 rebuildItemList();
+                reportListFiltersChanged();
             }
         };
         displayTypeDropbox.change(currentDisplayType);
@@ -1289,17 +1368,38 @@ public class NInventory extends Inventory
 
         dropX += displayTypeW + elementGap;
         int qualityW = UI.scale(32);
-        qualityFilterEntry = new TextEntry(qualityW, "") {
+        qualityFilterEntry = new TextEntry(qualityW, (initial != null) ? initial.minQuality : "") {
+            @Override
+            public boolean keydown(KeyDownEvent ev) {
+                // A minimum quality is a number: other printable keys are not typed but fall
+                // through to the hotkeys. Editing keys and Ctrl/Alt shortcuts still work.
+                if (((ev.mods & (KeyMatch.C | KeyMatch.M)) == 0) && (ev.c >= 32) && !InventoryListFilters.isQualityChar(ev.c))
+                    return false;
+                return super.keydown(ev);
+            }
+
             @Override
             public void changed() {
                 super.changed();
+                String clean = InventoryListFilters.sanitizeQuality(text());
+                if (!clean.equals(text())) {
+                    // e.g. pasted text; settext() comes back through changed()
+                    settext(clean);
+                    return;
+                }
                 parseQualityFilter();
                 rebuildItemList();
+                reportListFiltersChanged();
             }
         };
         qualityFilterEntry.settip("Min quality filter\nEnter a number (e.g. 10)\nto show only items with q >= 10");
+        // Built hidden: Widget.add0 registers a visible focusable child with its window, which
+        // made this field the container's keyboard focus as soon as the container opened, with
+        // the panel closed. applyPanelState() shows it with the expanded panel.
+        qualityFilterEntry.visible = false;
         rightPanel.add(qualityFilterEntry, new Coord(dropX, y + UI.scale(-2)));
         expandedOnlyWidgets.add(qualityFilterEntry);
+        parseQualityFilter();
 
         // --- Row 4: Space label ---
         y += UI.scale(22);
@@ -1326,6 +1426,7 @@ public class NInventory extends Inventory
         itemListContainer.cont.add(itemListContent, Coord.z);
 
         rebuildItemList();
+        listFiltersReady = true;
     }
 
     private void updateItemListSize() {
@@ -1354,16 +1455,7 @@ public class NInventory extends Inventory
             minQualityFilter = null;
             return;
         }
-        String text = qualityFilterEntry.text().trim();
-        if (text.isEmpty()) {
-            minQualityFilter = null;
-            return;
-        }
-        try {
-            minQualityFilter = Double.parseDouble(text);
-        } catch (NumberFormatException e) {
-            minQualityFilter = null;
-        }
+        minQualityFilter = InventoryListFilters.parseMinQuality(qualityFilterEntry.text());
     }
 
     private void applySorting() {

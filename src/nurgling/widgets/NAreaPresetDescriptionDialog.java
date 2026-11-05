@@ -11,7 +11,7 @@ import static nurgling.i18n.L10n.get;
  * Edits the description of one of the player's own presets. An empty area preset description starts
  * from the same outline the built-in presets use, with a line for each of the preset's areas.
  */
-public class NAreaPresetDescriptionDialog extends Window
+public class NAreaPresetDescriptionDialog extends Window implements nurgling.FocusGuard.TypingDialog
 {
     private final NTextArea text;
     private final Consumer<String> onSave;

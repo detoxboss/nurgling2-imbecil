@@ -200,6 +200,14 @@ These files have nurgling UI integrations. Most are low-risk for conflicts.
   server clicks".
 - May have conflicts in rendering code
 
+**src/haven/OptWnd.java**
+- Nurgling settings panel, keybind list entries for fork bindings
+- `BindingPanel`'s "Special" block carries fork `addbtn` lines, including
+  `NGameUI.kb_focusGuard` (added for the Keyboard Focus Guard; see
+  `docs/keyboard-focus-guard.md`). Re-add any that a hafen merge drops: an unlisted binding still
+  works, it just can't be rebound from the Keybindings screen.
+- Large merges; see `docs/hafen-integration-2026-06-port-design.md`
+
 **src/haven/MainFrame.java**
 - Headless mode, session management
 - Usually minimal conflicts

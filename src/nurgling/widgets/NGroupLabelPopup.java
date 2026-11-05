@@ -18,7 +18,7 @@ import nurgling.i18n.L10n;
  * {@link NGroupSelectorCompanion} or anything the server-provided Village permission window owns -
  * so it can never affect either one's size or layout, no matter how long a label gets.
  */
-public class NGroupLabelPopup extends Window {
+public class NGroupLabelPopup extends Window implements nurgling.FocusGuard.TypingDialog {
     private final NGroupSelectorCompanion owner;
     private final NGroupLabels.Scope scope;
     private final String labelOwner;
