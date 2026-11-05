@@ -14,6 +14,12 @@ technical detail belongs in the canonical docs it points to.
    you which canonical document owns which subject and whether that document describes current
    implementation, approved-but-unimplemented behavior, a proposal, or recovery/backlog material.
    Load only the specific docs relevant to your task from there; don't preload the whole tree.
+3. For an unfamiliar feature, fix, or investigation task — before reading a full doc — also check
+   **[`docs/knowledge/capability-index.md`](docs/knowledge/capability-index.md)** (code capabilities)
+   or **[`docs/knowledge/gameplay-index.md`](docs/knowledge/gameplay-index.md)** (gameplay mechanics)
+   for a one-line pointer; see **[`docs/knowledge/README.md`](docs/knowledge/README.md)** for the
+   rest of that index (reuse candidates, user-supplied observations). `.claude/rules/*.md` cover the
+   same ground automatically once you touch a matching source file — this step is for before that.
 
 ## Authority model
 
@@ -125,6 +131,9 @@ when (and when not) to use the mixed-WIP safety-snapshot pattern:
 | Combat reactor (`src/nurgling/combat/**`, `Fightsess`/`NFightsess`) | `.claude/rules/combat-automation.md` → `docs/combat/README.md` |
 | Water-based World Explorer bot (shore-tracing, `TileField`/`CoastFollower`) | `.claude/rules/world-explorer.md` → `docs/world-explorer-system.md` |
 | Land-based long-distance navigation research, cliff handling, rolling-horizon overland exploration, or related `DynamicPf`/`PathFinder`/`NPFMap`/`ChunkNav` work toward that goal | `.claude/rules/land-navigation.md` → `docs/land-navigation-research.md` |
+| `ChunkNav` persisted navigation (planner/graph/recording/persistence/route execution), `FollowRoute`/`StorageNav` | `.claude/rules/chunknav-navigation.md` → `docs/audit/capability-navigation.md` (pointers: `docs/knowledge/capability-index.md`) |
+| Workstation/production bots: fuel-loop family (Baker/Bricks/BlockAsh/BoneAsh/Smelter/Steel/Tarkiln/LyeBoiler) or the generic crafting-window path (`Craft`/`UseWorkStation`/`AutocraftBot`) | `.claude/rules/workstation-production.md` → `docs/audit/capability-workstation-production.md` (pointers: `docs/knowledge/capability-index.md`, `docs/knowledge/gameplay-index.md`) |
+| Bot/task/scenario lifecycle framework (`Action`/`Results`/`NTask`/`Scenario`/`BotRegistry`/`BotsInterruptWidget`) | `.claude/rules/bot-lifecycle.md` → `docs/audit/capability-bot-lifecycle.md` (pointers: `docs/knowledge/capability-index.md`) |
 | Village Watch bot, Discord webhook attachments, lookout screenshots | `docs/village-watch.md` |
 | Hafen/upstream integration | `docs/hafen-integration-guide.md`, `docs/fork-sync-guide.md`, `docs/fork-customization-ledger.md`, `docs/fork-maintenance-backlog.md`, `docs/nurgling-modified-files.md` |
 | Equipment bonuses sidebar, gilding/food item tooltips, durability bars, equipment stat block (`NTooltip`, `NFoodInfo`, `NEquipory`, `NWItem`) | `docs/equipment-tooltip-enhancements.md` (FEP formula: `docs/feps-system-reference.md`) |

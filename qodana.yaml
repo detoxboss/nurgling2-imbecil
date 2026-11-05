@@ -1,0 +1,37 @@
+
+version: "1.0"
+
+linter: qodana-jvm-community
+
+withinDocker: false
+
+projectJDK: 21
+
+profile:
+  name: qodana.recommended
+
+# Ant project: Qodana only auto-imports Maven/Gradle. .idea/ is gitignored in this repo, and
+# without a project model Qodana creates an empty module (no source roots) and silently skips
+# every Java inspection — see docs/audit/qodana-audit.md for how that was diagnosed.
+# etc/qodana/project-model/ is the committed, machine-path-free source of truth (mirrors
+# build.xml's "hafen-client" target); this copies it into .idea/ before every scan so a fresh
+# clone, another worktree, or CI reproduces the same project model without manual setup.
+#
+# Verified on Windows (this repo's dev environment): Qodana CLI runs `bootstrap` via cmd.exe
+# there, after the IDE platform has already created .idea/ itself — so no mkdir is needed, and
+# `copy` (not POSIX `cp`) is the right command. NOT YET verified on a POSIX CI runner; a Linux
+# CI job may need `mkdir -p .idea && cp etc/qodana/project-model/*.* .idea/` instead. See
+# docs/audit/qodana-audit.md.
+bootstrap: |
+  copy /Y etc\qodana\project-model\nurgling2-release-sync.iml .idea\nurgling2-release-sync.iml
+  copy /Y etc\qodana\project-model\misc.xml .idea\misc.xml
+  copy /Y etc\qodana\project-model\modules.xml .idea\modules.xml
+
+# Vendored third-party code (see CLAUDE.md) is out of scope; this is a path exclusion,
+# not a rule suppression. opt/panama (JDK 22 only) and test sources are excluded at the
+# project-model level (etc/qodana/project-model/), not here.
+exclude:
+  - name: All
+    paths:
+      - src/com
+      - src/dolda

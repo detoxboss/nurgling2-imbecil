@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Committed Qodana bootstrap template (etc/qodana/project-model/). qodana.yaml's bootstrap
+     step copies this into .idea/ before each scan. .idea/ itself is gitignored and Qodana
+     cannot auto-import this Ant project (no Maven/Gradle), so without this template Qodana
+     creates an empty module with no source roots and skips all Java inspections.
+     Mirrors build.xml's "hafen-client" target. Keep both in sync by hand.
+     All paths use $MODULE_DIR$ — no machine-specific paths, safe for any clone/worktree/CI. -->
+<module type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" LANGUAGE_LEVEL="JDK_1_8" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/test" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tools/render-parity" isTestSource="true" />
+      <!-- opt/panama needs release=22; projectJDK in qodana.yaml is 21. Not scanned (see docs/audit/qodana-audit.md). -->
+      <excludeFolder url="file://$MODULE_DIR$/opt" />
+      <excludeFolder url="file://$MODULE_DIR$/build" />
+      <excludeFolder url="file://$MODULE_DIR$/bin" />
+      <excludeFolder url="file://$MODULE_DIR$/diagnostics" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="module-library">
+      <library name="client.classpath">
+        <CLASSES>
+          <root url="jar://$MODULE_DIR$/lib/ext/jlatexmath/jlatexmath-1.0.7.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/jogl/jogl-all.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/jogl/gluegen-rt.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/lwjgl/lwjgl-fat.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/lwjgl/lwjgl-awt.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/lwjgl/lwjgl-opengl-fat.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/lwjgl-vk/lwjgl-vulkan-3.4.1.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/lwjgl-vk/lwjgl-shaderc-3.4.1.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/lwjgl-vk/lwjgl-vma-3.4.1.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/ext/steamworks/steamworks4j.jar!/" />
+          <root url="jar://$MODULE_DIR$/etc/json-java.jar!/" />
+          <root url="jar://$MODULE_DIR$/etc/postgresql-42.7.5.jar!/" />
+          <root url="jar://$MODULE_DIR$/etc/sqlite-jdbc-3.49.1.0.jar!/" />
+          <root url="jar://$MODULE_DIR$/lib/jglob.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+      </library>
+    </orderEntry>
+    <orderEntry type="module-library" scope="TEST">
+      <library name="junit-platform">
+        <CLASSES>
+          <root url="jar://$MODULE_DIR$/lib/ext/junit/junit-platform-console-standalone-1.14.2.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+      </library>
+    </orderEntry>
+  </component>
+</module>
