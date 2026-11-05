@@ -48,6 +48,26 @@ class SyncRegistryInventoryTest {
         registered("blueprint_builder", BlueprintBuilder.class);
     }
 
+    /**
+     * WorldExplorer and Shore Tracer deliberately share one iconPath ("worldexplorer") so both
+     * buttons show the same icon - this is only safe because NBotsMenu.NButton/find() dedup by
+     * `bot.id`, never by iconPath (docs/fork-customization-ledger.md, "WorldExplorer / Shore Tracer
+     * split"). This test locks in the precondition that fix depends on: same icon, distinct ids and
+     * classes. It does not exercise NButton/find() itself (NBotsMenu's constructor eagerly loads
+     * icon resources over the network, which this test classpath can't do).
+     */
+    @Test
+    void worldExplorerAndShoreTracerShareIconButNotIdentity() {
+        BotDescriptor worldExplorer = BotRegistry.byId("worldexplorer");
+        BotDescriptor shoreTracer = BotRegistry.byId("shoretracer");
+        assertNotNull(worldExplorer, "worldexplorer not registered");
+        assertNotNull(shoreTracer, "shoretracer not registered");
+        assertEquals(worldExplorer.iconPath, shoreTracer.iconPath,
+                "expected both bots to deliberately share one iconPath");
+        assertTrue(!worldExplorer.id.equals(shoreTracer.id), "ids must differ");
+        assertTrue(worldExplorer.clazz != shoreTracer.clazz, "classes must differ");
+    }
+
     @Test
     void noDuplicateIds() {
         Set<String> seen = new HashSet<>();
