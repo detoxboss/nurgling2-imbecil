@@ -129,7 +129,7 @@ when (and when not) to use the mixed-WIP safety-snapshot pattern:
 | Inventory/stack/cursor/equipment/drop/study/eat grid code | `.claude/rules/inventory-management.md` → `docs/inventory-grid-system.md` |
 | LP Assistant bot, LP discovery markers | `.claude/rules/lp-assistant.md` → `docs/lp-assistant-bot.md` |
 | Combat reactor (`src/nurgling/combat/**`, `Fightsess`/`NFightsess`) | `.claude/rules/combat-automation.md` → `docs/combat/README.md` |
-| Water-based World Explorer bot (shore-tracing, `TileField`/`CoastFollower`) | `.claude/rules/world-explorer.md` → `docs/world-explorer-system.md` |
+| Water-based Shore Tracer bot (shore-tracing, `TileField`/`CoastFollower` — formerly "World Explorer"; upstream's own `worldexplorer`-id "Ocean Explorer" is a separate, upstream-owned bot with no doc here) | `.claude/rules/world-explorer.md` → `docs/world-explorer-system.md` |
 | Land-based long-distance navigation research, cliff handling, rolling-horizon overland exploration, or related `DynamicPf`/`PathFinder`/`NPFMap`/`ChunkNav` work toward that goal | `.claude/rules/land-navigation.md` → `docs/land-navigation-research.md` |
 | `ChunkNav` persisted navigation (planner/graph/recording/persistence/route execution), `FollowRoute`/`StorageNav` | `.claude/rules/chunknav-navigation.md` → `docs/audit/capability-navigation.md` (pointers: `docs/knowledge/capability-index.md`) |
 | Workstation/production bots: fuel-loop family (Baker/Bricks/BlockAsh/BoneAsh/Smelter/Steel/Tarkiln/LyeBoiler) or the generic crafting-window path (`Craft`/`UseWorkStation`/`AutocraftBot`) | `.claude/rules/workstation-production.md` → `docs/audit/capability-workstation-production.md` (pointers: `docs/knowledge/capability-index.md`, `docs/knowledge/gameplay-index.md`) |

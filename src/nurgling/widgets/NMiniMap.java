@@ -2295,25 +2295,75 @@ NMiniMap extends MiniMap {
 
     @Override
     public boolean mousewheel(MouseWheelEvent ev) {
-        if(ev.a > 0) {
-            // Zoom out - multiply by 0.95 (5% decrease per step)
-            targetScale *= 0.95f;
-            // Limit minimum scale
-            if(targetScale < 0.03125f) // 1/32 zoom out
-                targetScale = 0.03125f;
-        } else {
-            // Zoom in - multiply by 1.0526 (inverse of 0.95, ~5.3% increase)
-            targetScale *= 1.0526f;
-            // Limit maximum scale to 4x
-            if(targetScale > MAX_SCALE)
-                targetScale = MAX_SCALE;
+        zoomBy((ev.a > 0) ? 0.95f : 1.0526f);
+        return(true);
+    }
+
+    /** One step of the map window's zoom buttons: the same as about five wheel notches. */
+    public void zoomStep(boolean in) {
+        zoomBy(in ? 1.3f : (1 / 1.3f));
+    }
+
+    /* ------------------------------------------------------------ thingwall links */
+
+    /* Loftar's thingwall map icon (resource code, gfx/terobjs/mm/thingwall) draws a line to each
+     * neighbouring province's thingwall while it is hovered, and only in the map window. To show
+     * every link at once, each thingwall is held "hovered" through GobIcon.Icon.hover after the
+     * normal hover pass, which otherwise only marks the one under the cursor. */
+    private java.util.List<MarkerIcon> thingwalls = java.util.Collections.emptyList();
+    private int twMarkerSeq = -1, twFileSeq = -1;
+    private boolean twForced = false;
+
+    @Override
+    public boolean mousehover(MouseHoverEvent ev, boolean hovering) {
+        boolean ret = super.mousehover(ev, hovering);
+        boolean all = Boolean.TRUE.equals(NConfig.get(NConfig.Key.showThingwallLinks))
+            && (getparent(MapWnd.class) != null);
+        /* Once more after turning it off, to let go of the ones held. */
+        if(all || twForced) {
+            holdThingwalls(all);
+            twForced = all;
         }
-        
+        return(ret);
+    }
+
+    private void holdThingwalls(boolean on) {
+        synchronized(markers) {
+            if((twMarkerSeq != markers.seq) || (twFileSeq != file.markerseq)) {
+                java.util.List<MarkerIcon> found = new java.util.ArrayList<>();
+                for(MarkerIcon mi : markers.known()) {
+                    if((mi.m instanceof MapFile.SMarker) && NParser.checkName(((MapFile.SMarker)mi.m).res.name, "thingwall"))
+                        found.add(mi);
+                }
+                thingwalls = found;
+                twMarkerSeq = markers.seq;
+                twFileSeq = file.markerseq;
+            }
+            for(MarkerIcon mi : thingwalls) {
+                try {
+                    mi.icon().hover(Coord.z, on);
+                } catch(Loading l) {
+                }
+            }
+        }
+    }
+
+    /** True while the view keeps recentring on whatever it was told to follow. */
+    public boolean following() {
+        return(follow && (setloc != null));
+    }
+
+    /** Current display scale; 1.0 is one map pixel per tile at the base data level. */
+    public float zoom() {
+        return(currentScale);
+    }
+
+    private void zoomBy(float f) {
+        // Between 1/32 zoomed out and MAX_SCALE zoomed in.
+        targetScale = Utils.clip(targetScale * f, 0.03125f, MAX_SCALE);
         // Update zoomlevel for compatibility with base class
         // Must be small (0-5) since base class uses it in bit shifts: 1 << zoomlevel
         zoomlevel = Utils.clip((int)(Math.log(1.0 / targetScale) / Math.log(2)), 0, 5);
-        
-        return(true);
     }
 
     protected boolean allowzoomout() {
@@ -2691,6 +2741,11 @@ NMiniMap extends MiniMap {
         }
     }
     
+    /** Terrain name under a point of this view, or null off the loaded map. */
+    public String terrainAt(Coord c) {
+        return(getTerrainNameAtCoord(c));
+    }
+
     private String getTerrainNameAtCoord(Coord c) {
         if(dloc == null || display == null || dgext == null) {
             return null;
@@ -3356,13 +3411,6 @@ NMiniMap extends MiniMap {
                 NGameUI gui = NUtils.getGameUI();
                 if(gui != null && gui.map != null) {
                     Coord pres = gob.rc.floor(OCache.posres);
-                    // Register this as a real gob click the same way MapView.Click.hit() does for a
-                    // 3D-world click. LpExplorer.recentHarvestClick() gates discovery recording on
-                    // map.clickedGob being a freshly-clicked harvestable gob; the raw wdgmsg below
-                    // goes straight to the server and never touches clickedGob, so without this the
-                    // gate reads whatever stale gob the last 3D click left there - and the harvest
-                    // gets recorded only if that happened to be harvestable and recent.
-                    gui.map.clickedGob = new MapView.ClickedGob(gob, ev.b);
                     // ui.mc (current absolute mouse position) rather than Coord.z, so a resulting
                     // flower menu opens where the cursor actually is - matches what
                     // MiniMap.mvclick() itself falls back to when its own mc param is null.

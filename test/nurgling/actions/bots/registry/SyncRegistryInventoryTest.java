@@ -37,6 +37,7 @@ class SyncRegistryInventoryTest {
         registered(VillageWatchSettingsAction.BOT_ID, VillageWatchSettingsAction.class);
         registered("lpassistantbot", LpAssistantBot.class);
         registered("table_eat_optimizer", OptimizeTableEatingBot.class);
+        registered("shoretracer", nurgling.actions.bots.ShoreTracer.class);
         assertNotNull(BotRegistry.byId("combatreactortool"), "combat reactor tool not registered");
     }
 
@@ -55,8 +56,10 @@ class SyncRegistryInventoryTest {
             assertTrue(seen.add(d.id), "duplicate bot id: " + d.id);
             n++;
         }
-        // 198 live at the merge base + 6 fork + 3 upstream (2026-10-30 sync). BotRegistry also holds
-        // one commented-out bots.add line (testzonepatroller), which a text count would include.
-        assertEquals(207, n);
+        // 198 live at the merge base + 6 fork + 3 upstream (2026-10-30 sync) + 1 fork (shoretracer,
+        // 2026-11-05 sync, split from the shared "worldexplorer" id when upstream rewrote it as Ocean
+        // Explorer). BotRegistry also holds one commented-out bots.add line (testzonepatroller), which
+        // a text count would include.
+        assertEquals(208, n);
     }
 }

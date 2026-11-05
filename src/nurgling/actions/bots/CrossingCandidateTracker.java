@@ -12,7 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Tracks candidate inter-continent crossing points while WorldExplorer traces
+ * Tracks candidate inter-continent crossing points while ShoreTracer traces
  * a coastline: perpendicular ray-scans outward from the hug direction, into
  * deep OCEAN water only (never freshwater - a river is not a continent
  * crossing, per the corrected WaterTiles taxonomy), looking for a far shore

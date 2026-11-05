@@ -17,13 +17,25 @@ public class NDraggableWidget extends Widget
     public Coord target_c;
     protected ICheckBox btnLock;
     protected ICheckBox btnVis;
-    private boolean isFlipped = false;
+    /** Orientations the turn button steps through: 0 = no button, 2 = flip (action bars), 4 = cycle. */
+    private int rotations = 0;
+    private int rot = 0;
     protected ICheckBox btnFlip;
-    public static final IBox box = Window.wbox;
 
     public final static Coord off = new Coord(UI.scale(10,10));
     public final static Coord delta = new Coord(UI.scale(35,20));
     public Widget content = null;
+
+    /**
+     * Content with four orientations (see {@link #setRotations}). A content that grows up or to the
+     * left reports by how much in {@link #anchorShift}: the widget is drawn that far up/left of its
+     * saved position, so the part the player placed stays where it was.
+     */
+    public interface Turnable {
+        void rotate(int rot);
+
+        Coord anchorShift();
+    }
     TexI label = null;
     public static Text.Furnace fnd = new PUtils.BlurFurn(new Text.Foundry(Text.sans.deriveFont(java.awt.Font.BOLD), 14, Color.YELLOW).aa(true), UI.scale(1), UI.scale(2), Color.BLACK);
     public NDraggableWidget(Widget content, String name, Coord sz)
@@ -31,8 +43,14 @@ public class NDraggableWidget extends Widget
         this(name,sz);
         this.content = add(content);
         this.content.visible = btnVis.a;
+        // Drag-mode controls above the content: contents that fill their whole area (bot menu,
+        // history bar) would otherwise hide the turn button at the top-left corner.
+        btnLock.raise();
+        btnVis.raise();
+        btnFlip.raise();
         content.resize(this.sz.sub(delta));
         content.move(off);
+        layoutControls();
     }
 
     public NDraggableWidget(String name, Coord sz)
@@ -47,13 +65,9 @@ public class NDraggableWidget extends Widget
             {
                 super.changed(val);
                 if(NDraggableWidget.this.parent instanceof GameUI)
-                {
-                    NDragProp prop = new NDragProp(NDraggableWidget.this.c, val, btnVis.a, name);
-                    prop.flip = btnFlip.a;
-                    NDragProp.set(name, prop);
-                }
+                    saveProp(target_c);
             }
-        }, new Coord(sz.x - NStyle.locki[0].sz().x - NStyle.locki[0].sz().x / 2, NStyle.locki[0].sz().y / 2));
+        }, Coord.z);
 
         add(btnVis = new ICheckBox(NStyle.visi[0], NStyle.visi[1], NStyle.visi[2], NStyle.visi[3])
         {
@@ -65,13 +79,9 @@ public class NDraggableWidget extends Widget
                     content.visible = val;
                 }
                 if(NDraggableWidget.this.parent instanceof GameUI)
-                {
-                    NDragProp prop = new NDragProp(NDraggableWidget.this.c, btnLock.a, val, name);
-                    prop.flip = btnFlip.a;
-                    NDragProp.set(name, prop);
-                }
+                    saveProp(target_c);
             }
-        }, new Coord(sz.x - NStyle.locki[0].sz().x - NStyle.locki[0].sz().x / 2, NStyle.locki[0].sz().y + off.y));
+        }, Coord.z);
 
         add(btnFlip = new ICheckBox(NStyle.flipi[0], NStyle.flipi[1], NStyle.flipi[2], NStyle.flipi[3])
         {
@@ -79,18 +89,17 @@ public class NDraggableWidget extends Widget
             public void changed(boolean val)
             {
                 super.changed(val);
+                if(rotations > 2)
+                    rot = (rot + 1) % rotations;
                 if(content!=null)
                 {
                     flipContent();
                 }
                 if(NDraggableWidget.this.parent instanceof GameUI)
-                {
-                    NDragProp prop = new NDragProp(NDraggableWidget.this.c, btnLock.a, btnVis.a, name);
-                    prop.flip = val;
-                    NDragProp.set(name, prop);
-                }
+                    saveProp(target_c);
             }
-        }, new Coord(NStyle.locki[0].sz().x / 2, NStyle.locki[0].sz().y/2));
+        }, Coord.z);
+        layoutControls();
 
         btnVis.hide();
         btnLock.hide();
@@ -104,6 +113,7 @@ public class NDraggableWidget extends Widget
             this.btnLock.a = prop.locked;
             this.btnVis.a = prop.vis;
             this.btnFlip.a = prop.flip;
+            this.rot = prop.rot;
         }
         else
         {
@@ -122,15 +132,37 @@ public class NDraggableWidget extends Widget
     public void resize(Coord sz)
     {
         super.resize(sz);
-        btnLock.move(new Coord(sz.x - NStyle.locki[0].sz().x - NStyle.locki[0].sz().x / 2, NStyle.locki[0].sz().y / 2));
-        btnVis.move(new Coord(sz.x - NStyle.locki[0].sz().x - NStyle.locki[0].sz().x / 2, NStyle.locki[0].sz().y + off.y));
-        if(isFlipped)
-            btnFlip.move(new Coord(NStyle.locki[0].sz().x / 2, NStyle.locki[0].sz().y/2));
         if(content!=null)
         {
             content.resize(sz.sub(delta));
             content.move(off);
         }
+        layoutControls();
+    }
+
+    /**
+     * The box the player sees outside drag mode: the content, in this widget's coordinates. Drag
+     * mode outlines it, snaps it and keeps it on screen, so a layout made there is what shows later.
+     * The frame around it may hang off screen. Falls back to the whole frame while the content is
+     * too small to grab (an empty buff list).
+     */
+    public Area box()
+    {
+        Area b = (content != null) ? Area.sized(content.c, content.sz) : Area.sized(off, sz.sub(delta));
+        Coord min = NStyle.locki[0].sz();
+        if(b.sz().x < min.x || b.sz().y < min.y)
+            return Area.sized(sz);
+        return b;
+    }
+
+    /** Lock and eye at the box's top-right, turn at its top-left: inside the box, so they stay reachable at a screen edge. */
+    private void layoutControls()
+    {
+        Area b = box();
+        int pad = UI.scale(2);
+        btnLock.move(new Coord(b.br.x - btnLock.sz.x - pad, b.ul.y + pad));
+        btnVis.move(new Coord(btnLock.c.x - btnVis.sz.x - pad, b.ul.y + pad));
+        btnFlip.move(new Coord(b.ul.x + pad, b.ul.y + pad));
     }
 
     public static final Tex bg = Resource.loadtex("nurgling/hud/wnd/bg");
@@ -139,16 +171,28 @@ public class NDraggableWidget extends Widget
     @Override
     public void draw(GOut g)
     {
-        if (ui.core.mode == NCore.Mode.DRAG)
-        {
-            drawBg(g, sz, ui);
-            box.draw(g, Coord.z, sz);
-
-        }
+        boolean drag = ui.core.mode == NCore.Mode.DRAG;
+        Area b = drag ? box() : null;
+        if (drag)
+            drawFlatBg(g.reclip(b.ul, b.sz()), b.sz(), ui);
         super.draw(g);
-        if (ui.core.mode == NCore.Mode.DRAG) {
-            g.aimage(label, sz.div(2), 0.5, 0.5);
+        if (drag) {
+            drawOutline(g, b);
+            g.aimage(label, b.ul.add(b.sz().div(2)), 0.5, 0.5);
         }
+    }
+
+    /** The drag-mode frame: an accent line just inside the box, over the content's edge pixels. */
+    static void drawOutline(GOut g, Area b)
+    {
+        int t = Math.max(1, UI.scale(1));
+        Coord s = b.sz();
+        g.chcolor(nurgling.styles.UITheme.ACCENT);
+        g.frect(b.ul, new Coord(s.x, t));
+        g.frect(new Coord(b.ul.x, b.br.y - t), new Coord(s.x, t));
+        g.frect(b.ul, new Coord(t, s.y));
+        g.frect(new Coord(b.br.x - t, b.ul.y), new Coord(t, s.y));
+        g.chcolor();
     }
 
     public static void drawBg(GOut g, Coord sz, UI ui) {
@@ -212,7 +256,7 @@ public class NDraggableWidget extends Widget
         }
     }
 
-    /** New UI: the flat frame lies on the outer bounds, so fill up to those same bounds. */
+    /** Fills all of sz: the new UI's flat frame and the drag-mode box both reach their bounds. */
     private static void drawFlatBg(GOut g, Coord sz, UI ui) {
         nurgling.NUI nui = ui instanceof nurgling.NUI ? (nurgling.NUI)ui : null;
         int alpha = nui == null ? 255 : (int)(255 * nui.getUIOpacity());
@@ -248,7 +292,7 @@ public class NDraggableWidget extends Widget
             if (btnClick(btnLock, ev) || btnClick(btnVis, ev) || btnClick(btnFlip, ev))
                 return true;
 
-            if (ev.c.isect(Coord.z, sz)) {
+            if (box().contains(ev.c)) {
                 // Start dragging only when this widget is unlocked, nothing else
                 // is currently grabbed and it is the left mouse button.
                 if (ev.b == 1 && !btnLock.a && ui.grabs.isEmpty()) {
@@ -263,6 +307,8 @@ public class NDraggableWidget extends Widget
                 // the pointer should react.
                 return true;
             }
+            // The invisible padding around the box: leave it to whatever lies underneath.
+            return false;
         }
         return super.mousedown(ev);
     }
@@ -272,10 +318,8 @@ public class NDraggableWidget extends Widget
     public boolean mouseup(MouseUpEvent ev) {
         if (dm != null && ui.core.mode == NCore.Mode.DRAG)
         {
-            NDragProp res = new NDragProp(NDraggableWidget.this.c, btnLock.a, btnVis.a, name);
-            res.flip = btnFlip.a;
-            NDragProp.set(name, res);
-            target_c = new Coord(this.c);
+            target_c = this.c.add(anchorShift());
+            saveProp(target_c);
             dm.remove();
             dm = null;
             return true;
@@ -295,31 +339,12 @@ public class NDraggableWidget extends Widget
             if (dm != null)
             {
                 Coord prepc = this.c.add(ev.c.add(doff.inv()));
-                Coord newc = nurgling.styles.DragGrid.snap(prepc);
-                
-                // Snap to screen edges
-                if(NUtils.getGameUI() != null && NUtils.getGameUI().sz != Coord.z) {
-                    int snapThreshold = UI.scale(20); // Distance at which snapping activates
-                    Coord screenSz = NUtils.getGameUI().sz;
-                    
-                    // Snap to left edge
-                    if(newc.x < snapThreshold) {
-                        newc.x = 0;
-                    }
-                    // Snap to top edge
-                    if(newc.y < snapThreshold) {
-                        newc.y = 0;
-                    }
-                    // Snap to right edge
-                    if(newc.x + sz.x > screenSz.x - snapThreshold) {
-                        newc.x = screenSz.x - sz.x;
-                    }
-                    // Snap to bottom edge
-                    if(newc.y + sz.y > screenSz.y - snapThreshold) {
-                        newc.y = screenSz.y - sz.y;
-                    }
-                }
-                
+                // The grid catches the box's corner, not the frame's; the screen edge stops the box
+                // without pulling it in, so it can sit anywhere up to and against the edge.
+                Area b = box();
+                Coord newc = nurgling.styles.DragGrid.snap(prepc.add(b.ul)).sub(b.ul);
+                if(NUtils.getGameUI() != null && NUtils.getGameUI().sz != Coord.z)
+                    newc = DragLayout.clamp(newc, b, NUtils.getGameUI().sz);
                 this.c = newc;
             }
             else
@@ -328,7 +353,7 @@ public class NDraggableWidget extends Widget
                 {
                     btnLock.mousemove(ev);
                     btnVis.mousemove(ev);
-                    if(isFlipped)
+                    if(rotations > 0)
                         btnFlip.mousemove(ev);
                 }
             }
@@ -346,9 +371,10 @@ public class NDraggableWidget extends Widget
         super.tick(dt);
         if (ui.core.mode == NCore.Mode.DRAG)
         {
+            layoutControls();
             btnLock.show();
             btnVis.show();
-            if( isFlipped )
+            if(rotations > 0)
                 btnFlip.show();
         }
         else
@@ -361,15 +387,34 @@ public class NDraggableWidget extends Widget
             }
         }
 
+        place();
+    }
+
+    /** Puts the widget at its saved position (less the content's anchor shift), its box kept on screen. */
+    public void place()
+    {
         if(NUtils.getGameUI()!=null && NUtils.getGameUI().sz!=Coord.z && dm == null)
         {
-            // Assign a fresh Coord: c can alias a shared instance (Widget defaults c to Coord.z),
-            // and writing through it once moved Coord.z itself and broke every blurred text render.
-            int x = (c.x + sz.x > NUtils.getGameUI().sz.x - GameUI.margin.x) ? NUtils.getGameUI().sz.x - sz.x : target_c.x;
-            int y = (c.y + sz.y > NUtils.getGameUI().sz.y - GameUI.margin.y) ? NUtils.getGameUI().sz.y - sz.y : target_c.y;
-            if (c.x != x || c.y != y)
-                c = new Coord(x, y);
+            // Test the intended spot, not the current one: right after a turn or resize c is stale.
+            // DragLayout returns a fresh Coord: c can alias a shared instance (Widget defaults c to
+            // Coord.z), and writing through it once moved Coord.z itself and broke every blurred text.
+            Coord at = DragLayout.clamp(target_c.sub(anchorShift()), box(), NUtils.getGameUI().sz);
+            if (!at.equals(c))
+                c = at;
         }
+    }
+
+    private Coord anchorShift()
+    {
+        return (content instanceof Turnable) ? ((Turnable) content).anchorShift() : Coord.z;
+    }
+
+    private void saveProp(Coord at)
+    {
+        NDragProp prop = new NDragProp(new Coord(at), btnLock.a, btnVis.a, name);
+        prop.flip = btnFlip.a;
+        prop.rot = rot;
+        NDragProp.set(name, prop);
     }
 
     public String getName()
@@ -379,13 +424,25 @@ public class NDraggableWidget extends Widget
 
     public void flipContent()
     {
-        content.flip(btnFlip.a);
+        if(rotations > 2 && content instanceof Turnable)
+            ((Turnable) content).rotate(rot);
+        else
+            content.flip(btnFlip.a);
         resize(content.sz.add(delta));
+        place();
     }
 
     public void setFlipped(boolean val)
     {
-        isFlipped = val;
+        setRotations(val ? 2 : 0);
+    }
+
+    /** Shows the turn button: 2 flips the content, more steps a {@link Turnable} through that many orientations. */
+    public void setRotations(int n)
+    {
+        rotations = n;
+        if(rotations > 2)
+            rot = Math.floorMod(rot, rotations);
         flipContent();
     }
 }

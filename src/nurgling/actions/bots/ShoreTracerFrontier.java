@@ -4,7 +4,7 @@ import haven.Coord;
 import haven.Coord2d;
 import haven.MCache;
 import nurgling.NUtils;
-import nurgling.conf.NWorldExplorerProp;
+import nurgling.conf.NShoreTracerProp;
 import nurgling.pf.FrontierPicker;
 import nurgling.pf.WaterTiles;
 import nurgling.tools.NDebugLog;
@@ -14,26 +14,27 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Water frontier target selection for WorldExplorer: built on FrontierPicker
- * (shared ray-scan/chunk-fallback), gated by WaterTiles.isSafe, with a
- * persisted per-character visited-grid set so a resumed run doesn't
- * immediately re-explore the same water after a relogin.
+ * Water frontier target selection for ShoreTracer (renamed from
+ * WorldExplorerFrontier, 2026-11-05 sync - see ShoreTracer's class doc):
+ * built on FrontierPicker (shared ray-scan/chunk-fallback), gated by
+ * WaterTiles.isSafe, with a persisted per-character visited-grid set so a
+ * resumed run doesn't immediately re-explore the same water after a relogin.
  *
  * Grid identity is MCache.Grid.id, not grid coordinate - ChunkNavData
  * explicitly persists only .id and drops the session-relative gc/ul fields
  * (confirmed by direct read of ChunkNavData.java), so this follows the same
  * convention.
  */
-public class WorldExplorerFrontier
+public class ShoreTracerFrontier
 {
     // Mirrors ChunkNavManager's own 2s save-throttle to avoid excessive disk writes.
     private static final long SAVE_THROTTLE_MS = 2000;
 
-    private final NWorldExplorerProp prop;
+    private final NShoreTracerProp prop;
     private final Set<Long> visitedGridIds;
     private long lastSaveTime = 0;
 
-    public WorldExplorerFrontier(NWorldExplorerProp prop)
+    public ShoreTracerFrontier(NShoreTracerProp prop)
     {
         this.prop = prop;
         this.visitedGridIds = new HashSet<>(prop.visitedGridIds);
@@ -57,8 +58,8 @@ public class WorldExplorerFrontier
         {
             lastSaveTime = now;
             prop.visitedGridIds = new ArrayList<>(visitedGridIds);
-            NWorldExplorerProp.set(prop);
-            NDebugLog.log("WorldExplorerFrontier: saved " + visitedGridIds.size() + " visited grids");
+            NShoreTracerProp.set(prop);
+            NDebugLog.log("ShoreTracerFrontier: saved " + visitedGridIds.size() + " visited grids");
         }
     }
 
@@ -90,7 +91,7 @@ public class WorldExplorerFrontier
      * closer than minTargetDist to pos - a target that close isn't worth
      * actually moving to and is exactly what makes PathFinder's "already
      * there" case fire with no real movement, which starved the caller's
-     * loop-pacing safety net during a real incident (see WorldExplorer's
+     * loop-pacing safety net during a real incident (see ShoreTracer's
      * MIN_ITERATION_MS doc). Tier 4 is exempted since it must never return
      * null; the caller's hard iteration-rate cap is the backstop for that case.
      *
@@ -128,7 +129,7 @@ public class WorldExplorerFrontier
         if (dist <= MAX_ROUTE_DIST)
             return target;
         Coord2d clamped = pos.add(target.sub(pos).div(dist).mul(MAX_ROUTE_DIST));
-        NDebugLog.log("WorldExplorerFrontier: clamped target (dist=" + (int) dist
+        NDebugLog.log("ShoreTracerFrontier: clamped target (dist=" + (int) dist
                 + ") to routable range -> " + clamped);
         return clamped;
     }

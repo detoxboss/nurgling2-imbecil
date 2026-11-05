@@ -28,6 +28,8 @@ public class NConfig
     {
         vilol, claimol, realmol,
         minimapVilol, minimapClaimol, minimapRealmol,
+        mapClaimsShown,
+        showThingwallLinks,
         selectedWorld,
         charlistSort,
         showVarity,
@@ -95,6 +97,7 @@ public class NConfig
         tracking,
         swimming,
         debug,
+        botFavourites,
         claydiggerprop,
         miningol,
         minesweeperol,
@@ -126,6 +129,7 @@ public class NConfig
         animalrad,
         smokeprop,
         worldexplorerprop,
+        shoretracerprop,
         questNotified, lpassistent, fishingsettings,
         serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, shareHearthSecret, autoHearthSecret, sharePosition, showPeerPositions, todoNotify, dbGrantRole, dbStatsOverlay, mapShareMarkers, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
         temsmarktime, exploredAreaEnable, chunkNavOverlay, minimapTogglesShown, player_box, player_fov, temsmarkdist, tempmark, tempmarkIgnoreDist, gridbox, gridWallColor, gridDiagonals, gridDiagonalColor, useGlobalPf, useHFinGlobalPF, boxFillColor, boxEdgeColor, boxLineWidth, ropeAfterFeeding, ropeAfterTaiming, eatingConf, deersprop,dropConf, printpfmap, showPlayerCoords, fonts,
@@ -194,6 +198,8 @@ public class NConfig
         disableCloudShadows,
         darkenDeepOcean,
         disableDrugEffects,
+        disableEasterEggs,
+        easterEggSeen,
         simpleInspect,
         showSpeedometer,
         showPathLine,
@@ -345,6 +351,8 @@ public class NConfig
         conf.put(Key.minimapVilol, false);
         conf.put(Key.minimapClaimol, false);
         conf.put(Key.minimapRealmol, false);
+        conf.put(Key.mapClaimsShown, true);
+        conf.put(Key.showThingwallLinks, false);
         conf.put(Key.selectedWorld, null);
         conf.put(Key.charlistSort, "played");
         conf.put(Key.showVarity, false);
@@ -404,6 +412,7 @@ public class NConfig
         conf.put(Key.tracking, false);
         conf.put(Key.swimming, false);
         conf.put(Key.debug, false);
+        conf.put(Key.botFavourites, new ArrayList<HashMap<String, Object>>());
         conf.put(Key.hidecredo, true);
         conf.put(Key.q_visitor, false);
         conf.put(Key.q_door, true);
@@ -636,6 +645,8 @@ public class NConfig
         conf.put(Key.disableCloudShadows, false);
         conf.put(Key.darkenDeepOcean, false);
         conf.put(Key.disableDrugEffects, true);  // Default to disabled for better performance
+        conf.put(Key.disableEasterEggs, false);
+        conf.put(Key.easterEggSeen, false);
         
         // Parasite bot settings
         conf.put(Key.parasiteBotEnabled, false);
@@ -1313,6 +1324,9 @@ public class NConfig
                             case "NWorldExplorer":
                                 res.add(new NWorldExplorerProp(obj));
                                 break;
+                            case "NShoreTracer":
+                                res.add(new nurgling.conf.NShoreTracerProp(obj));
+                                break;
                             case "NMiningOverlayMemory":
                                 res.add(new NMiningOverlayMemory(obj));
                                 break;
@@ -1451,6 +1465,31 @@ public class NConfig
                     }
                 }catch (IllegalArgumentException ignore)
                 {}
+            }
+
+            // Migration: WorldExplorer/Shore Tracer split (2026-11-05 sync). Legacy
+            // `worldexplorerprop` entries that predate the split carry the fork's own
+            // tunables (lookaheadTiles, stuckTimeoutS, backupTiles, swingTiles, bandTiles,
+            // visitedGridIds) that upstream's rewritten NWorldExplorerProp no longer reads.
+            // Those fields only still exist in the raw HashMap at this point - readArray()/
+            // NWorldExplorerProp's own constructor both silently discard unknown keys - so
+            // this must run here, against `map`, not later against the already-typed `conf`.
+            if (!conf.containsKey(Key.shoretracerprop) && map.get(Key.worldexplorerprop.name()) instanceof ArrayList<?>)
+            {
+                ArrayList<Object> migrated = new ArrayList<>();
+                for (Object raw : (ArrayList<?>) map.get(Key.worldexplorerprop.name()))
+                {
+                    if (raw instanceof HashMap && ((HashMap<?, ?>) raw).get("lookaheadTiles") != null)
+                        migrated.add(new nurgling.conf.NShoreTracerProp((HashMap<String, Object>) raw));
+                }
+                if (!migrated.isEmpty())
+                {
+                    conf.put(Key.shoretracerprop, migrated);
+                    System.out.println("[NConfig] Migrated " + migrated.size()
+                            + " legacy worldexplorerprop entr" + (migrated.size() == 1 ? "y" : "ies")
+                            + " to shoretracerprop (WorldExplorer/Shore Tracer split)");
+                    isUpd = true;
+                }
             }
         }
 

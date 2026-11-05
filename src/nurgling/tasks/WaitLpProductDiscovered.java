@@ -2,7 +2,6 @@ package nurgling.tasks;
 
 import nurgling.NGameUI;
 import nurgling.NUtils;
-import nurgling.tools.HarvestState;
 import nurgling.widgets.NCharacterInfo;
 
 /**
@@ -17,10 +16,14 @@ import nurgling.widgets.NCharacterInfo;
  *    has one targeted harvest in flight at a time, so a rise during that narrow window is
  *    attributable to it.
  * 2. NCharacterInfo's discovery record (NGItem.tick() -> LpExplorer.checkLpExplorer() ->
- *    NCharacterInfo.LpExplorerAdd()) - the same record that makes the LP-assistant green marker
- *    disappear. Kept as a second path since it does confirm the specific product, and because
- *    comparing which of the two signals actually fires (see confirmedVia()) is itself useful
- *    diagnostic information for anything not yet root-caused (see this class's git history).
+ *    NCharacterInfo.ledger()'s DiscoveryTracker) - the same record that makes the LP-assistant
+ *    green marker disappear. Kept as a second path since it does confirm the specific product, and
+ *    because comparing which of the two signals actually fires (see confirmedVia()) is itself
+ *    useful diagnostic information for anything not yet root-caused (see this class's git history).
+ *    Checked via ledger().isDone(product) only - the per-resource lpExplorer map this used to read
+ *    (IsLpExplorerContains(gobResName, product)) was replaced by upstream's Discovery Atlas rewrite
+ *    (2026-11-05 sync) with a ledger keyed by item name only; LpExplorer.java itself now reads the
+ *    same way (see its allUndiscoveredProducts()/line ~55), so gobResName no longer narrows anything.
  *
  * Not LpExplorer.allUndiscoveredProducts(gob) - that gates seed/leaf products on the gob's
  * *current* live fruit/leaf visibility as well as discovery state, so picking the one
@@ -61,15 +64,10 @@ public class WaitLpProductDiscovered extends NTask {
             return true;
         }
         NCharacterInfo info = gui != null ? gui.getCharInfo() : null;
-        if (info != null) {
-            boolean discovered = HarvestState.isBarkProductName(product)
-                    ? info.IsLpExplorerContainsAnywhere(product)
-                    : info.IsLpExplorerContains(gobResName, product);
-            if (discovered) {
-                confirmed = true;
-                confirmedVia = "record";
-                return true;
-            }
+        if (info != null && info.ledger().isDone(product)) {
+            confirmed = true;
+            confirmedVia = "record";
+            return true;
         }
         return System.currentTimeMillis() >= deadline;
     }

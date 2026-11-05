@@ -11,7 +11,7 @@ import java.util.Set;
 /**
  * Terrain-agnostic frontier-exploration primitives (Yamauchi-style: steer
  * toward the boundary between known-safe and unknown space), shared by both
- * the water (WorldExplorerFrontier) and land (LandFrontier) bots rather than
+ * the water (ShoreTracerFrontier) and land (LandFrontier) bots rather than
  * writing the same ray-scan twice. Gated by a caller-supplied TileAcceptor so
  * "safe" means whatever the caller needs (WaterTiles.isSafe, TerrainFilter).
  *

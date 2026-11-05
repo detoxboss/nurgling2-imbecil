@@ -20,13 +20,15 @@ import nurgling.tools.NParser;
 import static haven.OCache.posres;
 
 /**
- * Momentum-preserving movement primitives for WorldExplorer, parallel to
- * DynamicPf's chained-click pattern. Deliberately does not modify GoTo.java
- * (used broadly elsewhere) - this is a bot-scoped mover with the same
- * click/vehicle-dispatch shape but non-blocking waits, so a boat's momentum
- * carries across a multi-tile straight run instead of stopping every tile.
+ * Momentum-preserving movement primitives for ShoreTracer (renamed from
+ * WorldExplorerMove, 2026-11-05 sync - see ShoreTracer's class doc),
+ * parallel to DynamicPf's chained-click pattern. Deliberately does not
+ * modify GoTo.java (used broadly elsewhere) - this is a bot-scoped mover
+ * with the same click/vehicle-dispatch shape but non-blocking waits, so a
+ * boat's momentum carries across a multi-tile straight run instead of
+ * stopping every tile.
  */
-public class WorldExplorerMove
+public class ShoreTracerMove
 {
     // Mirrors DynamicPf's existing use of the same threshold for this exact
     // "non-blocking, close-enough-or-moving" semantics (IsMoving/IsMovingBySpeed
@@ -62,7 +64,7 @@ public class WorldExplorerMove
      * one tile at a time. Returns null if this direction isn't boundary-safe
      * even for the first step (i.e. this heading isn't viable at all right
      * now - the caller should try another one), rather than a blind
-     * one-tile guess - the primary caller (WorldExplorer's main loop) needs
+     * one-tile guess - the primary caller (ShoreTracer's main loop) needs
      * to distinguish "found a real boundary run" from "nothing here."
      */
     public static Coord scanAhead(Coord pltc, Coord dir, Coord[] neardirs, boolean deeperMode, int maxLookahead)
@@ -76,7 +78,7 @@ public class WorldExplorerMove
             farthest = cand;
         }
         if (farthest != null)
-            NDebugLog.log("WorldExplorerMove: scanAhead " + pltc + " -> " + farthest + " along " + dir);
+            NDebugLog.log("ShoreTracerMove: scanAhead " + pltc + " -> " + farthest + " along " + dir);
         return farthest;
     }
 
@@ -131,7 +133,7 @@ public class WorldExplorerMove
             farthest = cand;
         }
         if (farthest != null)
-            NDebugLog.log("WorldExplorerMove: scanHeading " + pos + " -> " + farthest
+            NDebugLog.log("ShoreTracerMove: scanHeading " + pos + " -> " + farthest
                     + " @ " + Math.round(Math.toDegrees(angleRad)) + "deg");
         return farthest;
     }
