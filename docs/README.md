@@ -68,6 +68,11 @@ the sub-documents from here; follow `combat/README.md`'s own "Read this for…" 
 | [`claude-code-combat-documentation-prompt.md`](claude-code-combat-documentation-prompt.md) | historical | The original prompt used to generate the `combat/` documentation tree |
 | `combat/hurricane-port-brief.md`, `combat/hurricane-ready-files.md` | proposal | Not tracked in this repo — file names only, no link. See `mixed-wip-recovery.md` for where they're recorded. A handoff package for porting the combat reactor into a *different, external* H&H client project ("Hurricane"), not work on this repo |
 
+## Qodana / modernization audit
+
+Start at [`audit/README.md`](audit/README.md) — it is itself the routing index for the audit
+documentation tree and states its own done/not-started scope.
+
 ## Recovery / backlog
 
 | Doc | Kind | What it covers |

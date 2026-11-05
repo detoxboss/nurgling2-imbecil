@@ -21,11 +21,17 @@ nurgling2.iml
 # CLAUDE.local.md is always local/private, at any depth including root.
 CLAUDE.local.md
 
-# .claude/ is local Claude Code state by default; whitelist only the tracked rules directory.
+# .claude/ is local Claude Code state by default; whitelist only the tracked rules and
+# project-skill directories.
 /.claude/*
 !/.claude/rules/
 /.claude/rules/*
 !/.claude/rules/*.md
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/*/
+/.claude/skills/*/*
+!/.claude/skills/*/SKILL.md
 
 .agent-os
 __pycache__/
