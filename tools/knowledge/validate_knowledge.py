@@ -142,7 +142,7 @@ def check_links(records, repo_root, errors):
                 continue
             if value.startswith("http://") or value.startswith("https://"):
                 continue
-            path = (repo_root / value).resolve()
+            path = (repo_root / value.split("#", 1)[0]).resolve()
             if not path.exists():
                 errors.append((loc, f"{field} '{value}' does not exist"))
         for field in LIST_PATH_FIELDS:
@@ -151,7 +151,7 @@ def check_links(records, repo_root, errors):
                     continue
                 if value.startswith("http://") or value.startswith("https://"):
                     continue
-                path = (repo_root / value).resolve()
+                path = (repo_root / value.split("#", 1)[0]).resolve()
                 if not path.exists():
                     errors.append((loc, f"{field} entry '{value}' does not exist"))
 

@@ -6,12 +6,13 @@ paths:
   - "src/nurgling/actions/StorageNav.java"
 ---
 
-Before changing `ChunkNav` (planner, graph, recording, persistence, route execution) or either of its
-two grid-coordinate callers (`FollowRoute`, `StorageNav`), read `docs/audit/capability-navigation.md`
+Before changing `ChunkNav` (planner, graph, recording, persistence, route execution) or its
+grid-coordinate callers (including `FollowRoute`, `StorageNav`, `Forager`, `GhostConstruction`, and
+`NUtils.navigateTo(NGlobalCoord)`), read `docs/audit/capability-navigation.md`
 — full trace of `ChunkNavPlanner`/`ChunkNavGraph`/`ChunkNavData`/`ChunkPath`/`ChunkNavRecorder`/
 `UnifiedTilePathfinder`, a four-way comparison against local pathfinding/global pathfinding/Forager's
 route-walking layer, and a confirmed High-severity defect (`ChunkNavExecutor.replanAndContinue()`
-fails instead of replanning for these two exact callers — `CAP-NAV-001` in
+fails instead of replanning whenever `targetArea == null` — `CAP-NAV-001` in
 `docs/knowledge/capability-index.md`).
 
 Check `docs/knowledge/capability-index.md` first for a one-line pointer (`CAP-NAV-001`, `CAP-NAV-002`)

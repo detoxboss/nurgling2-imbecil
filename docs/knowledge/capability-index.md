@@ -26,14 +26,15 @@ area: navigation
 status: EVALUATED
 reachability: ACTIVE
 evidence_doc: docs/audit/capability-navigation.md
-source_paths: src/nurgling/navigation/ChunkNavExecutor.java, src/nurgling/actions/FollowRoute.java, src/nurgling/actions/StorageNav.java
-verified_commit: 883d9d81976527d28d4271b5efcc6bc28a90e564
+source_paths: src/nurgling/navigation/ChunkNavExecutor.java, src/nurgling/actions/FollowRoute.java, src/nurgling/actions/StorageNav.java, src/nurgling/actions/bots/Forager.java, src/nurgling/actions/bots/blueprint/GhostConstruction.java, src/nurgling/NUtils.java
+verified_commit: 2d57f83316406848b90c83ee36e42fe9bcf7ad51
 upstream_sha: unknown
 -->
 **CAP-NAV-001 — `ChunkNavExecutor.replanAndContinue()` fails instead of replanning for grid-coordinate callers.**
 High-severity reliability defect: on a replan, the method returns `Results.FAIL()` immediately when
-`targetArea == null`, which is the case for its two real callers (`FollowRoute`, `StorageNav`) since
-they plan by grid coordinate, not area. See `capability-navigation.md` §13 for the full trace.
+`targetArea == null`. Affected callers include `FollowRoute`, `StorageNav`, `Forager`,
+`GhostConstruction`, and `NUtils.navigateTo(NGlobalCoord)`. See `capability-navigation.md` §13.2
+for the trace and the correction to the earlier two-caller scope claim.
 
 <!-- knowledge-record
 id: CAP-NAV-002

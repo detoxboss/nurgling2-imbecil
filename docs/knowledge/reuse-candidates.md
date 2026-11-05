@@ -29,7 +29,7 @@ state: PROPOSED
 capability_source: Forager's independent route-recording/walking layer (docs/audit/capability-navigation.md §5)
 source_paths: src/nurgling/actions/bots/Forager.java, src/nurgling/routes/ForagerRouteStore.java
 candidate_consumers: other point-to-point bots that currently hand-roll waypoint/route logic instead of using a shared recording layer (no specific bot named yet)
-backlog_link: 
+backlog_link:
 -->
 **REUSE-001 — Forager's route-recording/walking layer as a general-purpose lightweight route primitive.**
 Surfaced by the navigation capability-area's four-way comparison matrix (local pathfinding vs. global

@@ -703,6 +703,12 @@ test** (how to validate the fix, where one is actually implemented).
 
 ## 23. `ChunkNavExecutor.replanAndContinue()` fails immediately instead of replanning when the executor has no target area
 
+**Scope correction (PR #30 review, 2026-11-05):** the earlier two-caller wording below is
+superseded by `capability-navigation.md` §13.2's correction. `Forager`, `GhostConstruction`, and
+`NUtils.navigateTo(NGlobalCoord)` also pass a null area, in addition to `FollowRoute` and
+`StorageNav`. Any implementation and regression coverage must account for all these paths;
+the defect is shared by null-area callers, not limited to the original two examples.
+
 - **Finding:** `capability-navigation.md` §13.2 / §12 finding N12.
 - **Severity:** **High** — this is the most concrete reliability defect found across either
   navigation session. `replanAndContinue()` returns `Results.FAIL()` immediately when

@@ -542,6 +542,14 @@ answer to "does it replan intelligently or repeat ineffective actions, and does 
 caller" — yes, and the difference is not by design, it's a null-check gap in a shared executor
 that two different callers exercise differently.
 
+**Correction (PR #30 review, 2026-11-05):** the earlier "two callers" scope claim above and in
+N12 is incomplete. At `2d57f8331`, `Forager.run` (`Forager.java:225`), `GhostConstruction.goTo`
+(`GhostConstruction.java:129`), and `NUtils.navigateTo(NGlobalCoord)` (`NUtils.java:958`) also call
+`navigateWithPath(path, null, gui)`. `ChunkNavManager.navigateWithPath` passes that area unchanged
+to `ChunkNavExecutor`, so these paths encounter the same immediate failure if replanning is
+needed. `FollowRoute` and `StorageNav` are examples, not an exhaustive caller list. This expands
+the affected scope without changing the underlying defect or claiming a live reproduction.
+
 ### 13.3 Dead code: two things that look like alternate implementations are actually one live path and one unreachable one
 
 `ChunkNavExecutor.run()`'s top-level dispatch is:
