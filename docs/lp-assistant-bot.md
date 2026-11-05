@@ -27,9 +27,9 @@ registered, then moves to the next — until nothing is left in view.
 | Concept | Where it lives | Notes |
 |---|---|---|
 | Which products a resource tracks | `nurgling.tools.VSpec.object` (`Map<String,ArrayList<String>>`, resource name → product names) | Static data table. No category metadata — category is inferred from naming convention, see below. |
-| Per-character discovery record | `nurgling.widgets.NCharacterInfo.lpExplorer` (`Map<String,ArrayList<String>>`, resource name → discovered product names) | **Not SQLite** — a plain per-character JSON file, see "Storage" below. The single source of truth every marker/overlay ultimately reads from. |
-| "Is this undiscovered" query layer | `nurgling.tools.LpExplorer` | `allUndiscoveredProducts(Gob)`, `hasUndiscoveredProduct(Gob)`, `isFullyDiscovered(String)` (cached per-character per-season), `isProductUndiscovered(gobResName, product)`. All resource-scoped (not gob-instance-scoped) — discovering "Red Apple" on one apple tree clears the marker on every apple tree of that species at once, by design. |
-| Writing a discovery | `LpExplorer.checkLpExplorer(String itemName)` | Called from `NGItem.tick()` the *first time* a picked-up item widget's name resolves. Gated by `recentHarvestClick()` — see "The clickedGob trap" below, the single most important gotcha in this file. |
+| Per-character discovery record | **(2026-11-05 sync, upstream Discovery Atlas rewrite)** `nurgling.widgets.NCharacterInfo.ledger()` → `nurgling.discovery.DiscoveryLedger`, keyed by item **name only** (not resource) | **Not SQLite** — a plain per-character JSON file (`<...>.discoveries.json`), see "Storage" below. Replaces the old `NCharacterInfo.lpExplorer` resource-keyed map, which still exists only as a one-time legacy-import source (`DiscoveryLedger.importLegacy`); its own query methods (`IsLpExplorerContains`/`IsLpExplorerContainsAnywhere`/`LpExplorerAdd`) were deleted. The single source of truth every marker/overlay ultimately reads via `DiscoveryLedger.isDone(name)`. |
+| "Is this undiscovered" query layer | `nurgling.tools.LpExplorer` | `allUndiscoveredProducts(Gob)`, `hasUndiscoveredProduct(Gob)`, `isFullyDiscovered(String)` (cached per-character per-season), `isProductUndiscovered(gobResName, product)`. All global-by-name now (not resource-scoped) — confirmed behaviorally equivalent to the old resource-scoped model for every product except bark, which was *already* checked globally (a prior fork audit of `VSpec.object`, in the now-deleted `productToResource()`, found exactly one resource per product name except bark — see `docs/fork-customization-ledger.md`). |
+| Writing a discovery | **(2026-11-05 sync)** `NGItem.added()`/`.named()`/`.destroy()` → `nurgling.discovery.DiscoveryTracker.arrived/named/departed` → `DiscoveryCorrelator` → `DiscoveryLedger.record()`, applied asynchronously from `DiscoveryTracker.tick()` | Replaces the deleted `LpExplorer.checkLpExplorer(String)`/`recentHarvestClick()`/`recentBotHarvestClick()` chain entirely. Bot-driven right-clicks are recognized via `NCore.lastGobRightClick()`, fed from `NMapView.wdgmsg("click")` for every sender — see "The clickedGob trap (historical)" below for why this used to need a bot-specific workaround and why it no longer does. |
 | 3D-world marker (fallback) | `nurgling.overlays.NLPassistant` | Only active when the gob's own always-on harvest overlay (`NObjHarvestOl`, gated by `HarvestSpecs`) is off. Re-evaluates every tick, no staleness. |
 | Minimap marker | `nurgling.overlays.map.MinimapDiscoveryRenderer` | Recomputes every frame, non-blocking. |
 | Always-on harvest overlay (tints discovery in place) | `nurgling.overlays.NObjHarvestOl` + `nurgling.tools.{TreeHarvestSpec,BushHarvestSpec,ProductListHarvestSpec}` | Logs/stones/old-trunks (no live per-instance state) use `ProductListHarvestSpec`; trees/bushes decode a live bitmask for seed/leaf presence. |
@@ -37,7 +37,7 @@ registered, then moves to the next — until nothing is left in view.
 | Product → petal-text matching | `nurgling.tools.LpActionMatcher` | See "Petal matching" below. |
 | Bot settings | `nurgling.conf.NLpAssistantProp` + `nurgling.widgets.bots.LpAssistant` | Per-category tool `NAlias` strings, `autoEatNew`/`autoDropNew` (independent toggles), `debug`. |
 | Post-harvest inventory triage | `nurgling.actions.StudyEatOrDrop` | See "Drop mechanics" below. |
-| Discovery-confirmation task | `nurgling.tasks.WaitLpProductDiscovered` | Polls two independent signals, see "Confirming a harvest actually counted" below. |
+| Discovery-confirmation task | `nurgling.tasks.WaitLpProductDiscovered` | Polls two independent signals and distinguishes a genuinely new discovery from an already-known resolution — see "Confirming a harvest actually counted" below. |
 | Interrupt-timing task | `nurgling.tasks.WaitFirstProgressCycle` | Polls `haven.GameUI.prog`, see "Stopping a repeating harvest" below. Superseded as the bot's actual interrupt trigger by `WaitLpFirstProduct` (Round 5) - kept for reference/rollback, not deleted. |
 | Shared inventory/cursor topology model (Round 6) | `nurgling.tools.InventorySnapshot` | Baseline capture, ownership delta, cursor classification - see `docs/inventory-grid-system.md` §7. |
 | Post-interrupt settlement task (Round 6) | `nurgling.tasks.WaitLpSettlement` | State-driven quiet-period wait, replaces a fixed sleep - see Round 6 section below. |
@@ -86,12 +86,23 @@ data file open) whether a fresh empty-chrid file reappears on a specific action
 (normal login vs. bot-triggered reconnect vs. multi-session executor start) to
 isolate the trigger — that reproduction is the missing piece, not further guessing.
 
-## The clickedGob trap (why bot-driven harvests weren't clearing markers)
+## The clickedGob trap (historical — superseded 2026-11-05, kept for its diagnostic history)
+
+**Status: historical.** This section describes a real bug and its fix against the *pre-2026-11-05*
+discovery-tracking mechanism (`LpExplorer.checkLpExplorer()`/`recentHarvestClick()`), both of which
+upstream's Discovery Atlas rewrite deleted outright. The new mechanism (`DiscoveryTracker`, see the
+Core Objects table above) recognizes bot-driven right-clicks through `NCore.lastGobRightClick()`,
+fed from `NMapView.wdgmsg("click")` for every sender (manual clicks, the Q action, and bots' raw
+`wdgmsg` clicks alike) — it never reads `haven.MapView.clickedGob` at all, so the trap described
+below **no longer applies**, and the `gui.map.clickedGob = new MapView.ClickedGob(target, 3)` stamp
+still present in `LpAssistantBot.java` is now vestigial (harmless — that field is still read by an
+unrelated quality-overlay command — but no longer load-bearing for discovery). Kept below verbatim
+as a diagnostic-history record, not as current architecture.
 
 This was the root cause of "stone gobs never clear" and "duplicate-instance markers
-don't all clear together" reports during live testing, and is the most important
-thing to understand before writing *any* new bot that wants `LpExplorer` discovery
-to track correctly.
+don't all clear together" reports during live testing, and was the most important
+thing to understand before writing *any* new bot that wanted `LpExplorer` discovery
+to track correctly, under the pre-2026-11-05 mechanism.
 
 `LpExplorer.checkLpExplorer()` only records a discovery if
 `recentHarvestClick(MapView map)` (`LpExplorer.java:456-468`) returns true, which
@@ -141,10 +152,29 @@ independent real signals, not a guessed delay:
    but can't say *which* product caused the rise (acceptable since only one harvest
    is ever in flight at a time) — and, importantly, **does nothing for marker
    display**, which depends solely on signal 2.
-2. The `NCharacterInfo` discovery record itself (`IsLpExplorerContains`/
-   `IsLpExplorerContainsAnywhere`) — the same thing the marker reads.
+2. **(2026-11-05 sync)** The character's `DiscoveryLedger` — the same record the
+   marker reads, via `DiscoveryTracker`/`DiscoveryCorrelator` (see the Core Objects
+   table above). Checked via `ledger().get(product)`, not the simpler `isDone()`:
+   `DiscoveryLedger.isDone(name)` is true for KNOWN/LEGACY/MANUAL as well as
+   DISCOVERED, but only DISCOVERED means an LP rise was actually paired with *this*
+   harvest. A product already discovered server-side but not yet recorded locally
+   (or legacy-imported, or marked by hand in the Atlas) resolves as KNOWN/LEGACY/
+   MANUAL with zero new LP — `WaitLpProductDiscovered.isNewLpDiscovery()` is the
+   narrower check that excludes this case; `confirmed()` stays true for either
+   outcome (both mean "stop retrying, nothing more to gain here"). `LpAssistantBot`
+   only increments its discovered-product counter on `isNewLpDiscovery()`, logging
+   an already-known resolution separately rather than crediting itself with a fresh
+   discovery that didn't happen this harvest.
 
-Whichever fires first wins; `confirmedVia()` reports which one did, for debugging.
+Whichever of 1/2 fires first wins; `confirmedVia()` reports which ("exp",
+"discovered", or "known"), for debugging. `outcome()` returns the full
+`WaitLpProductDiscovered.Outcome` enum.
+
+**Known latency caveat (reviewed, not fixed):** `DiscoveryCorrelator`'s 30s
+unresolved-item-name window can exceed both this task's 8s default timeout and
+`LpAssistantBot`'s 3s follow-up check, if the exp signal is unavailable. See
+`WaitLpProductDiscovered`'s own class doc for the full reasoning on why this wasn't
+changed as part of the KNOWN/DISCOVERED fix.
 
 ## Stopping a repeating harvest without over-harvesting
 

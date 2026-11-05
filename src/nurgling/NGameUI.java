@@ -36,6 +36,7 @@ public class NGameUI extends GameUI
     public NCompass compass;
     public nurgling.craft.CraftAtlas atlas;
     public NCraftAtlas atlasWindow;
+    public nurgling.widgets.NDiscoveryAtlas discoveryAtlas;
     public NEditAreaName nean;
     public NEditFolderName nefn;
     public NImportStrategyDialog importDialog;
@@ -164,7 +165,7 @@ public class NGameUI extends GameUI
         // Initialize world-specific profile
         nurgling.profiles.ConfigFactory.initializeProfile(genus);
 
-        add(new NDraggableWidget(botsMenu = new NBotsMenu(), "botsmenu", botsMenu.sz.add(NDraggableWidget.delta)));
+        add(new NDraggableWidget(botsMenu = new NBotsMenu(), "botsmenu", botsMenu.sz.add(NDraggableWidget.delta))).setRotations(4);
 
         // Initialize world speed
         initWorldSpeedMap();
@@ -228,7 +229,7 @@ public class NGameUI extends GameUI
             questinfo = new NQuestInfo(), "quests", questinfo.sz.add(NDraggableWidget.delta));
         questwdg.minSize = new Coord(200, 110);
         add(questwdg);
-        add(new NDraggableWidget(recentActionsPanel = new NRecentActionsPanel(), "recentactions", recentActionsPanel.sz.add(NDraggableWidget.delta)));
+        add(new NDraggableWidget(recentActionsPanel = new NRecentActionsPanel(), "recentactions", recentActionsPanel.sz.add(NDraggableWidget.delta))).setFlipped(true);
         // Add drink meter widget to show water/tea capacity (uses IMeter.fsz to match other meters)
         drinkMeter = new DrinkMeter();
         add(new NDraggableWidget(drinkMeter, "drinkmeter", IMeter.fsz));
@@ -393,14 +394,16 @@ public class NGameUI extends GameUI
                 .withdraw((profile == null || profile.isEmpty()) ? "global" : profile, chrid);
             peerPositionService.clear();
         }
-        // This session's own core, not the ambient active-tab session - disposing
-        // the wrong session's NCore here (e.g. when closing a backgrounded
-        // multi-session character) stops that OTHER session's persistence and
-        // watcher threads while it's still meant to be running. Upstream still
-        // reaches this point via NUtils.getUI() (ambient lookup) on its own side;
-        // kept on ui.core here deliberately.
-        if(ui != null && ui.core != null)
-            ui.core.dispose();
+        /* This UI's core, not NUtils.getUI()'s: a background session's game UI is torn down off the visual
+         * thread, where that resolves to the active session - this session's own core, not the ambient
+         * active-tab one (fork's pre-existing ownership invariant; upstream independently converged to
+         * the same ui.core resolution in this 2026-11-05 range). Only the game UI goes here; the core
+         * survives into the character list, so it must not be disposed (that latched auto-drink/
+         * auto-mapper off until restart) - upstream's gameUIDisposed() replaces the old unconditional
+         * dispose() for exactly that reason. */
+        NCore core = (ui != null) ? ui.core : null;
+        if(core != null)
+            core.gameUIDisposed();
         // Shutdown ChunkNav to prevent thread accumulation on game restart
         if(map instanceof NMapView) {
             NMapView nmapView = (NMapView) map;
@@ -1159,8 +1162,8 @@ public class NGameUI extends GameUI
                     NToolBeltProp prop = NToolBeltProp.get(name);
                     // Store the bot's unique id, not its icon path - two bots can share an icon
                     // (e.g. before this fix, LpAssistantBot and Forager both used "forager"), and
-                    // path alone can't tell them apart once persisted (see NBotsMenu.NButton.id's doc).
-                    prop.custom.put(slot,pag.id);
+                    // path alone can't tell them apart once persisted (see NBotsMenu.NButton.bot's doc).
+                    prop.custom.put(slot,pag.bot.id);
                     NToolBeltProp.set(name,prop);
                     return(true);
                 } else if(thing instanceof nurgling.widgets.NScenarioButton) {
@@ -1385,6 +1388,7 @@ public class NGameUI extends GameUI
     public static final KeyBinding kb_atlas = KeyBinding.get("craft-atlas", KeyMatch.forchar('K', KeyMatch.C | KeyMatch.S));
     public static final KeyBinding kb_compass = KeyBinding.get("navigation-compass", KeyMatch.nil);
     public static final KeyBinding kb_focusGuard = KeyBinding.get("keyboard-focus-guard", KeyMatch.nil);
+    public static final KeyBinding kb_discoveries = KeyBinding.get("discovery-atlas", KeyMatch.nil);
 
     /* Keyboard Focus Guard and Remember Inventory List Filters (QoL); both hold this
      * session's state only. See docs/keyboard-focus-guard.md. */
@@ -1394,6 +1398,16 @@ public class NGameUI extends GameUI
     @Override
     protected Widget progslot() {
         return((progressSlot != null) && nurgling.styles.UITheme.on()) ? progressSlot : null;
+    }
+
+    public void toggleDiscoveryAtlas() {
+        nurgling.widgets.NCharacterInfo info = getCharInfo();
+        if(info == null) return;
+        if(discoveryAtlas == null) {
+            discoveryAtlas = new nurgling.widgets.NDiscoveryAtlas(info.ledger());
+            add(discoveryAtlas, discoveryAtlas.restorepos(UI.scale(140, 110)));
+            fitwdg(discoveryAtlas);
+        } else togglewnd(discoveryAtlas);
     }
 
     public void toggleCraftAtlas() {
@@ -1447,6 +1461,7 @@ public class NGameUI extends GameUI
             return true;
 
         if(kb_atlas.key().match(ev)) { toggleCraftAtlas(); return true; }
+        if(kb_discoveries.key().match(ev)) { toggleDiscoveryAtlas(); return true; }
         if(kb_compass.key().match(ev) && compass != null) { compass.toggle(); return true; }
         if (nurgling.diagnostics.MovementTrace.capture.key().match(ev.awt)) {
             nurgling.diagnostics.MovementTrace.trigger(ui);

@@ -150,6 +150,10 @@ public class NCore extends Widget
     private static final long CLICKED_GOB_TTL_MS = 60_000;
     private volatile long clickedGobId = -1;
     private volatile long clickedGobAt = 0;
+    /* The latest gob right-click, never consumed or cleared by other clicks: discovery tracking
+     * uses it to tell items the player's own action produced from ones handed over. */
+    private volatile long lastRclickGobId = -1;
+    private volatile long lastRclickGobAt = 0;
 
     /* Where the latest placement ("place", e.g. a new stockpile) went down. The new gob does not
      * exist yet when the placement is sent - and a new pile's window may arrive before it - so
@@ -164,6 +168,8 @@ public class NCore extends Widget
         if (args.length >= 6 && args[2] instanceof Integer && (Integer) args[2] == 3 && args[5] instanceof Integer) {
             clickedGobId = Integer.toUnsignedLong((Integer) args[5]);
             clickedGobAt = System.currentTimeMillis();
+            lastRclickGobId = clickedGobId;
+            lastRclickGobAt = clickedGobAt;
         } else {
             clickedGobId = -1;
         }
@@ -226,15 +232,14 @@ public class NCore extends Widget
         return gob;
     }
 
-    /** As takeClickedGob, but with a caller-chosen age limit and without forgetting the click. */
-    public Gob recentClickedGob(long maxAgeMs)
+    /** The gob of the latest right-click within maxAgeMs, even if a window took it or the player clicked the ground since. */
+    public Gob lastGobRightClick(long maxAgeMs)
     {
-        long id = clickedGobId;
-        if (id < 0 || System.currentTimeMillis() - clickedGobAt > maxAgeMs || ui == null || ui.sess == null)
+        long id = lastRclickGobId;
+        if (id < 0 || System.currentTimeMillis() - lastRclickGobAt > maxAgeMs || ui == null || ui.sess == null)
             return null;
         return ui.sess.glob.oc.getgob(id);
     }
-
 
     public Mode mode = Mode.DRAG;
     private boolean botmod = false;
@@ -435,7 +440,10 @@ public class NCore extends Widget
         }
 
         NGameUI gui = NUtils.getGameUI();
-        if(gui != null && autoDrink == null && (Boolean)NConfig.get(NConfig.Key.autoDrink))
+        /* ui.gui is never cleared, so after a logout to the character list it still points at the destroyed
+         * game UI; a destroyed widget has no parent. Start the helpers only for a live one. */
+        boolean liveGui = gui != null && gui.parent != null;
+        if(liveGui && autoDrink == null && (Boolean)NConfig.get(NConfig.Key.autoDrink))
         {
             synchronized (autoHelperLock) {
                 if (!autoHelpersDisposed && autoDrink == null) {
@@ -474,8 +482,9 @@ public class NCore extends Widget
         // added autoHelperLock/autoHelpersDisposed thread-safety around this same
         // worker (see stopAutoHelpers()/dispose() below, both null-safe already),
         // but did not add an equivalent passive guard, so the passive take-block
-        // remains the fork's active mechanism here.
-        // if(gui != null && autoSaveTableware == null && (Boolean)NConfig.get(NConfig.Key.autoSaveTableware))
+        // remains the fork's active mechanism here. Reference body kept in sync
+        // with upstream's 2026-11-05 liveGui gating (see tick()'s own liveGui doc).
+        // if(liveGui && autoSaveTableware == null && (Boolean)NConfig.get(NConfig.Key.autoSaveTableware))
         // {
         //     synchronized (autoHelperLock) {
         //         if (!autoHelpersDisposed && autoSaveTableware == null) {
@@ -599,9 +608,21 @@ public class NCore extends Widget
         mappingClient.tick(dt);
     }
 
-    private void stopAutoHelpers() {
+    /**
+     * The game UI is going away but this UI (and this core) lives on: logging out or going to bed returns to
+     * the character list over the same session, and the next character gets a new game UI under the same
+     * core. Stop the helpers and the auto-mapper bound to the old character without latching them off, so
+     * tick() starts them again for the next game UI.
+     */
+    public void gameUIDisposed() {
+        stopAutoHelpers(false);
+        mappingClient.stop();
+    }
+
+    private void stopAutoHelpers(boolean disposing) {
         synchronized (autoHelperLock) {
-            autoHelpersDisposed = true;
+            if (disposing)
+                autoHelpersDisposed = true;
 
             AutoDrink drink = autoDrink;
             if (drink != null)
@@ -668,8 +689,8 @@ public class NCore extends Widget
 
     @Override
     public void dispose() {
-        stopAutoHelpers();
-        mappingClient.done.set(true);
+        stopAutoHelpers(true);
+        mappingClient.stop();
         // Don't shutdown databaseManager here - it's static and should persist across UI/session changes
         // It will be shutdown only when the application exits or database is disabled
         super.dispose();

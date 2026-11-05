@@ -43,7 +43,7 @@ public class StuckDetector
             return false;
         }
         boolean stuck = (now - lastProgressTime) > timeoutS;
-        // File-only: the caller (e.g. WorldExplorer) already posts its own
+        // File-only: the caller (e.g. ShoreTracer) already posts its own
         // sparser "stuck (attempt N)" chat message right after this fires.
         if (stuck)
             NDebugLog.log("StuckDetector: no progress for " + String.format("%.1f", now - lastProgressTime) + "s at tile " + tile);

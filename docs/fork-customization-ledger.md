@@ -76,6 +76,64 @@ a per-session `new MapFile(...)` path, the lost-write problem returns and this e
 **Verify:** two sessions on the same world: explore and place markers in both, log both out, log back
 in, confirm no grids or markers were lost.
 
+## WorldExplorer / Shore Tracer split (2026-11-05 sync)
+
+**Files:** `src/nurgling/actions/bots/ShoreTracer.java` (renamed from `WorldExplorer.java`),
+`src/nurgling/actions/bots/ShoreTracerFrontier.java` (renamed from `WorldExplorerFrontier.java`),
+`src/nurgling/actions/bots/ShoreTracerMove.java` (renamed from `WorldExplorerMove.java`),
+`src/nurgling/conf/NShoreTracerProp.java` (new, split from `NWorldExplorerProp.java`),
+`src/nurgling/widgets/bots/ShoreTracerWnd.java` (new, split from `WorldExplorerWnd.java`),
+`src/nurgling/actions/bots/registry/BotRegistry.java` (new `shoretracer` descriptor),
+`src/nurgling/widgets/NBotsMenu.java` (`find()`/`NButton` — see below), `src/nurgling/NConfig.java`
+(new `Key.shoretracerprop` + one-time migration), `src/lang/messages.properties`,
+`src/lang/messages_ru.properties` (new `shoretracer.*`/`bot.shoretracer.*` keys).
+
+**Why this exists:** upstream's commit `04fc495e6` ("Ocean Explorer: rewrite World Explorer as a
+ray-sweep wall follower") replaced the entire body of the shared `WorldExplorer`/`worldexplorer`
+bot id/class with an independent implementation (36-ray sweep, gob/animal avoidance, real
+stuck-abort), in a brand-new package (`actions/bots/worldexplorer/{Helm,SeaGrid,SeaSearch,
+SeaDanger}.java`) that never touches any of the fork's own shore-tracing files. The fork's
+pre-existing algorithm (`TileField`/`CoastFollower` contour-following, documented in full in
+`docs/world-explorer-system.md`) has real in-client runtime evidence (2026-08-08 smoke test,
+9 sessions, 1037 successful planning cycles) but upstream's rewrite had none at the time of this
+sync (its own author noted it as "not yet run in the game"). Rather than pick one implementation to
+discard on unproven grounds, both are kept as independent, selectable bots: upstream's rewrite keeps
+the native `worldexplorer` id/class/identity unmodified (minimizing future-merge friction — this
+fork makes **zero** modifications to `WorldExplorer.java`/`NWorldExplorerProp.java`/
+`WorldExplorerWnd.java` going forward), and the fork's algorithm continues under a new identity,
+`shoretracer`/`ShoreTracer`.
+
+**Minimum hooks that must survive a merge:**
+- The `shoretracer` `BotDescriptor` entry in `BotRegistry.java`, and its `"shoretracer"` membership in
+  the `group("checks", ...)` call alongside `"worldexplorer"`.
+- `ShoreTracer.java`'s sibling classes (`ShoreTracerFrontier`, `ShoreTracerMove`) stay referencing
+  `NShoreTracerProp`, not `NWorldExplorerProp` — a future merge must not silently repoint them at
+  upstream's class just because the names look similar.
+- `NShoreTracerProp`'s one-time migration in `NConfig.read()` (reads the legacy `worldexplorerprop`
+  key's **raw** JSON, before upstream's `NWorldExplorerProp(HashMap)` constructor would silently drop
+  the fork-only fields `lookaheadTiles`/`stuckTimeoutS`/`backupTiles`/`swingTiles`/`bandTiles`/
+  `visitedGridIds`) must keep running until confident no pre-split installs remain; it is guarded by
+  `!conf.containsKey(Key.shoretracerprop)` so it only ever runs once per profile.
+- `NBotsMenu.NButton.find(String id)` must keep checking `byId.get(id)` **before** falling back to a
+  linear `path`-based scan. This is the fork's pre-existing anti-collision fix (two bots sharing one
+  `iconPath` — here, `shoretracer` deliberately reuses `worldexplorer`'s icon for appearance only)
+  re-applied onto upstream's *also-rewritten* `NButton`/`NBotsMenu` (upstream's own 2026-11-05 rail/
+  folder/favourites redesign introduced a naive path-only `find()` that would have silently
+  reintroduced the exact bug this fix exists to prevent — upstream never had this fix, so it isn't a
+  convergence, just a re-application). `NButton` no longer has its own `id` field; identity reads
+  through the stored `bot.id` (`BotDescriptor`), matching upstream's own idiom (`b.bot.id` is used
+  throughout the new favourites/rail code) — don't reintroduce a separate `id` field.
+
+**Verify:** both "World Explorer" (upstream's Ocean Explorer) and "Shore Tracer" (fork's own) appear
+as separate, independently launchable entries in the bot menu's "checks" group; dragging either to a
+hotbar slot and clicking it runs the correct one (confirms `find()`'s id-first dedup); an existing
+character's pre-split Shore Tracer settings (tunables, `visitedGridIds`) survive the first config
+load after upgrading (confirms the migration).
+
+**Superseded when:** never wholesale — this is a permanent fork/upstream split, not a temporary
+override. Revisit only if upstream's Ocean Explorer gets its own in-client verification and the two
+are deliberately compared again (see the research that informed this decision for 2026-11-05).
+
 ## Explicit-session area/scenario/explored-area persistence
 
 **Files:** `src/nurgling/NConfig.java` (`writeAreas`/`writeScenarios` with an explicit session
@@ -130,6 +188,17 @@ owning session, not `NUtils.getGameUI()` or an equivalent ambient accessor.
 
 **Verify:** open two sessions, close one; confirm the other keeps running normally and the closed one's
 resources are actually released.
+
+**Partial upstream convergence (2026-11-05 sync).** Upstream's `NGameUI.dispose()` teardown call site
+now independently resolves via explicit `ui.core` instead of ambient `NUtils.getUI().core` (matching
+this fork's invariant), while separately replacing the call itself from `core.dispose()` (full,
+permanent teardown) to the new `core.gameUIDisposed()` (stops Auto-drink/auto-mapper without
+permanently latching them off, so they resume for the next character after a logout to the character
+list — fixes a real "auto-drink dies until restart" bug). The merge took upstream's version whole:
+it already satisfies the ownership invariant above, and improves on the fork's prior behavior rather
+than regressing it. **Not fully superseded** — this is one call site in `dispose()`; other
+session-ownership-sensitive code in this file and `NCore.java` is unaffected and still needs this
+invariant watched on every sync, per the note at the end of this document.
 
 **Superseded when:** upstream ships native multi-session support with its own correctly-scoped
 teardown.
@@ -323,20 +392,22 @@ bots there instead of a parallel list keeps them visible to all of that machiner
 
 **Minimum hook that must survive:** every fork bot's `BotDescriptor` entry stays present with correct
 id/class/`BotType`/metadata. Registration identity is **not** ordinal-keyed the way `NConfig.Key` is
-(nothing looks a bot up by list index) — but list position is not entirely inert either:
-`NBotsMenu.java` groups `BotRegistry.allowedInBotMenu()`'s entries by `BotType` into per-category
-layouts and adds each bot's button to its category **in list iteration order**, so a fork bot's
-position within the shared `bots` list determines where its button falls within its category's
-button grid. A future merge reordering entries around a fork bot won't break anything functionally,
-but could visibly reorder that bot's button within its category — worth a glance after a sync, not a
-hard invariant.
+(nothing looks a bot up by list index). **Correction (2026-11-05 sync):** the claim this entry used to
+make — that `NBotsMenu.java` adds each bot's button to its category in `bots`-list iteration order —
+is no longer accurate. Upstream's 2026-11-05 bot-menu redesign (folder rail + groups + Favourites)
+replaced that layout entirely: `NBotsMenu.Folder.rebuild()` now buckets each `BotType`'s buttons into
+named sub-groups via `BotRegistry.groupsOf(type)` (fork bots join a group the same way upstream bots
+do — see `group(...)` calls in `BotRegistry.java`, e.g. this sync added `"shoretracer"` to the
+`"checks"` group) and sorts each group's buttons **alphabetically by display name**, not by list order.
+List position within `bots` is now purely cosmetic (it no longer affects button placement at all).
 
 **Verify:** diff entry count before/after any sync; confirm every fork bot id is still present with its
-registered class, correct `BotType`, and in a reasonable position within its category's button
-ordering. Count **live** registrations (`BotRegistry.all()`), not `bots.add` text lines: the file
-carries one commented-out `//bots.add(...testzonepatroller...)` line that a text grep counts. As of
-the 2026-10-30 sync: 207 live (198 at the merge base + 6 fork + 3 upstream), asserted by
-`test/nurgling/actions/bots/registry/SyncRegistryInventoryTest.java`.
+registered class and correct `BotType`, and (since the 2026-11-05 redesign) that it is still a member
+of a sensible `group(...)` call if it was before. Count **live** registrations (`BotRegistry.all()`),
+not `bots.add` text lines: the file carries one commented-out `//bots.add(...testzonepatroller...)`
+line that a text grep counts. As of the 2026-11-05 sync: 208 live (198 at the 2026-10-30 merge base +
+6 fork + 3 upstream + 1 fork `shoretracer`, the WorldExplorer/Shore Tracer split — see its own ledger
+entry), asserted by `test/nurgling/actions/bots/registry/SyncRegistryInventoryTest.java`.
 
 **Superseded when:** never wholesale — same open-ended nature as the config keys above.
 

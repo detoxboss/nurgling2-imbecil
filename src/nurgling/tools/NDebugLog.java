@@ -10,7 +10,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 /**
- * Plain-text file logging for the frontier-exploration bots (WorldExplorer
+ * Plain-text file logging for the frontier-exploration bots (ShoreTracer
  * et al.). Game chat has no select-all and no scrollbar drag - a real
  * testing session confirmed it becomes physically impossible to copy out
  * once a bot has been running a while (the user could not complete a
@@ -26,7 +26,7 @@ import java.util.Date;
  */
 public class NDebugLog
 {
-    private static final String FILE_PREFIX = "worldexplorer-debug";
+    private static final String FILE_PREFIX = "shoretracer-debug";
     private static Path resolvedPath = null;
 
     /**

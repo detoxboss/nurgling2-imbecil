@@ -390,23 +390,18 @@ public class LpAssistantBot implements Action {
                         unreachable = false;
 
                         NUtils.rclickGob(target);
-                        // LpExplorer.checkLpExplorer() (the thing that actually writes the discovery
-                        // record the green marker depends on) only fires within a short window after
-                        // map.clickedGob points at a harvestable gob - see recentHarvestClick() in that
-                        // class. That field is normally set by MapView.Click.hit(), which only runs for
-                        // a real local mouse click; NUtils.rclickGob()/lclick() and GoTo's movement
-                        // click all send their "click" wdgmsg directly to the server and never trigger
-                        // it. Bot-driven harvesting was therefore relying entirely on whatever stale
-                        // value a real click happened to leave behind before the bot started (matched
-                        // by resource TYPE, not gob identity - see recentHarvestClick()'s own doc) -
-                        // explaining both why discovery sometimes recorded for the wrong-seeming
-                        // product and why it often silently never recorded at all (the fallback marker/
-                        // minimap icon depends solely on this record, not on the exp signal below, so a
-                        // missing record here is exactly "icon never clears"). Stamping it explicitly
-                        // for the gob we're actually about to harvest - the same public field/
-                        // constructor a real click would populate - fixes this at the source instead of
-                        // working around it. Re-stamped fresh for every attempt, each giving its own
-                        // 10s window (LpExplorer.HARVEST_CLICK_WINDOW).
+                        // Historical note (stale as of the 2026-11-05 Discovery Atlas rewrite): this
+                        // used to be the fix for bot-driven harvests never crediting discovery, back
+                        // when LpExplorer.checkLpExplorer()/recentHarvestClick() gated discovery on
+                        // haven.MapView.clickedGob, which only a real local mouse click set - so this
+                        // line stamped it explicitly for bots. That whole mechanism (checkLpExplorer,
+                        // recentHarvestClick, HARVEST_CLICK_WINDOW) is gone; discovery is now credited
+                        // by DiscoveryTracker/DiscoveryCorrelator, whose bot-click signal
+                        // (NCore.lastGobRightClick(), fed from NMapView.wdgmsg("click") for every
+                        // sender) does not read map.clickedGob at all. This assignment is kept only
+                        // because map.clickedGob is still read elsewhere (NGameUI's quality-overlay
+                        // command, InspectQualityBot) - harmless to set here, but no longer load-
+                        // bearing for LP discovery crediting.
                         gui.map.clickedGob = new MapView.ClickedGob(target, 3);
                         fm = NUtils.getFlowerMenu();
                         if (fm == null || fm.nopts == null || fm.nopts.length == 0) {
@@ -495,20 +490,30 @@ public class LpAssistantBot implements Action {
                     InventorySnapshot settled = settlement.result();
                     log("  " + product + ": settlement ended (" + settlement.endReason() + ")");
 
-                    boolean discovered = firstProduct.signal() == WaitLpFirstProduct.Signal.DISCOVERY;
-                    if (discovered) {
+                    // Three distinct outcomes, not two - see WaitLpProductDiscovered's 2026-11-05
+                    // doc. A genuinely new LP discovery (discoveredCount++) is NOT the same as the
+                    // product turning out to be already known/legacy-imported/manually marked (no
+                    // new LP this harvest - resolved, but not counted as a discovery and not logged
+                    // as a failure either), which is NOT the same as an actual timeout (recordSkip).
+                    boolean newDiscovery = firstProduct.signal() == WaitLpFirstProduct.Signal.DISCOVERY;
+                    boolean alreadyKnown = false;
+                    if (newDiscovery) {
                         log("  " + product + ": discovery confirmed (via first-product signal)");
                     } else {
                         WaitLpProductDiscovered discovery =
                                 new WaitLpProductDiscovered(gobResName, product, expBaseline, DISCOVERY_CONFIRM_TIMEOUT_MS);
                         NUtils.getUI().core.addTask(discovery);
-                        discovered = discovery.confirmed();
-                        if (discovered)
+                        newDiscovery = discovery.isNewLpDiscovery();
+                        alreadyKnown = discovery.confirmed() && !newDiscovery;
+                        if (newDiscovery)
                             log("  " + product + ": discovery confirmed (via " + discovery.confirmedVia() + ")");
+                        else if (alreadyKnown)
+                            log("  " + product + ": already known (" + discovery.confirmedVia()
+                                    + ", no new LP this harvest) - resolved, not counted as a new discovery");
                     }
-                    if (discovered) {
+                    if (newDiscovery) {
                         discoveredCount++;
-                    } else {
+                    } else if (!alreadyKnown) {
                         log("  " + product + ": discovery NOT confirmed (timed out)");
                         logClickedGob("  " + product + ": clickedGob at timeout");
                         try {
@@ -1136,7 +1141,10 @@ public class LpAssistantBot implements Action {
         return ClearHandResult.STUCK;
     }
 
-    /** Debug-only: logs what map.clickedGob currently points at, to diagnose discovery misses. */
+    /** Debug-only: logs what map.clickedGob currently points at. Historical diagnostic from before
+     *  the 2026-11-05 Discovery Atlas rewrite - map.clickedGob no longer drives discovery crediting
+     *  (see the comment above the gui.map.clickedGob assignment in processGob()), so this no longer
+     *  diagnoses discovery misses; kept as a general clickedGob-state dump. */
     private void logClickedGob(String label) {
         if (prop == null || !prop.debug)
             return;

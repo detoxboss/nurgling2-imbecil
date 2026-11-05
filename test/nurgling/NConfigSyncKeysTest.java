@@ -21,15 +21,20 @@ class NConfigSyncKeysTest {
             names.add(k.name());
         assertEquals(NConfig.Key.values().length, names.size());
         // 296 at the merge base + 12 fork + 7 upstream-only (autoDrinkThreshold was added by both),
-        // + 2 fork keys since (keyboardFocusGuard, rememberInvListFilters).
-        assertEquals(317, names.size());
+        // + 2 fork keys since (keyboardFocusGuard, rememberInvListFilters), + 5 upstream keys from the
+        // 2026-11-05 sync (mapClaimsShown, showThingwallLinks, botFavourites, disableEasterEggs,
+        // easterEggSeen) + 1 fork key from the same sync (shoretracerprop, WorldExplorer/Shore
+        // Tracer split - see docs/fork-customization-ledger.md).
+        assertEquals(323, names.size());
         for (String fork : new String[] {"gobInstanceConf", "kinGroupLabels", "villageGroupLabels",
                 "lpassistantbotprop", "autoDrinkThreshold", "showPlayerCoords", "stackSizeLearning",
                 "combatReactorEnabled", "combatReactorDefenseThreshold", "equipBonusesExpanded",
-                "showDurabilityBars", "showSpiceMarks", "keyboardFocusGuard", "rememberInvListFilters"})
+                "showDurabilityBars", "showSpiceMarks", "keyboardFocusGuard", "rememberInvListFilters",
+                "shoretracerprop"})
             assertTrue(names.contains(fork), "fork key lost: " + fork);
         for (String up : new String[] {"drinkerprop", "gridDiagonals", "gridDiagonalColor",
-                "craftUseStorage", "roadTags", "tunnelingBot", "decoupledRender"})
+                "craftUseStorage", "roadTags", "tunnelingBot", "decoupledRender",
+                "mapClaimsShown", "showThingwallLinks", "botFavourites"})
             assertTrue(names.contains(up), "upstream key missing: " + up);
     }
 }

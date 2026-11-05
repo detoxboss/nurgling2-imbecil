@@ -9,11 +9,13 @@ automatically just because a sync cycle mentioned it.
 Nothing in this document has been fixed as part of drafting it. Do not treat an entry's presence here
 as authorization to fix it without separate review.
 
-## 1. World Explorer — unsynchronized `MCache.grids` access
+## 1. Shore Tracer (formerly World Explorer) — unsynchronized `MCache.grids` access
 
-**Where:** `src/nurgling/actions/bots/WorldExplorerFrontier.java` (line ~140),
+**Where:** `src/nurgling/actions/bots/ShoreTracerFrontier.java` (renamed from `WorldExplorerFrontier.java`
+in the 2026-11-05 sync's WorldExplorer/Shore Tracer split — see `fork-customization-ledger.md`; line
+number ~140, unchanged by the rename),
 `src/nurgling/pf/FrontierPicker.java` (lines ~139/210/267 as of the 2026-09-30 sync — and anywhere
-else in the World Explorer path that reads `MCache.grids` directly).
+else in the Shore Tracer path that reads `MCache.grids` directly).
 
 **Problem:** reads `MCache.grids` without the synchronization the rest of the client's grid-loading
 path uses, which is a latent race with concurrent grid load/unload.
@@ -25,7 +27,10 @@ for callers that look up many grid ids per frame — built for exactly this area
 pattern (upstream's own area-overlay-performance commit uses it internally). Both fork call sites
 above are fork-only files upstream cannot have touched, so they still read `map.grids` directly and
 unsynchronized; switching them to a `gridsById()` snapshot is now a small, low-risk fix rather than
-a design problem to solve from scratch.
+a design problem to solve from scratch. Upstream's own separate, unrelated "Ocean Explorer" rewrite
+(`worldexplorer` id, 2026-11-05 sync) does not have this bug — it reads tiles through the correctly
+synchronized `MCache.gettile()` — but that is a different bot/codebase from Shore Tracer; this item
+is specific to Shore Tracer and unaffected by Ocean Explorer's design.
 
 ## 2. Broader multi-session architecture/reliability investigation
 
