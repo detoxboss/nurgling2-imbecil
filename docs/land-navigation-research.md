@@ -50,11 +50,16 @@ routing across terrain the client (or a persisted database) already fully knows.
 ## 2. Intended direction: rolling-horizon navigation, not pre-recorded-data-dependent
 
 **[Proposal]** Pre-recorded `ChunkNav` data must **not** be a prerequisite for this bot to function.
-`ChunkNav` (`src/nurgling/navigation/**`, current `master`) is an opt-in, persisted, background-recorded
-navigation database (`NConfig.Key.chunkNavOverlay`, default off — see
-`docs/world-explorer-plan-b-frontier-exploration.md`'s "What ChunkNav and ExploredArea actually provide"
-section for the code-read investigation of what it does and doesn't offer). Requiring a user to have
-pre-recorded an area before the bot can explore it there defeats the bot's own purpose.
+`ChunkNav` (`src/nurgling/navigation/**`, current `master`) is a persisted, background-recorded
+navigation database. **Correction (navigation capability-area audit, session 1):** the recorder itself
+is **not** opt-in — `ChunkNavManager.tick()` runs unconditionally every map-view tick for every player,
+regardless of settings, performing throttled recording/portal-scan/save work in the background the
+whole time the client is open. `NConfig.Key.chunkNavOverlay` (default off) gates only the *visual
+overlay* that renders recorded chunks on the minimap — it has no effect on whether recording happens.
+See `docs/audit/capability-navigation.md` §11 for the source citation (`NMapView.java`). Requiring a
+user to have pre-recorded an area before the bot can explore it there still defeats the bot's own
+purpose — that conclusion is unaffected by this correction — but the mechanism was mischaracterized:
+there is no setting a user needs to enable for recording to happen; it is always happening.
 
 The intended direction instead is a **rolling horizon**:
 
