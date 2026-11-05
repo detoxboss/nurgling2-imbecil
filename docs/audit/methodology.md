@@ -113,3 +113,74 @@ For navigation, inventory, bots (general), UI, or any other area not yet started
    somewhere other than where you looked (the Oven/Bread lesson). This is cheap insurance against a
    false EVALUATED-but-wrong conclusion reaching VALIDATED.
 5. Keep the per-subsystem table, not a single area-wide level. Update it every session.
+
+## Reachability vocabulary (orthogonal to the four coverage levels)
+
+A coverage level (DISCOVERED/TRACED/EVALUATED/VALIDATED) says how thoroughly something was examined.
+It says nothing about whether that something actually runs. Track reachability as a separate tag,
+used by `docs/knowledge/capability-index.md`'s `reachability` field and by any audit doc that wants to
+state it precisely instead of writing "dead code" or "active" informally:
+
+- **ACTIVE** — implemented and exercised by at least one real caller in the normal execution path.
+- **CALLER-LIMITED** — implemented and reachable, but only from a specific, named caller (or small set
+  of callers) — don't generalize that to "used throughout" without checking each additional caller.
+- **UNUSED** — implemented, reachable, syntactically callable, but no caller currently invokes it.
+- **UNREACHABLE** — implemented but dead: computed and never consumed (e.g. `ChunkNav`'s confidence/
+  staleness-penalty mechanism — `capability-navigation.md` §13), or gated behind a condition that
+  cannot currently become true.
+- **UNCONFIGURED** — a configuration option exists with no code path that currently sets or reads it
+  meaningfully.
+- **UNKNOWN** — reachability has not actually been traced. Use this instead of guessing a level to
+  fill the field; an honest UNKNOWN is more useful than a fabricated ACTIVE.
+
+Do not label something UNUSED/UNREACHABLE/UNCONFIGURED from reading the implementation alone — that
+only tells you it *could* be dead. Confirm via caller analysis (who calls this, and does that call
+site's own code path actually execute) before asserting a negative reachability claim, same as any
+other EVALUATED/VALIDATED-stage conclusion in this document.
+
+## Provenance: local fork verification vs. upstream compatibility verification
+
+These are two different claims and must never be collapsed into one "is this still valid" verdict:
+
+- **Local fork source verification** — a claim about what *this fork's own current source* does,
+  verified by reading or running it. Stamped as `verified_commit`: the fork commit at which the claim
+  was confirmed (normally the commit that wrote the evidence-doc section making the claim). A later
+  commit touching the same file, or an uncommitted working-tree change to it, means the claim needs
+  re-checking — it does not mean the claim is wrong, only unverified as of now.
+- **Upstream compatibility verification** — a claim about whether this fork's source currently matches
+  `aleksandrsvoboda/nurgling2`'s `upstream` remote for the same file(s), verified by direct diff.
+  Stamped as `upstream_sha`: the exact `upstream` commit the diff was run against. **A single matching
+  `upstream_sha` only proves byte-identity as of that comparison** — it is not proof the fork hasn't
+  since diverged, and it is not proof upstream hasn't since changed (upstream churns independently of
+  this fork; `ChunkNav` alone had ~20 commits touching `ChunkNavExecutor.java` in the 90 days around
+  the navigation audit). Never infer fork-exclusivity or upstream-identity from directory structure
+  (`src/nurgling/**` is not automatically fork-exclusive — see `upstream-compatibility.md`); only a
+  direct diff against a recorded `upstream_sha` supports that claim.
+- Every capability area audited so far (navigation, workstation/production, bot lifecycle) recorded
+  its upstream-identity conclusion qualitatively ("byte-identical to upstream") without stamping the
+  exact `upstream_sha` compared against. `docs/knowledge/capability-index.md`'s seeded records
+  therefore carry `upstream_sha: unknown` for all of them — this is accurate, not a gap to silently
+  paper over by backfilling today's `upstream/master` SHA into an old record (that would misrepresent
+  when the comparison happened). Stamp a real `upstream_sha` only from a comparison made from this
+  point forward.
+
+## Correction-propagation checklist
+
+Demonstrated ad hoc twice already in this audit (the Oven/Bread retraction in this document; the
+session-1→session-2 fork-exclusivity correction in `capability-navigation.md`) — both followed the
+same shape without it being written down as a procedure. Writing it down so it isn't missed by
+accident on a future correction:
+
+1. Mark the old conclusion's status/state as superseded (or the most specific terminal state that
+   applies) **in place**, in the doc that made the claim. Do not delete it — the failure mode and the
+   correction are both worth keeping, same as the Oven/Bread section above.
+2. State the reason for the correction next to the superseded marker, not just the new conclusion —
+   future readers need to know *why* the old claim was wrong, not only that it was.
+3. `grep` (or equivalent) across `docs/**` for other references to the old claim — a short pointer
+   elsewhere (e.g. a `docs/knowledge/capability-index.md` row, a `docs/knowledge/reuse-candidates.md`
+   row, a routing-table entry) that still asserts the superseded conclusion is exactly the
+   contradiction this methodology exists to prevent. Update every one found, or at minimum leave a
+   note on it pointing at the correction.
+4. If a `docs/knowledge/*.md` index row pointed at the corrected section, re-run
+   `tools/knowledge/validate_knowledge.py` afterward — a corrected `evidence_doc` target that moved or
+   a `verified_commit` that should now bump will surface there.

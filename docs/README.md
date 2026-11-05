@@ -73,6 +73,14 @@ the sub-documents from here; follow `combat/README.md`'s own "Read this for…" 
 Start at [`audit/README.md`](audit/README.md) — it is itself the routing index for the audit
 documentation tree and states its own done/not-started scope.
 
+## Knowledge base
+
+Start at [`knowledge/README.md`](knowledge/README.md) — compact, pointer-only indexes
+(`capability-index.md`, `gameplay-index.md`, `reuse-candidates.md`, `observations.md`) into the audit
+docs above, gameplay facts (`recipes.bin`/wiki), and user-supplied observations. Check this before
+reading a full audit doc for navigation, workstation/production, or bot-lifecycle work, or a
+gameplay-mechanic question — it never duplicates a conclusion, only points at where it lives.
+
 ## Recovery / backlog
 
 | Doc | Kind | What it covers |

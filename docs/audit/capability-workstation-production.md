@@ -742,7 +742,14 @@ just the presence of a `quality` field):**
 
 - `FreeInventory2` — per-item-name quality *floor* when deciding whether to keep or discard/relocate an
   item.
-- `TakeItemsFromContainer` — an explicit `targetq` threshold parameter gating which items are taken.
+- `TakeItemsFromContainer` — two distinct quality-gate parameters: `targetq` (upper-bound cap — rejects
+  items *above* a quality value) and `minQuality` (lower-bound floor, gated through
+  `FindQualityThreshold.QEPS` — rejects items *below* a quality value). **Correction (independent
+  verification session): earlier text below named `targetq` as "the most directly reusable precedent
+  for a fuel-quality gate" — that is wrong, since a fuel-quality floor needs the lower bound, not the
+  upper bound. `minQuality` is the correct precedent; `TakeItems2` carries the same `minQuality`
+  field. Left in place per the correction-propagation rule rather than silently edited — see the
+  inline notes below and `docs/knowledge/reuse-candidates.md`'s `REUSE-003`.**
 - `SortContainersInArea`/`SortInventory` — quality-aware placement/stacking decisions.
 - `MasterMiner` — explicitly tracks and prefers the *highest*-quality ore/item seen.
 - `RabbitMaster`/`DuckMaster`/`KFC`/`CollectHighestQualitySilkwormEggs` — breeding/incubation bots that
@@ -752,8 +759,10 @@ just the presence of a `quality` field):**
 
 **This confirms the quality-threshold-filtering *pattern* is a mature, repeatedly-implemented idiom in
 this fork** — not a capability that would need inventing, just reuse of an existing, proven shape
-(`TakeItemsFromContainer`'s `targetq` parameter is the most directly reusable precedent for a
-fuel-quality gate).
+(~~`TakeItemsFromContainer`'s `targetq` parameter is the most directly reusable precedent for a
+fuel-quality gate`~~ **corrected: `targetq` is an upper-bound cap, not a lower-bound floor —
+`TakeItemsFromContainer`/`TakeItems2`'s `minQuality` parameter, gated through
+`FindQualityThreshold.QEPS`, is the actually-reusable precedent for a fuel-quality floor**).
 
 **What does not exist (confirmed by absence across every production bot read in sessions 1-3):** **no
 fuel-loop bot** (`BakerAction`/`BricksAction`/`BlockAshAction`/`BoneAshAction`/`SmelterAction`/
@@ -775,11 +784,12 @@ pattern used elsewhere — but nothing connects the two for production bots.
 
 **Opportunity, consistent with "avoid speculative abstraction" and "configurable, quality-aware
 automation":** a fork-owned, opt-in fuel-quality floor parameter on the existing fuel-loop helper
-(the same de-duplication target as backlog item 7) — reusing `TakeItemsFromContainer`'s `targetq`
-shape — would directly serve the kiln/smelter bots where the wiki formula confirms it matters, without
-touching the bread/oven path where the cited formula gives no reason to. This is deliberately narrower
-than "quality-aware automation everywhere": the wiki evidence above argues against applying it
-uniformly.
+(the same de-duplication target as backlog item 7) — reusing `TakeItemsFromContainer`/`TakeItems2`'s
+`minQuality` shape (**corrected**: not `targetq`, an upper-bound cap, which was cited here in error —
+see the correction note in §4 above) — would directly serve the kiln/smelter bots where the wiki
+formula confirms it matters, without touching the bread/oven path where the cited formula gives no
+reason to. This is deliberately narrower than "quality-aware automation everywhere": the wiki
+evidence above argues against applying it uniformly.
 
 ## 5. Consolidated registry — where everything now lives
 

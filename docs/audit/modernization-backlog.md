@@ -283,8 +283,13 @@ test** (how to validate the fix, where one is actually implemented).
   actually benefit from stockpiling better fuel, instead of the bot burning whatever fuel item matches
   by name regardless of its quality value.
 - **Complexity:** Low-Medium. A directly reusable precedent already exists in this codebase:
-  `TakeItemsFromContainer`'s `targetq` threshold parameter. Adding an optional fuel-quality floor to
-  the fuel-fetch step of the shared loop helper (item 7, if/when built) is additive, not a redesign.
+  `TakeItemsFromContainer`/`TakeItems2`'s `minQuality` lower-bound floor parameter (gated through
+  `FindQualityThreshold.QEPS`). Adding an optional fuel-quality floor to the fuel-fetch step of the
+  shared loop helper (item 7, if/when built) is additive, not a redesign.
+  **Correction (independent verification session):** earlier drafts of this item, and the matching
+  `REUSE-003` knowledge record, cited `targetq` instead. `targetq` is an *upper-bound cap* (rejects
+  items above a quality value), not the lower-bound floor this item needs — `minQuality` is the
+  correct field. See `docs/knowledge/reuse-candidates.md`'s `REUSE-003` for the full correction.
 - **Upstream merge risk:** Depends entirely on where it lands. If built as a new parameter on the
   item-7 shared helper (new, fork-owned file), risk is low. If added directly inside
   `BricksAction`/`BlockAshAction`/etc. individually, inherits those files' own moderate churn

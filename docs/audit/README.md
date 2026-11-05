@@ -91,14 +91,23 @@ beyond the handful of sampled/triaged files, and the `/audit-*` command set beyo
 at once risks shallow, unverified output. Pick up one capability area at a time and add a doc here
 per area, following this file's table format, rather than one all-at-once document.
 
-## Next planned milestone (not started — read this before starting new audit work)
+## Knowledge-base infrastructure (v1 implemented)
 
-With the navigation capability area closed, the next major project task is **establishing a
-permanent, lightweight, Git-versioned Nurgling2 Knowledge Base** — organizing code capabilities,
+With the navigation capability area closed, the next major project task was establishing a
+permanent, lightweight, Git-versioned Nurgling2 Knowledge Base — organizing code capabilities,
 gameplay mechanics, wiki references, cross-system relationships, modernization opportunities, and
 documentation-drift detection, designed to progressively improve Claude Code's codebase
-understanding without loading large documents unnecessarily. This is a separate, already-scoped
-task with a detailed prompt prepared outside this document — it has **not** been designed or
-implemented yet. A fresh Claude Code conversation picking up this project should treat this as the
-next thing to ask the user about, rather than starting another capability-area audit (inventory/
-item movement, client/server assumptions, etc.) on its own initiative.
+understanding without loading large documents unnecessarily. **v1 of this is now implemented** —
+start at [`../knowledge/README.md`](../knowledge/README.md), not here, for what it is and how it
+works. It indexes into this audit tree; it does not replace any document in it.
+
+What v1 deliberately defers (regular automated wiki-revision polling, automated source-to-knowledge
+semantic drift detection beyond `tools/knowledge/validate_knowledge.py`'s file-level checks, automated
+cross-system reuse discovery, capability coverage beyond navigation/workstation-production/
+bot-lifecycle, automated post-upstream-sync re-stamping) is recorded in
+`../knowledge/README.md`'s "Deferred" section, not here — don't duplicate that list.
+
+A fresh Claude Code conversation picking up this project next should treat the **backlog
+implementation** milestone (thematic batches against `modernization-backlog.md`, per the approved
+roadmap) as the next thing to confirm with the user, rather than starting another capability-area
+audit (inventory/item movement, client/server assumptions, etc.) on its own initiative.
