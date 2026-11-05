@@ -490,20 +490,30 @@ public class LpAssistantBot implements Action {
                     InventorySnapshot settled = settlement.result();
                     log("  " + product + ": settlement ended (" + settlement.endReason() + ")");
 
-                    boolean discovered = firstProduct.signal() == WaitLpFirstProduct.Signal.DISCOVERY;
-                    if (discovered) {
+                    // Three distinct outcomes, not two - see WaitLpProductDiscovered's 2026-11-05
+                    // doc. A genuinely new LP discovery (discoveredCount++) is NOT the same as the
+                    // product turning out to be already known/legacy-imported/manually marked (no
+                    // new LP this harvest - resolved, but not counted as a discovery and not logged
+                    // as a failure either), which is NOT the same as an actual timeout (recordSkip).
+                    boolean newDiscovery = firstProduct.signal() == WaitLpFirstProduct.Signal.DISCOVERY;
+                    boolean alreadyKnown = false;
+                    if (newDiscovery) {
                         log("  " + product + ": discovery confirmed (via first-product signal)");
                     } else {
                         WaitLpProductDiscovered discovery =
                                 new WaitLpProductDiscovered(gobResName, product, expBaseline, DISCOVERY_CONFIRM_TIMEOUT_MS);
                         NUtils.getUI().core.addTask(discovery);
-                        discovered = discovery.confirmed();
-                        if (discovered)
+                        newDiscovery = discovery.isNewLpDiscovery();
+                        alreadyKnown = discovery.confirmed() && !newDiscovery;
+                        if (newDiscovery)
                             log("  " + product + ": discovery confirmed (via " + discovery.confirmedVia() + ")");
+                        else if (alreadyKnown)
+                            log("  " + product + ": already known (" + discovery.confirmedVia()
+                                    + ", no new LP this harvest) - resolved, not counted as a new discovery");
                     }
-                    if (discovered) {
+                    if (newDiscovery) {
                         discoveredCount++;
-                    } else {
+                    } else if (!alreadyKnown) {
                         log("  " + product + ": discovery NOT confirmed (timed out)");
                         logClickedGob("  " + product + ": clickedGob at timeout");
                         try {

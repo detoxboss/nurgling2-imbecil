@@ -72,8 +72,13 @@ public class WaitLpFirstProduct extends NTask {
         }
 
         // check() on a plain, un-queued NTask instance is just a method call - safe to invoke
-        // directly every poll rather than duplicating its exp/record logic here.
-        if (discoveryCheck.check() && discoveryCheck.confirmed()) {
+        // directly every poll rather than duplicating its exp/record logic here. isNewLpDiscovery(),
+        // not confirmed(): a KNOWN/LEGACY/MANUAL resolution (already established, no new LP this
+        // harvest - see WaitLpProductDiscovered's own doc, 2026-11-05 correction) must not report
+        // Signal.DISCOVERY, since that would credit this harvest with a discovery that didn't happen.
+        // The item's physical arrival is still caught independently by NEW_ITEM/STACK_GROWTH/
+        // CURSOR_ITEM above, so a KNOWN resolution doesn't leave this task blind to the pickup.
+        if (discoveryCheck.check() && discoveryCheck.isNewLpDiscovery()) {
             signal = Signal.DISCOVERY;
             return true;
         }
