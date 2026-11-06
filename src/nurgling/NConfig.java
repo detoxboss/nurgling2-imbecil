@@ -157,6 +157,15 @@ public class NConfig
         studyDeskLayout,
         studyReportGhosts,   // per-character study report slot history, drawn as ghosts (NStudyInventory)
         showStudyReportGhosts,
+        // Land Survey editor overhaul: see nurgling.survey.SurveySettings / docs/land-survey-editor.md
+        surveyVertexMatchColor, surveyVertexMatchOpacity, surveyVertexMatchSize, surveyVertexMatchVisible,
+        surveyVertexFillColor, surveyVertexFillOpacity, surveyVertexFillSize, surveyVertexFillVisible,
+        surveyVertexDigColor, surveyVertexDigOpacity, surveyVertexDigSize, surveyVertexDigVisible,
+        surveySelHighlightColor, surveySelHighlightSize, surveySelHighlightVisible,
+        surveyOutlineColor, surveyOutlineOpacity, surveyOutlineWidth, surveyOutlineVisible,
+        surveyWireColor, surveyWireOpacity, surveyWireWidth, surveyWireVisible,
+        surveyFillVisible, surveyFillOpacity, surveyFillLowColor, surveyFillHighColor, surveyHeatmapEnabled,
+        surveyUndoDepth, surveyNewUnlocked,
         curioFinishedSound,
         keyboardFocusGuard,     // FocusGuard: text inputs only take keys after being clicked
         rememberInvListFilters, // InventoryListFilters: new inventories inherit the active one's list filters
@@ -497,6 +506,28 @@ public class NConfig
         conf.put(Key.showTerrainName, false);
         conf.put(Key.validateAllCropsBeforeHarvest, false);
         conf.put(Key.studyDeskLayout, "");
+        conf.put(Key.surveyVertexMatchVisible, true);
+        conf.put(Key.surveyVertexFillVisible, true);
+        conf.put(Key.surveyVertexDigVisible, true);
+        conf.put(Key.surveyVertexMatchOpacity, 100);
+        conf.put(Key.surveyVertexFillOpacity, 100);
+        conf.put(Key.surveyVertexDigOpacity, 100);
+        conf.put(Key.surveyVertexMatchSize, 7);
+        conf.put(Key.surveyVertexFillSize, 7);
+        conf.put(Key.surveyVertexDigSize, 7);
+        conf.put(Key.surveySelHighlightSize, 11);
+        conf.put(Key.surveySelHighlightVisible, true);
+        conf.put(Key.surveyOutlineOpacity, 100);
+        conf.put(Key.surveyOutlineWidth, 1);
+        conf.put(Key.surveyOutlineVisible, true);
+        conf.put(Key.surveyWireOpacity, 60);
+        conf.put(Key.surveyWireWidth, 1);
+        conf.put(Key.surveyWireVisible, false);
+        conf.put(Key.surveyFillVisible, true);
+        conf.put(Key.surveyFillOpacity, 50);
+        conf.put(Key.surveyHeatmapEnabled, false);
+        conf.put(Key.surveyUndoDepth, 20);
+        conf.put(Key.surveyNewUnlocked, true);
         conf.put(Key.studyReportGhosts, "");
         conf.put(Key.showStudyReportGhosts, true);
         conf.put(Key.curioFinishedSound, true);

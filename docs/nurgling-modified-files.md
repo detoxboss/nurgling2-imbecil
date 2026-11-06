@@ -302,6 +302,7 @@ src/haven/res/ui/locptr/Pointer.java
 src/haven/res/ui/obj/buddy/Buddy.java
 src/haven/res/ui/rchan/RealmChannel.java
 src/haven/res/ui/stackinv/ItemStack.java
+src/haven/res/ui/surv/Display.java
 src/haven/res/ui/surv/LandSurvey.java
 src/haven/res/ui/tt/cn/CustomName.java
 src/haven/res/ui/tt/curio/Fac.java

@@ -50,8 +50,13 @@ public class Data {
 	    dz[i] = Math.round(wz[i]);
     }
 
-    public Object[] encode() {
+    /** Widest span (inclusive) representable by the unsigned-byte relative encoding below. */
+    public static final int MAX_SPAN = 255;
+
+    public Object[] encode() throws HeightRangeExceededException {
 	eupdate();
+	if((hi - lo) > MAX_SPAN)
+	    throw(new HeightRangeExceededException(lo, hi));
 	MessageBuf buf = new MessageBuf();
 	ZMessage out = new ZMessage(buf);
 	for(int i = 0; i < dz.length; i++)
