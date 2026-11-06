@@ -14,13 +14,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Exercises SurveyConstraintValidator against synthetic height grids. Internal units throughout
- * are "dz" (haven.res.ui.surv.Data#dz) with gran = 10, i.e. 1 unit = 0.1 m -- matching the manual
- * soil-placement test in the Phase 2 investigation report (0.1 m per soil, blocked at ~20 units
- * = 2.0 m). All terrain snapshots are built with {@link SurveyTerrainSnapshot#forTesting} so
- * nothing here touches MCache or any other game resource.
+ * are "dz" (haven.res.ui.surv.Data#dz) with {@code gran = 10f/11f} -- the real value the live
+ * client sends (see haven.res.ui.surv.LandSurvey#mkwidget, {@code args[2] / 11}), NOT a
+ * convenient round number. 1 dz unit is 0.1 m (matching the manual soil-placement test in the
+ * Phase 2 investigation report: 0.1 m per soil, blocked at ~20 units = 2.0 m), but only because
+ * {@link SurveyConstraintValidator#metersPerDzUnit} divides by {@code gran * MCache.tilesz.x}
+ * -- a prior version of this test used an unrealistic {@code gran = 10f}, which combined with a
+ * then-buggy validator that divided by {@code gran} alone to produce the right-looking 0.1 m/unit
+ * number for the wrong reason, masking the regression this gran value is chosen to catch (with
+ * the real 10f/11f, the same buggy single-division code computes 1.1 m/unit instead -- wildly
+ * over-restrictive, matching the reported in-game symptom). All terrain snapshots are built with
+ * {@link SurveyTerrainSnapshot#forTesting} so nothing here touches MCache or any other game
+ * resource.
  */
 class SurveyConstraintValidatorTest {
-    private static final float GRAN = 10f;
+    private static final float GRAN = 10f / 11f;
     private static final double LIMIT = SurveySettings.TERRAIN_MAX_SLOPE_METERS; // 2.0 m
 
     @AfterEach
@@ -49,6 +57,67 @@ class SurveyConstraintValidatorTest {
         SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, dz, dz, terrain, LIMIT);
         assertEquals(SurveyConstraintResult.Status.VALID, res.overall);
         assertTrue(res.findings.isEmpty());
+    }
+
+    // Regression cases 1-6: incremental raises on flat ground at the real client gran
+    // (10f/11f), each independently, confirming the whole 0-20 unit range is usable (not just
+    // the single boundary points) and that the realistic gran doesn't throw off smaller values.
+    @Test
+    void realisticGranIncrementalRaises() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        int[] prior = {0, 0, 0, 0};
+        int[][] validRaises = {{1}, {2}, {10}, {19}, {20}}; // 0.1, 0.2, 1.0, 1.9, 2.0 m
+        for(int[] units : validRaises) {
+            int[] cand = {units[0], 0, 0, 0};
+            SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, prior, cand, terrain, LIMIT);
+            assertEquals(SurveyConstraintResult.Status.VALID, res.overall,
+                         units[0] + " units (" + (units[0] * 0.1) + " m) should be valid");
+        }
+        int[] cand21 = {21, 0, 0, 0}; // 2.1 m
+        assertEquals(SurveyConstraintResult.Status.VIOLATION,
+                     SurveyConstraintValidator.validate(varea, GRAN, prior, cand21, terrain, LIMIT).overall);
+    }
+
+    // Outside-boundary case: a 1.0 m difference to undisturbed ground must not be a violation;
+    // a >2.0 m one must be recognized. Both at the real client gran.
+    @Test
+    void outsideBoundaryDifferenceRecognizedAtCorrectThreshold() {
+        Area varea = oneTile();
+        int[] dz = {0, 0, 0, 0};
+        Map<Coord, Double> within = new HashMap<>();
+        for(Coord c : varea.margin(1))
+            within.put(c, 0.0);
+        within.put(Coord.of(-1, 0), 1.0); // 1.0 m -- within the limit
+        SurveyConstraintResult ok = SurveyConstraintValidator.validateAbsolute(
+            varea, GRAN, dz, SurveyTerrainSnapshot.forTesting(within, new HashMap<>(), varea.margin(1)), LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VALID, ok.overall);
+
+        Map<Coord, Double> beyond = new HashMap<>(within);
+        beyond.put(Coord.of(-1, 0), 2.5); // 2.5 m -- over the limit
+        SurveyConstraintResult bad = SurveyConstraintValidator.validateAbsolute(
+            varea, GRAN, dz, SurveyTerrainSnapshot.forTesting(beyond, new HashMap<>(), varea.margin(1)), LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VIOLATION, bad.overall);
+    }
+
+    // Diagnostics must report metres, not the raw world-Z units MCache.getfz() returns (the
+    // actual regression): a 2.1 m violation must report candidateDiffMeters near 2.1, not near
+    // 2.1 * MCache.tilesz.x (~23.1), which is what the pre-fix code would have produced.
+    @Test
+    void diagnosticsReportMetersNotWorldZUnits() {
+        Area varea = oneTile();
+        int[] prior = {0, 0, 0, 0};
+        int[] cand = {21, 0, 0, 0}; // 2.1 m
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, prior, cand, terrain, LIMIT);
+        boolean found = false;
+        for(SurveyConstraintResult.EdgeFinding f : res.findings) {
+            if((f.status == SurveyConstraintResult.Status.VIOLATION) && varea.contains(f.a) && varea.contains(f.b)) {
+                assertEquals(2.1, f.candidateDiffMeters, 0.01);
+                found = true;
+            }
+        }
+        assertTrue(found);
     }
 
     // 2/5. Raising one vertex to exactly the permitted maximum (20 units = 2.0 m) is valid.

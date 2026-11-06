@@ -437,8 +437,10 @@ touching the server protocol; see the PR for the full requirements.
 
 **Files:**
 - `src/nurgling/survey/SurveyTerrainSnapshot.java` (new) — immutable capture of real terrain
-  elevations (metres, via `MCache.getfz`) and cliff-tile classification (`Ridges.brokenp`) around
-  a survey's vertex area plus a one-vertex outside ring. Absence means unknown, never zero.
+  elevations (metres — `MCache.getfz()` divided by `MCache.tilesz.x`, fixed in the follow-up below;
+  see "Follow-up fix" for why the division is needed) and cliff-tile classification
+  (`Ridges.brokenp`) around a survey's vertex area plus a one-vertex outside ring. Absence means
+  unknown, never zero.
 - `src/nurgling/survey/SurveyConstraintResult.java` (new) — validation outcome: overall status
   (`VALID`/`VIOLATION`/`UNKNOWN`) plus the specific non-valid edges found.
 - `src/nurgling/survey/SurveyConstraintValidator.java` (new) — the deterministic, render- and
@@ -508,6 +510,20 @@ smoke-test checklist.
 **Superseded when:** a future hafen integration changes `ui/surv`'s resource version or the
 `data`/`lock` message shapes; re-verify this entire entry against the new `Display.java`/
 `LandSurvey.java` at that point.
+
+**Follow-up fix (same PR, pre-merge):** in-game testing of the above found the slope rule roughly
+11x too strict (ordinary edges flagged after ~0.1-0.2 m instead of ~2.0 m). Root cause:
+`MCache.getfz()` returns world-Z units, which `MCache.Grid`'s z-decode pre-multiplies by
+`MCache.tilesz.x` (11) to align with the x/y grid — it is not metres on its own. The validator and
+solver originally divided a `dz` difference only by `gran`, recovering world-Z units and then
+comparing those directly against the 2.0 m limit. Fixed by adding
+`SurveyConstraintValidator.metersPerDzUnit(gran)` (`1 / (gran * MCache.tilesz.x)`) as the one
+authoritative dz-to-metres factor, used everywhere the old `/ gran` division was, and by fixing
+`SurveyTerrainSnapshot.capture()` to divide `MCache.getfz()` by `MCache.tilesz.x` before storing
+it. Both test files' `GRAN` constant was also corrected from an unrealistic `10f` to the real
+client's `10f/11f` — the original `10f` had accidentally made the buggy single-division formula
+produce the right-looking number, masking the bug. See `docs/land-survey-editor.md`'s "Regression:
+unit-conversion bug" section for the full derivation.
 
 ## Fork `BotRegistry` registrations
 

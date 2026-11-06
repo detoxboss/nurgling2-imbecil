@@ -189,6 +189,10 @@ public class LandSurvey extends Window {
 
     private SurveyTerrainSnapshot terrainSnapshot;
     private int terrainSnapshotMapSeq = -1;
+    /** Diagnostic only: the most recent Constrain-mode clamp result, surfaced on the status
+     *  line so a clamp's limiting edge/amount can be checked in-game without guessing. Cleared
+     *  whenever a gesture ends (mode(new Idle())), not persisted, never affects behavior. */
+    private SurveyDragConstraintSolver.ClampResult lastClamp;
 
     /** Snapshot is cheap to rebuild but not free (probes a one-vertex ring around the whole
      *  survey); cached per gesture/tick and only rebuilt when the map actually changed. */
@@ -226,13 +230,19 @@ public class LandSurvey extends Window {
 	    }
 	}
 	dsp.setTerrainMarkers(viol, unk);
+	String base;
 	if(violCount > 0)
-	    terrlbl.settext(String.format("Terrain: %d edge(s) over %.1fm limit (worst %.1fm)",
-					   violCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS, worst));
+	    base = String.format("Terrain: %d edge(s) over %.1fm limit (worst %.1fm)",
+				  violCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS, worst);
 	else if(unkCount > 0)
-	    terrlbl.settext(String.format("Terrain: %d nearby edge(s) unverifiable (unloaded)", unkCount));
+	    base = String.format("Terrain: %d nearby edge(s) unverifiable (unloaded)", unkCount);
 	else
-	    terrlbl.settext("Terrain: OK");
+	    base = "Terrain: OK";
+	if((mode == SurveyConstraintValidator.Mode.CONSTRAIN) && (lastClamp != null) && (lastClamp.limitingEdge != null)) {
+	    SurveyConstraintValidator.Edge le = lastClamp.limitingEdge;
+	    base += String.format(" [clamped at %s-%s]", le.a, le.b);
+	}
+	terrlbl.settext(base);
     }
 
     /** Clamps a Mover/CMover gesture's requested diff to the largest amount that doesn't newly
@@ -245,6 +255,7 @@ public class LandSurvey extends Window {
 	SurveyTerrainSnapshot terrain = terrainSnapshot(mv.ui.sess.glob.map);
 	SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
 	    data.varea, data.gran, priorDz, gidx, sz, coeff, requestedDiff, terrain, SurveySettings.TERRAIN_MAX_SLOPE_METERS);
+	lastClamp = cr;
 	return cr.diff;
     }
 
@@ -436,6 +447,7 @@ public class LandSurvey extends Window {
 			after[i] = data.wz[gidx[i]];
 		    history.push(gidx, sz, after);
 		    send();
+		    lastClamp = null;
 		    mode(new Idle());
 		    return(true);
 		}
@@ -501,6 +513,7 @@ public class LandSurvey extends Window {
 			after[i] = data.wz[gidx[i]];
 		    history.push(gidx, sz, after);
 		    send();
+		    lastClamp = null;
 		    mode(new Idle());
 		    return(true);
 		}

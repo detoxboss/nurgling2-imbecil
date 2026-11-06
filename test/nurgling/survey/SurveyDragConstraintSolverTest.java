@@ -16,7 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (corner-interpolated tilt) drag shapes used by haven.res.ui.surv.LandSurvey.
  */
 class SurveyDragConstraintSolverTest {
-    private static final float GRAN = 10f;
+    // Real client gran (haven.res.ui.surv.LandSurvey#mkwidget: args[2] / 11), not a convenient
+    // round number -- the regression this exposed only showed up once the real gran was used
+    // (see SurveyConstraintValidatorTest's class doc for why the old gran=10f masked it).
+    private static final float GRAN = 10f / 11f;
     private static final double LIMIT = SurveySettings.TERRAIN_MAX_SLOPE_METERS; // 2.0 m
 
     private static Area oneTile() {
@@ -138,7 +141,7 @@ class SurveyDragConstraintSolverTest {
         SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
             varea, GRAN, prior, wholeSurveyGidx(), new float[] {0, 0, 0, 0}, uniformCoeff(), 100f, terrain, LIMIT);
         assertEquals(39f, cr.diff, 0.001); // floor(39.5), not round(39.5) -- never rounds outward
-        double resultingDiffMeters = Math.abs((0 + cr.diff) / GRAN - 1.95);
+        double resultingDiffMeters = Math.abs((0 + cr.diff) * SurveyConstraintValidator.metersPerDzUnit(GRAN) - 1.95);
         assertTrue(resultingDiffMeters <= LIMIT + 1e-9);
     }
 

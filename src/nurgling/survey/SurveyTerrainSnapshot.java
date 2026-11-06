@@ -41,7 +41,10 @@ public final class SurveyTerrainSnapshot {
         Map<Coord, Double> heights = new HashMap<>();
         for(Coord vc : probed) {
             try {
-                heights.put(vc, map.getfz(vc));
+                // map.getfz() returns world-Z units, which are MCache.tilesz.x times a real
+                // metre (see SurveyConstraintValidator#metersPerDzUnit for why) -- divide back
+                // out so terrainHeight() genuinely returns metres, matching dz-derived heights.
+                heights.put(vc, map.getfz(vc) / MCache.tilesz.x);
             } catch(Loading l) {
                 // left absent: unknown, not zero
             }

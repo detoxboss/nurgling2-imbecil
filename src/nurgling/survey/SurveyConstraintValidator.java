@@ -2,6 +2,7 @@ package nurgling.survey;
 
 import haven.Area;
 import haven.Coord;
+import haven.MCache;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,28 @@ public final class SurveyConstraintValidator {
      * own rule disagrees with either way.
      */
     public static boolean CHECK_DIAGONALS = false;
+
+    /**
+     * dz units to metres. Confirmed regression (see Phase 2 follow-up investigation): {@code
+     * haven.res.ui.surv.Data#dz} is {@code round(MCache.getfz() * gran)} (LandSurvey#initsurf),
+     * i.e. dz is in "world-Z units * gran", NOT metres -- dividing a dz difference by {@code
+     * gran} alone (the original bug here) recovers the difference in world-Z units, which are
+     * themselves {@code MCache.tilesz.x} times larger than a real metre: MCache's z buffer is
+     * stored pre-multiplied by {@code tilesz.x} to align its scale with the x/y grid (see the
+     * {@code * 11} factor in MCache.Grid's z-format decoding). Dividing world-Z back out by
+     * {@code tilesz.x} recovers the original server-sent value in real metres.
+     *
+     * Verified empirically: live {@code gran == 10f/11f}, and a manual soil-placement test
+     * raises a vertex by exactly 0.1 m per dz unit, blocked at ~20 units (~2.0 m) on flat
+     * ground -- {@code 1 / (gran * tilesz.x) == 1 / ((10/11) * 11) == 0.1}, matching exactly.
+     * This also matches the pre-existing (unmodified) "Peak to trough" readout in
+     * LandSurvey#updmap, which has always hardcoded {@code / 10.0} -- that only happens to be
+     * correct because live gran is always 10/11, so {@code gran * tilesz.x == 10} in practice;
+     * this method stays correct even if a server ever sent a different gran.
+     */
+    public static double metersPerDzUnit(float gran) {
+        return 1.0 / (gran * MCache.tilesz.x);
+    }
 
     private SurveyConstraintValidator() {}
 
@@ -100,10 +123,11 @@ public final class SurveyConstraintValidator {
         List<SurveyConstraintResult.EdgeFinding> findings = new ArrayList<>();
         SurveyConstraintResult.Status overall = SurveyConstraintResult.Status.VALID;
 
+        double mpd = metersPerDzUnit(gran);
         for(Edge e : edgesWithin(varea)) {
             int ia = varea.ridx(e.a), ib = varea.ridx(e.b);
-            double candDiff = Math.abs(candidateDz[ia] - candidateDz[ib]) / (double)gran;
-            double priorDiff = Math.abs(priorDz[ia] - priorDz[ib]) / (double)gran;
+            double candDiff = Math.abs(candidateDz[ia] - candidateDz[ib]) * mpd;
+            double priorDiff = Math.abs(priorDz[ia] - priorDz[ib]) * mpd;
             SurveyConstraintResult.Status s = classify(candDiff, strict ? 0 : priorDiff, maxSlopeMeters);
             if(s != SurveyConstraintResult.Status.VALID) {
                 findings.add(new SurveyConstraintResult.EdgeFinding(e.a, e.b, s, candDiff, maxSlopeMeters, !strict && (priorDiff > maxSlopeMeters)));
@@ -127,8 +151,8 @@ public final class SurveyConstraintValidator {
                     overall = worse(overall, SurveyConstraintResult.Status.UNKNOWN);
                     continue;
                 }
-                double candDiff = Math.abs((candidateDz[iv] / (double)gran) - oh);
-                double priorDiff = Math.abs((priorDz[iv] / (double)gran) - oh);
+                double candDiff = Math.abs((candidateDz[iv] * mpd) - oh);
+                double priorDiff = Math.abs((priorDz[iv] * mpd) - oh);
                 SurveyConstraintResult.Status s = classify(candDiff, strict ? 0 : priorDiff, maxSlopeMeters);
                 if(s != SurveyConstraintResult.Status.VALID) {
                     findings.add(new SurveyConstraintResult.EdgeFinding(vc, oc, s, candDiff, maxSlopeMeters, !strict && (priorDiff > maxSlopeMeters)));

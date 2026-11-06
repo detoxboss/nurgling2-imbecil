@@ -64,6 +64,7 @@ public final class SurveyDragConstraintSolver {
         SurveyConstraintValidator.Edge limiting = null;
         boolean sawUnknown = false;
 
+        double mpd = SurveyConstraintValidator.metersPerDzUnit(gran);
         Map<Integer, Integer> globalToRegion = new HashMap<>();
         for(int i = 0; i < regionGidx.length; i++)
             globalToRegion.put(regionGidx[i], i);
@@ -77,9 +78,9 @@ public final class SurveyDragConstraintSolver {
             double baseB = (rb != null) ? regionStartWz[rb] : priorDzFull[ib];
             double coA = (ra != null) ? regionCoeff[ra] : 0;
             double coB = (rb != null) ? regionCoeff[rb] : 0;
-            double C = (baseA - baseB) / gran;
-            double D = (coA - coB) / gran;
-            double priorDiff = Math.abs(priorDzFull[ia] - priorDzFull[ib]) / (double)gran;
+            double C = (baseA - baseB) * mpd;
+            double D = (coA - coB) * mpd;
+            double priorDiff = Math.abs(priorDzFull[ia] - priorDzFull[ib]) * mpd;
 
             Float boundary = edgeBoundaryT(C, D, sign, Math.max(maxSlopeMeters, priorDiff));
             if((boundary != null) && tighter(boundary, best, sign)) {
@@ -102,9 +103,9 @@ public final class SurveyDragConstraintSolver {
                     sawUnknown = true;
                     continue;
                 }
-                double C = (regionStartWz[rv] / gran) - oh;
-                double D = regionCoeff[rv] / gran;
-                double priorDiff = Math.abs((priorDzFull[iv] / (double)gran) - oh);
+                double C = (regionStartWz[rv] * mpd) - oh;
+                double D = regionCoeff[rv] * mpd;
+                double priorDiff = Math.abs((priorDzFull[iv] * mpd) - oh);
 
                 Float boundary = edgeBoundaryT(C, D, sign, Math.max(maxSlopeMeters, priorDiff));
                 if((boundary != null) && tighter(boundary, best, sign)) {

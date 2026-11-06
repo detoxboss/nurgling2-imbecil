@@ -61,16 +61,29 @@ implementation) — their content is taken as given by the task description, not
 
 ### Where terrain height data comes from
 
-`MCache.getfz(Coord tc)` returns a tile corner's elevation in metres (`Grid.getz`, ultimately from
-the server's terrain data); `MCache.tilesz` is 11x11 (world units per tile, matching the game's
-known 11 m tile size). `haven.res.ui.surv.Data` stores the survey's own target heights as an
-integer array `dz` in units of `1/gran` metres, where `gran` is set from the server-supplied
-resource argument at widget construction (`args[2] / 11`); `wz` is the float working copy
-`Mover`/`CMover` mutate during a drag, rounded into `dz` by `Data.dupdate()`. The manual
-soil-placement test's "0.1 m per unit, blocked near 20" is consistent with `gran = 10` in whatever
-units the live server actually sends — the engine never hardcodes that assumption, converting via
-the survey's own `gran` at every boundary instead (`SurveyConstraintValidator`/
-`SurveyDragConstraintSolver` both take `gran` as an explicit parameter).
+`MCache.getfz(Coord tc)` returns a tile corner's elevation in **world-Z units**, *not* metres,
+despite this doc's first revision assuming otherwise (see "Regression: unit-conversion bug" below
+for the fix). `MCache.Grid`'s z-buffer decode (`MCache.java`, the z-format-0..3 branches)
+multiplies every server-sent value by `MCache.tilesz.x` (11) when storing it, to align the
+elevation scale with the x/y grid; `getfz()`/`getz()` return that pre-multiplied value as-is. The
+real-world elevation the server actually sent is recovered by dividing back out by
+`MCache.tilesz.x`.
+
+`haven.res.ui.surv.Data` stores the survey's own target heights as an integer array `dz`, where
+`dz = round(getfz(vc) * gran)` (`LandSurvey.initsurf()`) — i.e. `dz` is in "world-Z units scaled by
+`gran`", not metres directly either. `gran` is set from the server-supplied resource argument at
+widget construction (`args[2] / 11`); `wz` is the float working copy `Mover`/`CMover` mutate during
+a drag, rounded into `dz` by `Data.dupdate()`.
+
+Converting a `dz` difference to metres therefore needs **two** divisions, not one:
+`metres = dzDiff / gran / MCache.tilesz.x` (`SurveyConstraintValidator.metersPerDzUnit(gran)`
+computes exactly this, as a single combined factor). The manual soil-placement test's "0.1 m per
+unit, blocked near 20" is consistent with the live server's `gran = 10f/11f`: `1 / ((10/11) * 11)
+== 0.1`. This also matches the pre-existing (upstream-derived, unmodified) "Peak to trough"
+readout in `LandSurvey.updmap()`, which has always divided by a hardcoded `10.0` — that line is
+only correct because live `gran` happens to always be `10/11`, making `gran * tilesz.x == 10`; the
+constraint engine computes the same factor from `gran` and `tilesz.x` explicitly instead of
+hardcoding it, so it stays correct even if a server instance ever sent a different `gran`.
 
 `Display.vfill()` already reads `map.getfz(vc)` per vertex every frame (for the fill/dig status
 dot color) and tolerates `haven.Loading` by treating that vertex as matching target height for
@@ -147,9 +160,44 @@ All four types are plain data/logic classes with no dependency on `MCache`, `NCo
 renderer — `SurveyTerrainSnapshot.capture()` is the one method that touches `MCache`, and tests
 build snapshots directly via `SurveyTerrainSnapshot.forTesting()` instead.
 
-**Units:** everything works in the survey's own integer `dz` units plus its `gran`, converting to
-metres only where a limit (metres) and a difference (dz units) need to be compared. The 2.0 m
-limit itself lives in `SurveySettings.TERRAIN_MAX_SLOPE_METERS`.
+**Units:** everything works in the survey's own integer `dz` units, converting to metres only via
+the single centralized factor `SurveyConstraintValidator.metersPerDzUnit(gran)` (`1 / (gran *
+MCache.tilesz.x)`) wherever a limit (metres) and a difference (dz units) need to be compared.
+`SurveyTerrainSnapshot.capture()` also divides `MCache.getfz()` by `MCache.tilesz.x` at capture
+time, so `terrainHeight()` always returns real metres too — every value `SurveyConstraintValidator`
+and `SurveyDragConstraintSolver` compare is in metres by the time it's compared, with no scattered
+hardcoded `10`/`11` conversions anywhere else. The 2.0 m limit itself lives in
+`SurveySettings.TERRAIN_MAX_SLOPE_METERS`.
+
+### Regression: unit-conversion bug (fixed)
+
+The first version of this engine (opened as PR #33) computed `dzDiff / gran` and treated that
+result as metres directly, and `SurveyTerrainSnapshot.capture()` stored `MCache.getfz()` unchanged
+and labeled it "metres" in its own doc comment. Both were wrong in the same way: `getfz()` returns
+world-Z units, which are `MCache.tilesz.x` (11) times larger than a real metre (see above), so
+every comparison was effectively checking a limit about 11x too strict. In-game testing found
+ordinary edges rejected after roughly one 0.1 m soil increment instead of the expected ~20 — the
+"effective limit" came out to `2.0 / 11 ≈ 0.18 m`, exactly matching the reported symptom, and
+confirming the missing `/ MCache.tilesz.x` factor as the root cause rather than a logic error in
+the worsening-aware rule itself (which was, and remains, correct).
+
+**Why the original automated tests didn't catch it:** both test files used an unrealistic
+`gran = 10f` constant instead of the real client's `gran = 10f/11f`. With the (buggy) single
+division `dzDiff / gran`, `gran = 10f` happens to produce `dzDiff / 10`, which is numerically the
+*correct* metres value — by coincidence, not because the code was right. The tests were exercising
+a value that only looked right because the chosen test input silently cancelled out the bug. Fixed
+by changing both test files' `GRAN` constant to the real `10f / 11f`, which makes the (now
+corrected) `metersPerDzUnit()` factor still equal `1/10`, but would have made the original buggy
+formula produce `dzDiff * 1.1` — about 11x too large — so the existing assertions now also serve as
+regression tests for this exact bug.
+
+**The fix:** added `SurveyConstraintValidator.metersPerDzUnit(float gran)` as the single
+authoritative dz-to-metres conversion (`1.0 / (gran * MCache.tilesz.x)`), used by both the
+validator and the solver in place of the bare `/ gran` division, and corrected
+`SurveyTerrainSnapshot.capture()` to divide `MCache.getfz()` by `MCache.tilesz.x` before storing
+it. No change was needed to the worsening-aware comparison logic, the drag-solver's affine-edge
+math, or any rendering/UI code — this was purely a unit-conversion defect in how two already-right
+formulas were combined.
 
 **Worsening rule:** an edge is a blocking `VIOLATION` iff its candidate difference exceeds
 `max(limit, priorDifference)` — equivalent to "exceeds the limit AND is worse than it already
@@ -179,8 +227,13 @@ unrelated edits; editing an over-limit edge towards (but not past) legality is a
 editing it further isn't; missing outside terrain is reported as unknown, never as zero; a
 whole-survey translation and a corner tilt both clamp against the correct limiting edge; unknown
 outside terrain never clamps a drag (only surfaces as a warning flag); a zero-diff gesture is
-never clamped; and a fractional analytic boundary rounds conservatively rather than outward.
-`NConfigSyncKeysTest` was updated for the one new config key.
+never clamped; and a fractional analytic boundary rounds conservatively rather than outward. Added
+in the unit-conversion fix: both files now use the real client `gran = 10f/11f` instead of the
+original unrealistic `10f` (see "Regression" above), plus explicit cases for each of the 1/2/10/19/
+20-unit (0.1/0.2/1.0/1.9/2.0 m) raises individually, a 1.0 m-vs-2.5 m outside-boundary pair, and an
+assertion that `EdgeFinding.candidateDiffMeters` reports real metres (≈2.1) rather than the raw
+world-Z value the bug would have produced (≈23.1). `NConfigSyncKeysTest` was updated for the one
+new config key.
 
 **Not covered by automated tests** (needs the full widget/game harness, or live verification):
 Undo/Redo interaction with a clamped drag end-to-end through `LandSurvey`/`SurveyEditHistory`;
@@ -198,10 +251,11 @@ mode changes while a survey window is already open; multiple simultaneous survey
   render-pipeline surface small.
 - **Paved tiles, buildings, water-adjacency are not checked at all.** `Ridges.brokenp()` is
   captured in every `SurveyTerrainSnapshot` for a future rule to use, but no such rule exists yet.
-- **No opt-in developer diagnostic overlay** (per-vertex current/requested/applied/limiting-edge
-  readout) was added; `LandSurvey`'s new `terrlbl` status line (edge-over-limit count, worst
-  exceedance, or an "unverifiable nearby" message) is the only runtime visibility beyond the
-  vertex markers themselves.
+- **No opt-in developer diagnostic overlay** (a full per-vertex current/requested/applied readout)
+  was added; `LandSurvey`'s `terrlbl` status line (edge-over-limit count, worst exceedance, or an
+  "unverifiable nearby" message) now also appends the limiting edge's two vertex coordinates while
+  Constrain mode is actively clamping a drag (`LandSurvey.lastClamp`), but there's still no
+  always-available readout of, e.g., a specific selected vertex's raw dz/terrain values.
 - Constrain mode's clamp only ever restricts a drag to a smaller amount in the same direction as
   requested — it never offers a "snap to the nearest legal shape in some other direction"
   suggestion.
@@ -222,6 +276,7 @@ mode changes while a survey window is already open; multiple simultaneous survey
 5. Walk a survey's edge right up against unloaded terrain (e.g. a chunk boundary that hasn't
    rendered in yet) and confirm the status line reports "unverifiable," not a false "OK."
 6. Compare this validator's block point against the exact in-game soil-placement limit on fresh,
-   perfectly flat ground, to confirm the assumed `gran`-to-metres conversion matches the live
-   server (the engine itself never hardcodes `gran`, but the 2.0 m constant and this comparison
-   are the thing that would reveal a mismatch).
+   perfectly flat ground, to confirm the corrected `metersPerDzUnit()` conversion matches the live
+   server — this is the exact check that caught the original unit-conversion regression, so it's
+   worth re-confirming specifically: a vertex on flat ground should now accept roughly 20 units
+   (2.0 m) before Constrain mode stops it, not 1-2 units as in the regressed build.
