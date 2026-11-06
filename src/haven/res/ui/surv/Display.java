@@ -4,6 +4,8 @@ package haven.res.ui.surv;
 import haven.*;
 import haven.render.*;
 import haven.render.sl.*;
+import nurgling.survey.SurveySettings;
+import nurgling.survey.SurveySettings.VState;
 import java.util.*;
 import java.nio.*;
 import java.awt.Color;
@@ -30,13 +32,15 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
     public final MapView mv;
     public final MCache map;
     public final VertexArray va;
-    public final Model surface, vertices;
+    public final Model surface, vertices, wire;
     public Area tarea;
     public Coord selected = null;
     public boolean active = false, update;
     private final Collection<RenderTree.Slot> slots = new ArrayList<>(1);
     private final Map<RenderTree.Slot, RenderTree.Slot> selslots = new IdentityHashMap<>();
+    private final Map<RenderTree.Slot, RenderTree.Slot> wireslots = new IdentityHashMap<>();
     private Model selection = null;
+    private Area curSel = null;
     private int mapseq = -1, dataseq = -1;
 
     public Display(Data data, MapView mv) {
@@ -48,6 +52,30 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 	this.tarea = Area.corn(varea.ul, varea.br.sub(1, 1));
 	this.surface = new Model(Model.Mode.TRIANGLES, va, new Model.Indices(tarea.area() * 6, NumberFormat.UINT16, DataBuffer.Usage.STREAM, this::sfill));
 	this.vertices = new Model(Model.Mode.POINTS, va, null);
+	this.wire = new Model(Model.Mode.LINES, va, new Model.Indices(wirecount(varea), NumberFormat.UINT16, DataBuffer.Usage.STATIC, DataBuffer.Filler.of(wireidx(varea))));
+    }
+
+    private static int wirecount(Area varea) {
+	int w = varea.br.x - varea.ul.x, h = varea.br.y - varea.ul.y;
+	return(((w - 1) * h + w * (h - 1)) * 2);
+    }
+
+    private static short[] wireidx(Area varea) {
+	short[] ind = new short[wirecount(varea)];
+	int o = 0;
+	for(int y = varea.ul.y; y < varea.br.y; y++) {
+	    for(int x = varea.ul.x; x < varea.br.x - 1; x++) {
+		ind[o++] = (short)varea.ridx(Coord.of(x, y));
+		ind[o++] = (short)varea.ridx(Coord.of(x + 1, y));
+	    }
+	}
+	for(int x = varea.ul.x; x < varea.br.x; x++) {
+	    for(int y = varea.ul.y; y < varea.br.y - 1; y++) {
+		ind[o++] = (short)varea.ridx(Coord.of(x, y));
+		ind[o++] = (short)varea.ridx(Coord.of(x, y + 1));
+	    }
+	}
+	return(ind);
     }
 
     private Coord3f orig() {
@@ -119,19 +147,29 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 	return(ret);
     }
 
+    /* --- Fork-owned, settings-driven appearance. Every uniform below reads
+     * nurgling.survey.SurveySettings (backed by NConfig) with zero Pipe dependency, the same
+     * idiom as Glob.u_globtime: the value function runs fresh on every draw, so colour/opacity/
+     * size/visibility changes made in Nurgling Settings -> Game environment -> Survey Settings
+     * take effect immediately, with no shader recompilation and no vertex/index buffer rebuild. */
+    public static final Uniform u_colMatch = new Uniform(VEC4, "survcolm", p -> SurveySettings.vertexFColor(VState.MATCH));
+    public static final Uniform u_colFill  = new Uniform(VEC4, "survcolf", p -> SurveySettings.vertexFColor(VState.FILL));
+    public static final Uniform u_colDig   = new Uniform(VEC4, "survcold", p -> SurveySettings.vertexFColor(VState.DIG));
+    public static final Uniform u_szMatch  = new Uniform(FLOAT, "survszm", p -> SurveySettings.vertexSize(VState.MATCH));
+    public static final Uniform u_szFill   = new Uniform(FLOAT, "survszf", p -> SurveySettings.vertexSize(VState.FILL));
+    public static final Uniform u_szDig    = new Uniform(FLOAT, "survszd", p -> SurveySettings.vertexSize(VState.DIG));
+    public static final Uniform u_haloCol  = new Uniform(VEC4, "survhcol", p -> SurveySettings.selectionHighlightFColor());
+    public static final Uniform u_haloSz   = new Uniform(FLOAT, "survhsz", p -> SurveySettings.selectionHighlightSize());
+
     public static final Function vcol = new Function.Def(VEC4) {{
-	code.add(new If(ne(bitand(f_flags.ref(), l(4)), l(0)),
-			new Return(vec4(0.0, 0.0, 1.0, 1.0))));
-	code.add(new If(ne(bitand(f_flags.ref(), l(1)), l(0)),
-			new Return(vec4(0.0, 0.5, 1.0, 1.0))));
-	code.add(new If(ne(bitand(f_flags.ref(), l(2)), l(0)),
-			       new Return(vec4(1.0, 0.0, 1.0, 1.0))));
-	code.add(new Return(vec4(0.0, 1.0, 0.0, 1.0)));
+	code.add(new If(ne(bitand(f_flags.ref(), l(1)), l(0)), new Return(u_colFill.ref())));
+	code.add(new If(ne(bitand(f_flags.ref(), l(2)), l(0)), new Return(u_colDig.ref())));
+	code.add(new Return(u_colMatch.ref()));
     }};
     public static final Function vsize = new Function.Def(FLOAT) {{
-	code.add(new If(ne(bitand(v_flags.ref(), l(8)), l(0)),
-			new Return(l(7.0))));
-	code.add(new Return(l(3.0)));
+	code.add(new If(ne(bitand(v_flags.ref(), l(1)), l(0)), new Return(u_szFill.ref())));
+	code.add(new If(ne(bitand(v_flags.ref(), l(2)), l(0)), new Return(u_szDig.ref())));
+	code.add(new Return(u_szMatch.ref()));
     }};
     public static final ShaderMacro vshader = prog -> {
 	FragColor.fragcol(prog.fctx).mod(in -> vcol.call(), 0);
@@ -139,25 +177,65 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 	prog.vctx.ptsz.force();
     };
     public static final Pipe.Op vdraw = Pipe.Op.compose(new RUtils.AdHoc(vshader), States.Depthtest.none, States.maskdepth,
-							new Rendered.Order.Default(20102));
+							new Rendered.Order.Default(20103));
 
+    /* Halo pass redraws every vertex through the same point model, but only the flag-4
+     * ("selected") vertex gets non-zero size; everything else collapses to a zero-size point.
+     * This keeps the selected point's own status colour untouched (preserving what it's telling
+     * you about terrain) and layers a separately configurable ring on top instead of overriding
+     * it, per the Survey Settings "selected/hovered point highlight" requirement. */
+    public static final Function halocol = new Function.Def(VEC4) {{
+	code.add(new If(eq(bitand(f_flags.ref(), l(4)), l(0)), new Return(vec4(l(0.0), l(0.0), l(0.0), l(0.0)))));
+	code.add(new Return(u_haloCol.ref()));
+    }};
+    public static final Function halosize = new Function.Def(FLOAT) {{
+	code.add(new If(eq(bitand(v_flags.ref(), l(4)), l(0)), new Return(l(0.0))));
+	code.add(new Return(u_haloSz.ref()));
+    }};
+    public static final ShaderMacro haloshader = prog -> {
+	FragColor.fragcol(prog.fctx).mod(in -> halocol.call(), 0);
+	prog.vctx.ptsz.mod(in -> halosize.call(), 0);
+	prog.vctx.ptsz.force();
+    };
+    public static final Pipe.Op halodraw = Pipe.Op.compose(new RUtils.AdHoc(haloshader), States.Depthtest.none, States.maskdepth,
+							   new Rendered.Order.Default(20106));
+
+    public static final Uniform u_fillLow   = new Uniform(VEC4, "survflo", p -> SurveySettings.fcolor(SurveySettings.fillLowColor(), 100));
+    public static final Uniform u_fillHigh  = new Uniform(VEC4, "survfhi", p -> SurveySettings.fcolor(SurveySettings.fillHighColor(), 100));
+    public static final Uniform u_fillAlpha = new Uniform(FLOAT, "survfa", p -> SurveySettings.fillVisible() ? (SurveySettings.fillOpacity() / 100f) : 0f);
+    public static final Uniform u_heatmap   = new Uniform(FLOAT, "survhm", p -> SurveySettings.heatmapEnabled() ? 1f : 0f);
+    public static final Uniform u_hmMatch   = new Uniform(VEC4, "survhmm", p -> SurveySettings.vertexFColor(VState.MATCH));
+    public static final Uniform u_hmFill    = new Uniform(VEC4, "survhmf", p -> SurveySettings.vertexFColor(VState.FILL));
+    public static final Uniform u_hmDig     = new Uniform(VEC4, "survhmd", p -> SurveySettings.vertexFColor(VState.DIG));
+
+    /* Default (non-heatmap) mode keeps the original two-stop gradient idea (now configurable,
+     * default orange->pink) rather than the original's exact three-colour piecewise curve; the
+     * visual difference is a smoother single mix instead of a sharp midpoint, called out in the
+     * manual test checklist. Heatmap mode (opt-in) instead colours each surface fragment by the
+     * same dig/fill/match classification as the vertex dots, flat per status. */
     public static final Function scol = new Function.Def(VEC4) {{
-	code.add(new If(lt(f_elev.ref(), l(0.5)),
-			new Return(mix(vec4(1.0, 0.4, 0.0, 1.0), vec4(1.0, 0.0, 0.0, 1.0),
-				       mul(f_elev.ref(), l(2.0)))),
-			new Return(mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(1.0, 0.0, 0.43, 1.0),
-				       mul(sub(f_elev.ref(), l(0.5)), l(2.0))))));
+	code.add(new If(ne(u_heatmap.ref(), l(0.0)),
+			new Block(
+			    new If(ne(bitand(f_flags.ref(), l(1)), l(0)), new Return(u_hmFill.ref())),
+			    new If(ne(bitand(f_flags.ref(), l(2)), l(0)), new Return(u_hmDig.ref())),
+			    new Return(u_hmMatch.ref())
+			)));
+	code.add(new Return(mix(u_fillLow.ref(), u_fillHigh.ref(), f_elev.ref())));
     }};
     public static final ShaderMacro sshader = prog -> {
-	FragColor.fragcol(prog.fctx).mod(in -> mul(in, scol.call()), 0);
+	FragColor.fragcol(prog.fctx).mod(in -> mul(mul(in, scol.call()), vec4(l(1.0), l(1.0), l(1.0), u_fillAlpha.ref())), 0);
     };
     public static final Pipe.Op sdraw1 = Pipe.Op.compose(FragColor.slot.nil, new States.DepthBias(-2, -2), new Rendered.Order.Default(20100), States.facecull.nil);
-    public static final Pipe.Op sdraw2 = Pipe.Op.compose(new RUtils.AdHoc(sshader), new BaseColor(255, 255, 255, 128), new States.DepthBias(-2, -2), States.facecull.nil,
+    public static final Pipe.Op sdraw2 = Pipe.Op.compose(new RUtils.AdHoc(sshader), new States.DepthBias(-2, -2), States.facecull.nil,
 							 new Rendered.Order.Default(20101));
 
-    public static final Pipe.Op seldraw = Pipe.Op.compose(new States.LineWidth(1), new BaseColor(0, 0, 255, 255), States.Depthtest.none, States.maskdepth,
-							  new Rendered.Order.Default(20103));
+    private static Pipe.Op lineOp(Color col, int opacitypct, int width, int order) {
+	return(Pipe.Op.compose(new BaseColor(SurveySettings.fcolor(col, opacitypct)), new States.LineWidth(Math.max(1, width)),
+			       States.Depthtest.none, States.maskdepth, new Rendered.Order.Default(order)));
+    }
+
     public void select(Area area) {
+	curSel = area;
 	if(selection != null) {
 	    selslots.values().forEach(RenderTree.Slot::remove);
 	    selslots.clear();
@@ -176,24 +254,51 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 	    for(int y = area.br.y; y >= area.ul.y; y--)
 		ind[o++] = (short)data.varea.ridx(Coord.of(area.ul.x, y));
 	    selection = new Model(Model.Mode.LINE_STRIP, va, new Model.Indices(ind.length, NumberFormat.UINT16, DataBuffer.Usage.STATIC, DataBuffer.Filler.of(ind)));
-	    for(RenderTree.Slot slot : slots)
-		selslots.put(slot, slot.add(selection, seldraw));
+	    if(SurveySettings.outlineVisible()) {
+		Pipe.Op seldraw = lineOp(SurveySettings.outlineColor(), SurveySettings.outlineOpacity(), SurveySettings.outlineWidth(), 20104);
+		for(RenderTree.Slot slot : slots)
+		    selslots.put(slot, slot.add(selection, seldraw));
+	    }
 	}
+    }
+
+    private void addWire(RenderTree.Slot slot) {
+	if(SurveySettings.wireVisible()) {
+	    Pipe.Op wiredraw = lineOp(SurveySettings.wireColor(), SurveySettings.wireOpacity(), SurveySettings.wireWidth(), 20102);
+	    wireslots.put(slot, slot.add(wire, wiredraw));
+	}
+    }
+
+    /**
+     * Rebuilds the outline/wireframe render passes from current settings. Colour/opacity/size of
+     * the vertex dots, halo and surface fill never need this -- they read live through the
+     * zero-dependency uniforms above -- but a visibility toggle or a line-width change for the
+     * outline/wireframe has to add or remove a whole render pass, which this does on demand
+     * (called by the Survey Settings panel's save()). Cheap: no shader recompilation, just
+     * Pipe.Op/Slot bookkeeping for two small static line models.
+     */
+    public void refreshStyle() {
+	select(curSel);
+	wireslots.values().forEach(RenderTree.Slot::remove);
+	wireslots.clear();
+	for(RenderTree.Slot slot : slots)
+	    addWire(slot);
     }
 
     public void added(RenderTree.Slot slot) {
 	slot.ostate(Location.xlate(Coord3f.of(data.varea.ul.x * (float)tilesz.x, -data.varea.ul.y * (float)tilesz.y, 0)));
 	slot.add(surface, sdraw1);
 	slot.add(surface, sdraw2);
+	addWire(slot);
 	slot.add(vertices, vdraw);
-	if(selection != null)
-	    selslots.put(slot, slot.add(selection, seldraw));
+	slot.add(vertices, halodraw);
 	slots.add(slot);
     }
 
     public void removed(RenderTree.Slot slot) {
 	slots.remove(slot);
 	selslots.remove(slot);
+	wireslots.remove(slot);
     }
 
     public void autogtick(Render g) {

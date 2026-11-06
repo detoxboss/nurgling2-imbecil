@@ -379,6 +379,76 @@ dropped and no duplicate was introduced.
 **Superseded when:** never wholesale — this is an open-ended growing list, not a single override to
 retire. Individual keys retire only when the fork feature they back is removed.
 
+## Land Survey editor overhaul (Survey Settings, lock fix, undo/redo, height-overflow guard)
+
+**Files:**
+- `src/nurgling/survey/SurveySettings.java` (new, fork-owned) — appearance/behaviour model, backed
+  by `NConfig`; every getter reads live so the renderer never needs a restart or rebuild to pick up
+  a settings change.
+- `src/nurgling/survey/SurveyEditHistory.java` (new, fork-owned) — bounded per-instance undo/redo.
+- `src/nurgling/widgets/nsettings/SurveySettingsPanel.java` (new) — registered in
+  `NSettingsWindow.fillSettings()` under Game environment → Survey Settings; auto-indexed by the
+  existing settings search (`SettingsIndexer`), no special registration needed.
+- `src/haven/res/ui/surv/HeightRangeExceededException.java` (new) — thrown by `Data.encode()`.
+- `src/haven/res/ui/surv/Data.java` — `encode()` now rejects a target-height span over 255 units
+  instead of silently wrapping (the unsigned-byte relative encoding cannot represent more).
+- `src/haven/res/ui/surv/Display.java`, `src/haven/res/ui/surv/LandSurvey.java` (both
+  `@FromResource`, upstream-owned) — see below.
+
+**Fork behavior:**
+- `Display`'s vertex-dot colors/opacity/sizes/visibility (per status: match/fill/dig), the
+  selected-point halo, and the surface fill's opacity/gradient/heatmap all read through
+  zero-Pipe-dependency `Uniform`s (the same idiom as `Glob.u_globtime`) straight from
+  `SurveySettings`, so Settings → Save takes effect on any open survey immediately with no shader
+  recompilation and no vertex/index buffer rebuild.
+- The sub-region selection outline and the new optional cell wireframe are separate line-mode
+  render passes whose color/opacity/width/visibility require rebuilding just those two passes
+  (`Display.refreshStyle()`), triggered by `SurveySettingsPanel.save()` via
+  `LandSurvey.refreshAllStyles()` (a `WeakHashMap`-backed registry of open survey windows — the
+  only piece of fork-owned global state here, used purely to broadcast the settings-save refresh).
+- The selected vertex no longer has its status color overridden; a halo pass (reusing the flag-4
+  "selected" bit already encoded per-vertex) draws a separately configurable ring on top instead,
+  so the dig/fill/match color is always visible even while selected or dragging.
+- `LandSurvey`'s lock checkbox now uses a survey-local `checkhit()` override (whole rectangle, not
+  `ICheckBox`'s default alpha-based hit test) instead of a global `ICheckBox` change, plus a
+  tooltip. A brand-new survey defaults optimistically to unlocked (configurable via
+  "New surveys start unlocked"); a reopened survey defaults to locked; either way the server's own
+  `lock` message always wins once it arrives — this changes only the client's guess while waiting
+  for it, not the lock protocol.
+- Fixed a verified bug: `Ground Level`/`Ground Plane` mutated `data.wz`/`dz` but never called
+  `send()`, so the server never learned the new target heights until an unrelated drag happened to
+  trigger one. Both now go through a shared `commit()` that pushes undo history and sends.
+- Undo/redo: one history entry per completed drag (`Mover`/`CMover`, committed at mouse-up, same
+  point they already call `send()`) or per `Ground Level`/`Ground Plane` click; capped at
+  `surveyUndoDepth` (default 20); new edits clear the redo branch; an incoming `data` message that
+  doesn't match what this client just sent (i.e. authored by someone/something else) drops the
+  whole history rather than risk replaying stale local entries over it. History lives on the
+  `LandSurvey` instance, not a global, and needs no explicit teardown.
+- `Ctrl+Z`/`Ctrl+Y`/`Ctrl+Shift+Z` are handled in `LandSurvey.keydown()`, which upstream's own
+  input routing only reaches once no focused child (chat, a text field, inventory, ...) has already
+  consumed the key, so this cannot steal input meant elsewhere; visible Undo/Redo buttons exist
+  regardless.
+
+**Why:** Requested overhaul of the existing Land Survey editor (settings-panel appearance controls,
+lock-button usability, undo/redo, and height-encoding safety) without duplicating the editor or
+touching the server protocol; see the PR for the full requirements.
+
+**Minimum hook that must survive:** `Data.encode()`'s return type now includes a checked
+`throws HeightRangeExceededException` — a hafen integration that regenerates `Data.java` from
+upstream will drop this unless re-applied. `Display`/`LandSurvey`'s `@FromResource(name = "ui/surv",
+version = 46)` annotation must keep matching the server's resource version; this change does not
+touch the wire protocol (`data`/`lock`/`lvl`/`rm` messages are unchanged) so it is independent of
+that version number.
+
+**Verify:** `ant jar`; `ant test` (see `test/haven/res/ui/surv/DataHeightRangeTest.java` for the
+height-overflow boundary). Manual in-game checks are required for anything rendering-related (GPU
+line-width behavior at width > 1 could not be verified from this environment) — see the PR's manual
+smoke-test checklist.
+
+**Superseded when:** a future hafen integration changes `ui/surv`'s resource version or the
+`data`/`lock` message shapes; re-verify this entire entry against the new `Display.java`/
+`LandSurvey.java` at that point.
+
 ## Fork `BotRegistry` registrations
 
 **File:** `src/nurgling/actions/bots/registry/BotRegistry.java`

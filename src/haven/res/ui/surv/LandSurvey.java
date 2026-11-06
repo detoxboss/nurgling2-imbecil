@@ -6,11 +6,15 @@ import haven.render.*;
 import haven.render.sl.*;
 import nurgling.NStyle;
 import nurgling.conf.NDragProp;
+import nurgling.survey.SurveyEditHistory;
+import nurgling.survey.SurveySettings;
 import nurgling.widgets.NDraggableWidget;
 
 import java.util.*;
+import java.util.Collections;
 import java.nio.*;
 import java.awt.Color;
+import java.awt.event.KeyEvent;
 import static haven.MCache.tilesz;
 import static haven.render.sl.Cons.*;
 import static haven.render.sl.Type.*;
@@ -19,42 +23,78 @@ import static haven.render.sl.Type.*;
 public class LandSurvey extends Window {
     public final Area area;
     public final Data data;
-    public final Label zdlbl, wlbl, dlbl;
+    public final Label zdlbl, wlbl, dlbl, errlbl;
     public Area selection;
     private boolean inited = false;
+    private final boolean isNew;
     private MapView mv;
     private Display dsp;
     private RenderTree.Slot s_dsp;
+    private final SurveyEditHistory history = new SurveyEditHistory();
+    private Button btnUndo, btnRedo;
 
-	private ICheckBox btnLock;
+    private ICheckBox btnLock;
 
-    public LandSurvey(Area area, Data data) {
+    /* Fork addition: lets the Survey Settings panel push outline/wireframe changes to every
+     * currently open survey window without a client restart. Membership only, no state. */
+    private static final Set<LandSurvey> open = Collections.newSetFromMap(new WeakHashMap<>());
+    public static void refreshAllStyles() {
+	for(LandSurvey s : open)
+	    if(s.dsp != null)
+		s.dsp.refreshStyle();
+    }
+
+    public LandSurvey(Area area, Data data, boolean isNew) {
 	super(Coord.z, "Land survey", true);
 	this.area = area;
 	this.data = data;
-	Widget prev = add(new Label(String.format("Area: %d m\u00b2", area.area())), 0, 0);
+	this.isNew = isNew;
+	Widget prev = add(new Label(String.format("Area: %d m²", area.area())), 0, 0);
 	add(btnLock = new ICheckBox(NStyle.locki[0], NStyle.locki[1], NStyle.locki[2], NStyle.locki[3])
 	{
+		/* The lock icon's transparent centre otherwise rejects clicks there (alpha-based
+		 * hit test in ICheckBox.checkhit): the whole visible button rectangle should
+		 * register, survey-lock-specific rather than a blanket ICheckBox change. */
 		@Override
-		public void changed(boolean val)
-		{
-			super.changed(val);
-			lock(val);
+		public boolean checkhit(Coord c) {
+		    return(c.isect(Coord.z, sz));
 		}
+
+		@Override
+		public Object tooltip(Coord c, Widget prev) {
+		    return(a ? "Survey editing is locked. Click to unlock."
+			     : "Survey editing is unlocked. Click to lock.");
+		}
+
+	    @Override
+	    public void changed(boolean val)
+	    {
+		super.changed(val);
+		lock(val);
+	    }
 	}, prev.pos("ur").add(UI.scale(200) - NStyle.locki[0].sz().x - NStyle.locki[0].sz().x / 2, 0));
-	btnLock.a = true;
+	/* Optimistic client-side default only -- the server's own "lock" message (handled in
+	 * uimsg below) always wins once it arrives. A brand-new survey defaults to unlocked (per
+	 * the "Survey Settings -> new surveys start unlocked" preference) so the creator isn't
+	 * stuck clicking through a locked icon; an existing survey being reopened defaults to
+	 * locked, the safe guess, until the server confirms otherwise. */
+	btnLock.a = isNew ? !SurveySettings.newSurveyUnlocked() : true;
 	zdlbl = add(new Label("..."), prev.pos("bl").adds(0, 1));
 	wlbl = add(new Label("..."), zdlbl.pos("bl").adds(0, 1));
 	dlbl = add(new Label("..."), wlbl.pos("bl").adds(0, 1));
+	errlbl = add(new Label(""), dlbl.pos("bl").adds(0, 1));
 	prev = add(new Button(UI.scale(125), "Ground level", false).action(this::initsurf),
-		   dlbl.pos("bl").adds(0, 20));
+		   errlbl.pos("bl").adds(0, 10));
 	add(new Button(UI.scale(125), "Ground plane", false).action(this::initplane),
 	    prev.pos("ur").adds(10, 0));
 	prev = add(new Button(UI.scale(125), "Dig", false).action(() -> wdgmsg("lvl")),
 		   prev.pos("bl").adds(0, 10));
 	add(new Button(UI.scale(125), "Remove", false).action(()-> wdgmsg("rm")),
 	    prev.pos("ur").adds(10, 0));
-
+	prev = add(btnUndo = new Button(UI.scale(60), "Undo", false).action(this::undo),
+		   prev.pos("bl").adds(0, 10));
+	add(btnRedo = new Button(UI.scale(60), "Redo", false).action(this::redo),
+	    prev.pos("ur").adds(10, 0));
 
 	pack();
     }
@@ -63,8 +103,9 @@ public class LandSurvey extends Window {
 	Area area = Area.corn((Coord)args[0], (Coord)args[1]);
 	float gran = ((Number)args[2]).floatValue() / 11;
 	Data data = new Data(Area.corni(area.ul, area.br), gran);
-	LandSurvey srv = new LandSurvey(area, data);
-	if(args[3] != null) {
+	boolean isNew = (args[3] == null);
+	LandSurvey srv = new LandSurvey(area, data, isNew);
+	if(!isNew) {
 	    data.decode(Utils.iv(args[3]), (byte[])args[4]);
 	    srv.inited = true;
 	}
@@ -78,18 +119,20 @@ public class LandSurvey extends Window {
 	s_dsp = mv.drawadd(dsp);
 	select(area);
 	mode(new Idle());
+	open.add(this);
     }
 
     private void initsurf() {
 	MCache map = mv.ui.sess.glob.map;
+	float[] before = data.wz.clone();
 	for(Coord vc : data.varea)
 	    data.wz[data.varea.ridx(vc)] = data.dz[data.varea.ridx(vc)] = (int)Math.round(map.getfz(vc) * data.gran);
-	data.seq++;
-	upd = true;
+	commit(before);
     }
 
     private void initplane() {
 	MCache map = mv.ui.sess.glob.map;
+	float[] before = data.wz.clone();
 	double zs = 0;
 	int nv = 0;
 	for(Coord vc : data.varea) {
@@ -99,8 +142,20 @@ public class LandSurvey extends Window {
 	int z = Math.round((float)(zs / nv) * data.gran);
 	for(int i = 0; i < data.wz.length; i++)
 	    data.wz[i] = data.dz[i] = z;
+	commit(before);
+    }
+
+    /** Pushes a whole-array edit (Ground Level/Ground Plane) and sends it. Fixes a verified bug:
+     * neither action previously called send(), so the server never learned about the new
+     * target heights until some unrelated drag triggered a send(). */
+    private void commit(float[] before) {
+	int[] idx = new int[data.wz.length];
+	for(int i = 0; i < idx.length; i++)
+	    idx[i] = i;
+	history.push(idx, before, data.wz.clone());
 	data.seq++;
 	upd = true;
+	send();
     }
 
     private void updmap() {
@@ -127,8 +182,56 @@ public class LandSurvey extends Window {
 	wdgmsg("lock", enabled ? 0 : 1);
     }
 
+    /**
+     * Sends the current target heights. Height safety (fork addition): Data.encode() now
+     * rejects spans that no longer fit the protocol's unsigned-byte relative encoding instead of
+     * silently wrapping. On rejection the submission is dropped, the editable state and undo
+     * history are left intact, and the user gets a visible error -- per spec, this does not
+     * clamp or otherwise alter the data.
+     */
     private void send() {
-	wdgmsg("data", data.encode());
+	try {
+	    wdgmsg("data", data.encode());
+	    errlbl.settext("");
+	} catch(HeightRangeExceededException e) {
+	    errlbl.settext(String.format("Height span too large to submit (%d > %d). Undo to continue.",
+					  e.hi - e.lo, Data.MAX_SPAN));
+	}
+    }
+
+    private void undo() {
+	if(history.undo(data)) {
+	    data.dupdate();
+	    data.seq++;
+	    upd = true;
+	    send();
+	}
+    }
+
+    private void redo() {
+	if(history.redo(data)) {
+	    data.dupdate();
+	    data.seq++;
+	    upd = true;
+	    send();
+	}
+    }
+
+    /* Ctrl+Z/Ctrl+Y (and Ctrl+Shift+Z) only fire here: Window.keydown is only reached once no
+     * focused child (chat, a text field, inventory, ...) has already consumed the key, so this
+     * never steals input meant elsewhere. */
+    public boolean keydown(KeyDownEvent ev) {
+	if(ui.modctrl) {
+	    if((ev.code == KeyEvent.VK_Z) && !ui.modshift) {
+		undo();
+		return(true);
+	    }
+	    if((ev.code == KeyEvent.VK_Y) || ((ev.code == KeyEvent.VK_Z) && ui.modshift)) {
+		redo();
+		return(true);
+	    }
+	}
+	return(super.keydown(ev));
     }
 
     private EventHandler<MouseEvent> mode = null;
@@ -220,6 +323,7 @@ public class LandSurvey extends Window {
 	public final Area area;
 	public final UI.Grab grab;
 	public final float[] sz;
+	public final int[] gidx;
 	public final float zsz;
 
 	public Mover(Coord vc, Area area, Coord sc) {
@@ -228,8 +332,11 @@ public class LandSurvey extends Window {
 	    this.area = area;
 	    this.zsz = dsp.zsize(vc);
 	    this.sz = new float[area.area()];
-	    for(Coord iv : area)
+	    this.gidx = new int[area.area()];
+	    for(Coord iv : area) {
+		gidx[area.ridx(iv)] = data.varea.ridx(iv);
 		this.sz[area.ridx(iv)] = data.wz[data.varea.ridx(iv)];
+	    }
 	    grab = mv.ui.grabmouse(mv);
 	    dsp.active = true;
 	    dsp.update = true;
@@ -248,6 +355,10 @@ public class LandSurvey extends Window {
 		    dsp.active = false;
 		    dsp.update = true;
 		    grab.remove();
+		    float[] after = new float[gidx.length];
+		    for(int i = 0; i < gidx.length; i++)
+			after[i] = data.wz[gidx[i]];
+		    history.push(gidx, sz, after);
 		    send();
 		    mode(new Idle());
 		    return(true);
@@ -263,6 +374,7 @@ public class LandSurvey extends Window {
 	public final Area area;
 	public final UI.Grab grab;
 	public final float[] sz;
+	public final int[] gidx;
 	public final float zsz;
 
 	public CMover(Coord vc, Area area, String corn, Coord sc) {
@@ -272,8 +384,11 @@ public class LandSurvey extends Window {
 	    this.corn = corn;
 	    this.zsz = dsp.zsize(vc);
 	    this.sz = new float[area.area()];
-	    for(Coord iv : area)
+	    this.gidx = new int[area.area()];
+	    for(Coord iv : area) {
+		gidx[area.ridx(iv)] = data.varea.ridx(iv);
 		this.sz[area.ridx(iv)] = data.wz[data.varea.ridx(iv)];
+	    }
 	    grab = mv.ui.grabmouse(mv);
 	    dsp.active = true;
 	    dsp.update = true;
@@ -301,6 +416,10 @@ public class LandSurvey extends Window {
 		    dsp.active = false;
 		    dsp.update = true;
 		    grab.remove();
+		    float[] after = new float[gidx.length];
+		    for(int i = 0; i < gidx.length; i++)
+			after[i] = data.wz[gidx[i]];
+		    history.push(gidx, sz, after);
 		    send();
 		    mode(new Idle());
 		    return(true);
@@ -316,7 +435,6 @@ public class LandSurvey extends Window {
 	if(!inited) {
 	    try {
 		initplane();
-		send();
 		inited = true;
 	    } catch(Loading l) {}
 	}
@@ -330,12 +448,21 @@ public class LandSurvey extends Window {
 		}
 	    }
 	}
+	if(btnUndo != null) {
+	    btnUndo.disable(!history.canUndo());
+	    btnRedo.disable(!history.canRedo());
+	}
 	super.tick(dt);
     }
 
     public void uimsg(String name, Object... args) {
 	if(name == "data") {
+	    float[] pre = data.wz.clone();
 	    data.decode(Utils.iv(args[0]), (byte[])args[1]);
+	    /* If this echoes our own just-sent edit, wz comes back unchanged and history survives
+	     * intact. If it reflects someone (or something) else's change instead, replaying our
+	     * local undo/redo entries over it would clobber that change, so drop the history. */
+	    history.onExternalData(pre, data.wz);
 	    upd = true;
 	} else if(name == "lock") {
 	    btnLock.a = !Utils.bv(args[0]);
@@ -345,6 +472,7 @@ public class LandSurvey extends Window {
     }
 
     public void destroy() {
+	open.remove(this);
 	mode(null);
 	if(s_dsp != null)
 	    s_dsp.remove();
