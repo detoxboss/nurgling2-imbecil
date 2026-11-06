@@ -156,6 +156,34 @@ public class SurveySettings {
         return flag(NConfig.Key.surveyNewUnlocked, true);
     }
 
+    /** Verified terraforming slope limit (metres) -- see SurveyConstraintValidator's class doc
+     *  for the evidence. Not currently user-configurable: changing it would need the same
+     *  in-game verification the 2.0 m figure itself does. */
+    public static final double TERRAIN_MAX_SLOPE_METERS = 2.0;
+
+    public static SurveyConstraintValidator.Mode terrainConstraintMode() {
+        Object v = NConfig.get(NConfig.Key.surveyTerrainConstraintMode);
+        if(v instanceof String) {
+            try {
+                return SurveyConstraintValidator.Mode.valueOf((String)v);
+            } catch(IllegalArgumentException e) {
+                // fall through to default
+            }
+        }
+        return SurveyConstraintValidator.Mode.WARN;
+    }
+
+    public static void setTerrainConstraintMode(SurveyConstraintValidator.Mode mode) {
+        NConfig.set(NConfig.Key.surveyTerrainConstraintMode, mode.name());
+    }
+
+    /** Fixed (not user-configurable) colours for the terrain-constraint vertex overlay -- a
+     *  separate halo-style render pass, like the selection highlight, so the normal
+     *  green/blue/purple status dot underneath is never hidden or replaced. */
+    public static final Color TERRAIN_VIOLATION_COLOR = new Color(255, 40, 40);
+    public static final Color TERRAIN_UNKNOWN_COLOR = new Color(255, 200, 0);
+    public static final float TERRAIN_MARKER_SIZE = 13f;
+
     public static FColor fcolor(Color c, int opacityPct) {
         return new FColor(c.getRed() / 255f, c.getGreen() / 255f, c.getBlue() / 255f, opacityPct / 100f);
     }

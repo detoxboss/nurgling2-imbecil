@@ -433,6 +433,66 @@ retire. Individual keys retire only when the fork feature they back is removed.
 lock-button usability, undo/redo, and height-encoding safety) without duplicating the editor or
 touching the server protocol; see the PR for the full requirements.
 
+## Land Survey terrain constraint engine (Phase 2: slope validation, Off/Warn/Constrain)
+
+**Files:**
+- `src/nurgling/survey/SurveyTerrainSnapshot.java` (new) — immutable capture of real terrain
+  elevations (metres, via `MCache.getfz`) and cliff-tile classification (`Ridges.brokenp`) around
+  a survey's vertex area plus a one-vertex outside ring. Absence means unknown, never zero.
+- `src/nurgling/survey/SurveyConstraintResult.java` (new) — validation outcome: overall status
+  (`VALID`/`VIOLATION`/`UNKNOWN`) plus the specific non-valid edges found.
+- `src/nurgling/survey/SurveyConstraintValidator.java` (new) — the deterministic, render- and
+  NConfig-independent slope rule itself (~2.0 m between connected vertices; see the Phase 2
+  investigation report linked from `docs/README.md` for what is and isn't verified about this).
+  Takes explicit `Area`/`gran`/dz-array/`SurveyTerrainSnapshot`/limit parameters rather than
+  reading `SurveySettings`/`NConfig`, so it's exercised with synthetic grids in
+  `test/nurgling/survey/SurveyConstraintValidatorTest.java` without touching game resources.
+- `src/nurgling/survey/SurveyDragConstraintSolver.java` (new) — finds the largest in-bounds drag
+  amount for one `Mover`/`CMover` gesture without distorting its shape (never clamps vertices
+  independently); exact per-edge analytic solve, not a search, since each edge's height
+  difference is affine in the gesture's one scalar parameter. See
+  `test/nurgling/survey/SurveyDragConstraintSolverTest.java`.
+- `src/nurgling/survey/SurveySettings.java` — added `terrainConstraintMode()` /
+  `setTerrainConstraintMode()` (backed by the new `NConfig.Key.surveyTerrainConstraintMode`,
+  default `WARN`) and fixed (not user-configurable) violation/uncertain marker colors.
+- `src/nurgling/widgets/nsettings/SurveySettingsPanel.java` — new "Terrain Constraints" section:
+  an Off/Warn/Constrain `haven.RadioGroup`.
+- `src/haven/res/ui/surv/Display.java`, `src/haven/res/ui/surv/LandSurvey.java` (both
+  `@FromResource`, upstream-owned) — see below.
+- `src/nurgling/NConfig.java` — one new key, `surveyTerrainConstraintMode` (String, `"OFF"` /
+  `"WARN"` / `"CONSTRAIN"`, default `"WARN"`).
+
+**Fork behavior:**
+- `LandSurvey.updmap()` (already called whenever the committed shape or map changes) now also
+  runs `SurveyConstraintValidator.validateAbsolute()` against the live committed `dz` shape and a
+  cached `SurveyTerrainSnapshot` (rebuilt only when `MCache.chseq` changes), updating a new status
+  label (`terrlbl`) and `Display`'s violation/uncertain vertex marker sets. This runs in Warn and
+  Constrain mode; Off skips it entirely. Because this already fires every tick while `upd` is set
+  (which a drag does continuously), Warn mode gets live drag feedback for free, with no separate
+  per-mouse-move validation pass.
+- `LandSurvey.Mover`/`CMover` each now also capture `priorDz` (the committed `dz` shape at gesture
+  start) and a per-vertex `coeff` array (1 for `Mover`; the same bilinear corner weight `CMover`
+  already computed for its interpolation, factored out so the solver can use it too) and route
+  the requested `diff` through `LandSurvey.clampDrag()`. In Constrain mode this clamps `diff` to
+  `SurveyDragConstraintSolver`'s answer before applying it; Off/Warn pass `diff` through
+  unchanged. Ground Level/Ground Plane/Undo/Redo are not separately gated — they already route
+  through `updmap()`'s status refresh, and per spec are never auto-corrected, only warned about.
+- `Display` gained a third halo-style vertex render pass (same idiom as the existing selection
+  halo), driven by two new per-vertex flag bits (16 = confirmed violation, 32 = unverifiable);
+  it layers a ring on top without ever touching the existing status-dot color/bits, so a
+  violation marker and the normal green/blue/purple dot are both visible together.
+- Diagonal (corner-to-corner) vertex pairs are deliberately **not** checked by default
+  (`SurveyConstraintValidator.CHECK_DIAGONALS = false`) — unverified against the server; see the
+  class doc for the exact in-game test that would resolve it.
+- Edge-highlighting (as opposed to vertex marking) and paved-tile/obstruction detection beyond
+  the existing `Ridges.brokenp` cliff-tile check are explicitly out of scope for this PR; see its
+  description for the full list of known limitations and proposed follow-ups.
+
+**Why:** Phase 2 of the Land Survey overhaul — stop users from dragging a survey into a shape the
+server's terraforming rules can't actually produce, without hard-blocking edits whose legality
+under that rule isn't actually verified; see the PR for the full requirements and the
+investigation report for the evidence behind the ~2.0 m figure and what remains unconfirmed.
+
 **Minimum hook that must survive:** `Data.encode()`'s return type now includes a checked
 `throws HeightRangeExceededException` — a hafen integration that regenerates `Data.java` from
 upstream will drop this unless re-applied. `Display`/`LandSurvey`'s `@FromResource(name = "ui/surv",

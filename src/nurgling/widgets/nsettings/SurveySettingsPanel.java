@@ -3,6 +3,8 @@ package nurgling.widgets.nsettings;
 import haven.*;
 import haven.res.ui.surv.LandSurvey;
 import nurgling.NConfig;
+import nurgling.survey.SurveyConstraintValidator;
+import nurgling.survey.SurveySettings;
 import nurgling.widgets.NColorWidget;
 
 import java.awt.Color;
@@ -48,6 +50,9 @@ public class SurveySettingsPanel extends Panel {
 
         int undoDepth;
         boolean newUnlocked;
+
+        /** Index into SurveyConstraintValidator.Mode.values(): Off=0, Warn=1, Constrain=2. */
+        int terrainMode;
     }
 
     private final S t = new S();
@@ -56,6 +61,7 @@ public class SurveySettingsPanel extends Panel {
     private final S pending = new S();
 
     private CheckBox matchVisible, fillVisible, digVisible, selVisible, outlineVisible, wireVisible, surfVisible, heatmap, newUnlocked;
+    private RadioGroup terrainMode;
     private NColorWidget matchColor, fillColor, digColor, selColor, outlineColor, wireColor, surfLow, surfHigh;
     private HSlider matchOpacity, fillOpacity, digOpacity, matchSize, fillSize, digSize, selSize,
         outlineOpacity, outlineWidth, wireOpacity, wireWidth, surfOpacity, undoDepth;
@@ -167,6 +173,15 @@ public class SurveySettingsPanel extends Panel {
             public void set(boolean val) { a = val; }
         }, x0);
 
+        section("Terrain Constraints (approximate 2.0 m terraforming slope limit)");
+        terrainMode = new RadioGroup(content) {
+            public void changed(int btn, String lbl) { pending.terrainMode = btn; }
+        };
+        for(String lbl : new String[] {"Off", "Warn", "Constrain"}) {
+            RadioGroup.RadioButton rb = terrainMode.add(lbl, new Coord(x0, y));
+            y += rb.sz.y + rowGap;
+        }
+
         y += sectionGap - rowGap;
         put(new Button(UI.scale(140), "Reset to defaults", false).action(this::resetDefaults), x0);
 
@@ -250,6 +265,8 @@ public class SurveySettingsPanel extends Panel {
         pending.undoDepth = 20;
         pending.newUnlocked = true;
 
+        pending.terrainMode = SurveyConstraintValidator.Mode.WARN.ordinal();
+
         applyToWidgets(pending);
     }
 
@@ -291,6 +308,8 @@ public class SurveySettingsPanel extends Panel {
         t.undoDepth = intOf(NConfig.Key.surveyUndoDepth, 20);
         t.newUnlocked = boolOf(NConfig.Key.surveyNewUnlocked, true);
 
+        t.terrainMode = SurveySettings.terrainConstraintMode().ordinal();
+
         applyToWidgets(t);
     }
 
@@ -310,6 +329,7 @@ public class SurveySettingsPanel extends Panel {
             pending.surfVisible = src.surfVisible; pending.surfOpacity = src.surfOpacity;
             pending.surfLow = src.surfLow; pending.surfHigh = src.surfHigh; pending.heatmap = src.heatmap;
             pending.undoDepth = src.undoDepth; pending.newUnlocked = src.newUnlocked;
+            pending.terrainMode = src.terrainMode;
         }
 
         matchColor.color = pending.matchColor; fillColor.color = pending.fillColor; digColor.color = pending.digColor;
@@ -352,6 +372,8 @@ public class SurveySettingsPanel extends Panel {
         undoDepth.val = pending.undoDepth;
         undoDepthLbl.settext("Undo history depth " + pending.undoDepth);
         newUnlocked.a = pending.newUnlocked;
+
+        terrainMode.check(pending.terrainMode);
     }
 
     @Override
@@ -391,6 +413,8 @@ public class SurveySettingsPanel extends Panel {
 
         NConfig.set(NConfig.Key.surveyUndoDepth, undoDepth.val);
         NConfig.set(NConfig.Key.surveyNewUnlocked, newUnlocked.a);
+
+        SurveySettings.setTerrainConstraintMode(SurveyConstraintValidator.Mode.values()[pending.terrainMode]);
 
         NConfig.needUpdate();
         LandSurvey.refreshAllStyles();

@@ -166,6 +166,8 @@ public class NConfig
         surveyWireColor, surveyWireOpacity, surveyWireWidth, surveyWireVisible,
         surveyFillVisible, surveyFillOpacity, surveyFillLowColor, surveyFillHighColor, surveyHeatmapEnabled,
         surveyUndoDepth, surveyNewUnlocked,
+        // Phase 2: terrain slope constraint engine, see nurgling.survey.SurveyConstraintValidator
+        surveyTerrainConstraintMode,
         curioFinishedSound,
         keyboardFocusGuard,     // FocusGuard: text inputs only take keys after being clicked
         rememberInvListFilters, // InventoryListFilters: new inventories inherit the active one's list filters
@@ -528,6 +530,7 @@ public class NConfig
         conf.put(Key.surveyHeatmapEnabled, false);
         conf.put(Key.surveyUndoDepth, 20);
         conf.put(Key.surveyNewUnlocked, true);
+        conf.put(Key.surveyTerrainConstraintMode, "WARN");
         conf.put(Key.studyReportGhosts, "");
         conf.put(Key.showStudyReportGhosts, true);
         conf.put(Key.curioFinishedSound, true);

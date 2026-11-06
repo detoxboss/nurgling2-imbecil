@@ -25,8 +25,10 @@ class NConfigSyncKeysTest {
         // 2026-11-05 sync (mapClaimsShown, showThingwallLinks, botFavourites, disableEasterEggs,
         // easterEggSeen) + 1 fork key from the same sync (shoretracerprop, WorldExplorer/Shore
         // Tracer split - see docs/fork-customization-ledger.md), + 30 fork keys from the Land Survey
-        // editor overhaul (nurgling.survey.SurveySettings - see docs/fork-customization-ledger.md).
-        assertEquals(353, names.size());
+        // editor overhaul (nurgling.survey.SurveySettings - see docs/fork-customization-ledger.md),
+        // + 1 fork key from the Phase 2 terrain constraint engine (surveyTerrainConstraintMode -
+        // see nurgling.survey.SurveyConstraintValidator).
+        assertEquals(354, names.size());
         for (String fork : new String[] {"gobInstanceConf", "kinGroupLabels", "villageGroupLabels",
                 "lpassistantbotprop", "autoDrinkThreshold", "showPlayerCoords", "stackSizeLearning",
                 "combatReactorEnabled", "combatReactorDefenseThreshold", "equipBonusesExpanded",

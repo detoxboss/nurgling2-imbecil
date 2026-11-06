@@ -36,6 +36,11 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
     public Area tarea;
     public Coord selected = null;
     public boolean active = false, update;
+    /* Terrain-constraint vertex markers (fork addition, Phase 2). Vertices touching a confirmed
+     * violation or an unverifiable edge, rendered as a separate halo-style pass -- never alters
+     * v_flags bits 1/2 (fill/dig), so the normal status dot colour stays intact underneath. */
+    public Set<Coord> violatingVertices = Collections.emptySet();
+    public Set<Coord> uncertainVertices = Collections.emptySet();
     private final Collection<RenderTree.Slot> slots = new ArrayList<>(1);
     private final Map<RenderTree.Slot, RenderTree.Slot> selslots = new IdentityHashMap<>();
     private final Map<RenderTree.Slot, RenderTree.Slot> wireslots = new IdentityHashMap<>();
@@ -118,6 +123,10 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 		if(active)
 		    fl |= 8;
 	    }
+	    if(violatingVertices.contains(vc))
+		fl |= 16;
+	    else if(uncertainVertices.contains(vc))
+		fl |= 32;
 	    buf.put(fl);
 	    buf.put((byte)((255 * (vz - data.lo)) / (data.hi - data.lo)));
 	    buf.put((byte)0).put((byte)0);
@@ -200,6 +209,32 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
     public static final Pipe.Op halodraw = Pipe.Op.compose(new RUtils.AdHoc(haloshader), States.Depthtest.none, States.maskdepth,
 							   new Rendered.Order.Default(20106));
 
+    /* Terrain-constraint vertex markers (fork addition, Phase 2): a third halo-style pass, same
+     * idiom as the selection halo above -- it never touches the status dot's own colour (bits
+     * 1/2/flags), just layers a ring on top when bit 16 (confirmed violation, checked first so
+     * it takes priority) or bit 32 (unverifiable) is set. */
+    public static final Uniform u_violCol = new Uniform(VEC4, "survvcol",
+	p -> SurveySettings.fcolor(SurveySettings.TERRAIN_VIOLATION_COLOR, 100));
+    public static final Uniform u_uncertainCol = new Uniform(VEC4, "survucol",
+	p -> SurveySettings.fcolor(SurveySettings.TERRAIN_UNKNOWN_COLOR, 100));
+    public static final Uniform u_violSz = new Uniform(FLOAT, "survvsz", p -> SurveySettings.TERRAIN_MARKER_SIZE);
+    public static final Function violcol = new Function.Def(VEC4) {{
+	code.add(new If(ne(bitand(f_flags.ref(), l(16)), l(0)), new Return(u_violCol.ref())));
+	code.add(new If(ne(bitand(f_flags.ref(), l(32)), l(0)), new Return(u_uncertainCol.ref())));
+	code.add(new Return(vec4(l(0.0), l(0.0), l(0.0), l(0.0))));
+    }};
+    public static final Function violsize = new Function.Def(FLOAT) {{
+	code.add(new If(eq(bitand(v_flags.ref(), l(48)), l(0)), new Return(l(0.0))));
+	code.add(new Return(u_violSz.ref()));
+    }};
+    public static final ShaderMacro violshader = prog -> {
+	FragColor.fragcol(prog.fctx).mod(in -> violcol.call(), 0);
+	prog.vctx.ptsz.mod(in -> violsize.call(), 0);
+	prog.vctx.ptsz.force();
+    };
+    public static final Pipe.Op violdraw = Pipe.Op.compose(new RUtils.AdHoc(violshader), States.Depthtest.none, States.maskdepth,
+							    new Rendered.Order.Default(20107));
+
     public static final Uniform u_fillLow   = new Uniform(VEC4, "survflo", p -> SurveySettings.fcolor(SurveySettings.fillLowColor(), 100));
     public static final Uniform u_fillHigh  = new Uniform(VEC4, "survfhi", p -> SurveySettings.fcolor(SurveySettings.fillHighColor(), 100));
     public static final Uniform u_fillAlpha = new Uniform(FLOAT, "survfa", p -> SurveySettings.fillVisible() ? (SurveySettings.fillOpacity() / 100f) : 0f);
@@ -232,6 +267,12 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
     private static Pipe.Op lineOp(Color col, int opacitypct, int width, int order) {
 	return(Pipe.Op.compose(new BaseColor(SurveySettings.fcolor(col, opacitypct)), new States.LineWidth(Math.max(1, width)),
 			       States.Depthtest.none, States.maskdepth, new Rendered.Order.Default(order)));
+    }
+
+    public void setTerrainMarkers(Set<Coord> violating, Set<Coord> uncertain) {
+	this.violatingVertices = violating;
+	this.uncertainVertices = uncertain;
+	update = true;
     }
 
     public void select(Area area) {
@@ -292,6 +333,7 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 	addWire(slot);
 	slot.add(vertices, vdraw);
 	slot.add(vertices, halodraw);
+	slot.add(vertices, violdraw);
 	slots.add(slot);
     }
 

@@ -6,8 +6,12 @@ import haven.render.*;
 import haven.render.sl.*;
 import nurgling.NStyle;
 import nurgling.conf.NDragProp;
+import nurgling.survey.SurveyConstraintResult;
+import nurgling.survey.SurveyConstraintValidator;
+import nurgling.survey.SurveyDragConstraintSolver;
 import nurgling.survey.SurveyEditHistory;
 import nurgling.survey.SurveySettings;
+import nurgling.survey.SurveyTerrainSnapshot;
 import nurgling.widgets.NDraggableWidget;
 
 import java.util.*;
@@ -24,6 +28,7 @@ public class LandSurvey extends Window {
     public final Area area;
     public final Data data;
     public final Label zdlbl, wlbl, dlbl, errlbl;
+    public final Label terrlbl;
     public Area selection;
     private boolean inited = false;
     private final boolean isNew;
@@ -83,8 +88,9 @@ public class LandSurvey extends Window {
 	wlbl = add(new Label("..."), zdlbl.pos("bl").adds(0, 1));
 	dlbl = add(new Label("..."), wlbl.pos("bl").adds(0, 1));
 	errlbl = add(new Label(""), dlbl.pos("bl").adds(0, 1));
+	terrlbl = add(new Label(""), errlbl.pos("bl").adds(0, 1));
 	prev = add(new Button(UI.scale(125), "Ground level", false).action(this::initsurf),
-		   errlbl.pos("bl").adds(0, 10));
+		   terrlbl.pos("bl").adds(0, 10));
 	add(new Button(UI.scale(125), "Ground plane", false).action(this::initplane),
 	    prev.pos("ur").adds(10, 0));
 	prev = add(new Button(UI.scale(125), "Dig", false).action(() -> wdgmsg("lvl")),
@@ -176,6 +182,70 @@ public class LandSurvey extends Window {
 	else
 	    wlbl.settext(String.format("Units of soil left over: %d", -sd));
 	dlbl.settext(String.format("Units of soil to dig: %d", hn));
+	refreshTerrainStatus(map);
+    }
+
+    /* --- Phase 2: terrain slope constraint engine integration --- */
+
+    private SurveyTerrainSnapshot terrainSnapshot;
+    private int terrainSnapshotMapSeq = -1;
+
+    /** Snapshot is cheap to rebuild but not free (probes a one-vertex ring around the whole
+     *  survey); cached per gesture/tick and only rebuilt when the map actually changed. */
+    SurveyTerrainSnapshot terrainSnapshot(MCache map) {
+	if((terrainSnapshot == null) || (terrainSnapshotMapSeq != map.chseq)) {
+	    terrainSnapshot = SurveyTerrainSnapshot.capture(map, data.varea);
+	    terrainSnapshotMapSeq = map.chseq;
+	}
+	return terrainSnapshot;
+    }
+
+    /** Idle (non-dragging) status: are there any over-limit edges in the currently committed
+     *  shape at all (new or pre-existing), and is any nearby terrain unverifiable. Skips the
+     *  check entirely in Off mode. */
+    private void refreshTerrainStatus(MCache map) {
+	SurveyConstraintValidator.Mode mode = SurveySettings.terrainConstraintMode();
+	if(mode == SurveyConstraintValidator.Mode.OFF) {
+	    terrlbl.settext("");
+	    dsp.setTerrainMarkers(Collections.emptySet(), Collections.emptySet());
+	    return;
+	}
+	SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(data.varea, data.gran, data.dz,
+										 terrainSnapshot(map), SurveySettings.TERRAIN_MAX_SLOPE_METERS);
+	Set<Coord> viol = new HashSet<>(), unk = new HashSet<>();
+	int violCount = 0, unkCount = 0;
+	double worst = 0;
+	for(SurveyConstraintResult.EdgeFinding f : res.findings) {
+	    if(f.status == SurveyConstraintResult.Status.VIOLATION) {
+		viol.add(f.a); viol.add(f.b);
+		violCount++;
+		worst = Math.max(worst, f.candidateDiffMeters);
+	    } else if(f.status == SurveyConstraintResult.Status.UNKNOWN) {
+		unk.add(f.a); unk.add(f.b);
+		unkCount++;
+	    }
+	}
+	dsp.setTerrainMarkers(viol, unk);
+	if(violCount > 0)
+	    terrlbl.settext(String.format("Terrain: %d edge(s) over %.1fm limit (worst %.1fm)",
+					   violCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS, worst));
+	else if(unkCount > 0)
+	    terrlbl.settext(String.format("Terrain: %d nearby edge(s) unverifiable (unloaded)", unkCount));
+	else
+	    terrlbl.settext("Terrain: OK");
+    }
+
+    /** Clamps a Mover/CMover gesture's requested diff to the largest amount that doesn't newly
+     *  violate (or worsen) the slope rule, in Constrain mode only -- Off/Warn never alter the
+     *  drag itself; Warn's live feedback instead comes from updmap()'s per-tick absolute check
+     *  above, which already runs every tick during a drag since it sets upd=true. */
+    float clampDrag(int[] gidx, float[] sz, float[] coeff, int[] priorDz, float requestedDiff) {
+	if((SurveySettings.terrainConstraintMode() != SurveyConstraintValidator.Mode.CONSTRAIN) || (requestedDiff == 0))
+	    return requestedDiff;
+	SurveyTerrainSnapshot terrain = terrainSnapshot(mv.ui.sess.glob.map);
+	SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
+	    data.varea, data.gran, priorDz, gidx, sz, coeff, requestedDiff, terrain, SurveySettings.TERRAIN_MAX_SLOPE_METERS);
+	return cr.diff;
     }
 
     private void lock(boolean enabled) {
@@ -324,6 +394,8 @@ public class LandSurvey extends Window {
 	public final UI.Grab grab;
 	public final float[] sz;
 	public final int[] gidx;
+	public final float[] coeff;
+	public final int[] priorDz;
 	public final float zsz;
 
 	public Mover(Coord vc, Area area, Coord sc) {
@@ -333,10 +405,13 @@ public class LandSurvey extends Window {
 	    this.zsz = dsp.zsize(vc);
 	    this.sz = new float[area.area()];
 	    this.gidx = new int[area.area()];
+	    this.coeff = new float[area.area()];
 	    for(Coord iv : area) {
 		gidx[area.ridx(iv)] = data.varea.ridx(iv);
 		this.sz[area.ridx(iv)] = data.wz[data.varea.ridx(iv)];
+		this.coeff[area.ridx(iv)] = 1f;
 	    }
+	    this.priorDz = data.dz.clone();
 	    grab = mv.ui.grabmouse(mv);
 	    dsp.active = true;
 	    dsp.update = true;
@@ -345,6 +420,7 @@ public class LandSurvey extends Window {
 	public boolean handle(MouseEvent ev) {
 	    if(ev instanceof MouseMoveEvent) {
 		float diff = Math.round((sc.y - ev.c.y) / zsz);
+		diff = clampDrag(gidx, sz, coeff, priorDz, diff);
 		for(Coord mv : area)
 		    data.wz[data.varea.ridx(mv)] = sz[area.ridx(mv)] + diff;
 		data.dupdate();
@@ -375,6 +451,8 @@ public class LandSurvey extends Window {
 	public final UI.Grab grab;
 	public final float[] sz;
 	public final int[] gidx;
+	public final float[] coeff;
+	public final int[] priorDz;
 	public final float zsz;
 
 	public CMover(Coord vc, Area area, String corn, Coord sc) {
@@ -385,10 +463,20 @@ public class LandSurvey extends Window {
 	    this.zsz = dsp.zsize(vc);
 	    this.sz = new float[area.area()];
 	    this.gidx = new int[area.area()];
+	    this.coeff = new float[area.area()];
+	    float ul = corn.equals("ul") ? 1 : 0;
+	    float ur = corn.equals("ur") ? 1 : 0;
+	    float br = corn.equals("br") ? 1 : 0;
+	    float bl = corn.equals("bl") ? 1 : 0;
+	    float iw = 1f / (area.br.x - 1 - area.ul.x), ih = 1f / (area.br.y - 1 - area.ul.y);
 	    for(Coord iv : area) {
 		gidx[area.ridx(iv)] = data.varea.ridx(iv);
 		this.sz[area.ridx(iv)] = data.wz[data.varea.ridx(iv)];
+		float fx = (iv.x - area.ul.x) * iw, fy = (iv.y - area.ul.y) * ih;
+		this.coeff[area.ridx(iv)] = (((ul * (1 - fx)) + (ur * fx)) * (1 - fy)) +
+					    (((bl * (1 - fx)) + (br * fx)) * fy);
 	    }
+	    this.priorDz = data.dz.clone();
 	    grab = mv.ui.grabmouse(mv);
 	    dsp.active = true;
 	    dsp.update = true;
@@ -397,17 +485,9 @@ public class LandSurvey extends Window {
 	public boolean handle(MouseEvent ev) {
 	    if(ev instanceof MouseMoveEvent) {
 		float diff = Math.round((sc.y - ev.c.y) / zsz);
-		float ul = (corn == "ul") ? diff : 0;
-		float ur = (corn == "ur") ? diff : 0;
-		float br = (corn == "br") ? diff : 0;
-		float bl = (corn == "bl") ? diff : 0;
-		float iw = 1f / (area.br.x - 1 - area.ul.x), ih = 1f / (area.br.y - 1 - area.ul.y);
-		for(Coord mv : area) {
-		    float fx = (mv.x - area.ul.x) * iw, fy = (mv.y - area.ul.y) * ih;
-		    float cd = (((ul * (1 - fx)) + (ur * fx)) * (1 - fy)) +
-			       (((bl * (1 - fx)) + (br * fx)) * fy);
-		    data.wz[data.varea.ridx(mv)] = sz[area.ridx(mv)] + cd;
-		}
+		diff = clampDrag(gidx, sz, coeff, priorDz, diff);
+		for(Coord mv : area)
+		    data.wz[data.varea.ridx(mv)] = sz[area.ridx(mv)] + (coeff[area.ridx(mv)] * diff);
 		data.dupdate();
 		data.seq++;
 		upd = true;
