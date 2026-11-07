@@ -211,38 +211,78 @@ public class LandSurvey extends Window {
 	SurveyConstraintValidator.Mode mode = SurveySettings.terrainConstraintMode();
 	if(mode == SurveyConstraintValidator.Mode.OFF) {
 	    terrlbl.settext("");
-	    dsp.setTerrainMarkers(Collections.emptySet(), Collections.emptySet());
+	    dsp.setTerrainMarkers(Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
 	    return;
 	}
 	SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(data.varea, data.gran, data.dz,
 										 terrainSnapshot(map), SurveySettings.TERRAIN_MAX_SLOPE_METERS);
-	Set<Coord> viol = new HashSet<>(), unk = new HashSet<>();
-	int violCount = 0, unkCount = 0;
+	/* Marker colour and the idle status line are driven purely by Severity (the edge's
+	 * absolute relationship to the real limit), not Status (the worsening-aware blocking
+	 * decision) -- a pre-existing, unworsened cliff is still genuinely over the limit and
+	 * should show red, same as a freshly-created one; see SurveyConstraintResult.Severity's
+	 * class doc for why the two are kept orthogonal. */
+	Set<Coord> over = new HashSet<>(), unk = new HashSet<>(), atLimit = new HashSet<>();
+	int overCount = 0, atLimitCount = 0, unkCount = 0;
 	double worst = 0;
 	for(SurveyConstraintResult.EdgeFinding f : res.findings) {
-	    if(f.status == SurveyConstraintResult.Status.VIOLATION) {
-		viol.add(f.a); viol.add(f.b);
-		violCount++;
+	    switch(f.severity) {
+	    case OVER_LIMIT:
+		over.add(f.a); over.add(f.b);
+		overCount++;
 		worst = Math.max(worst, f.candidateDiffMeters);
-	    } else if(f.status == SurveyConstraintResult.Status.UNKNOWN) {
+		break;
+	    case AT_LIMIT:
+		atLimit.add(f.a); atLimit.add(f.b);
+		atLimitCount++;
+		break;
+	    case UNKNOWN:
 		unk.add(f.a); unk.add(f.b);
 		unkCount++;
+		break;
+	    default:
+		break;
 	    }
 	}
-	dsp.setTerrainMarkers(viol, unk);
+	dsp.setTerrainMarkers(over, unk, atLimit);
 	String base;
-	if(violCount > 0)
+	if(overCount > 0)
 	    base = String.format("Terrain: %d edge(s) over %.1fm limit (worst %.1fm)",
-				  violCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS, worst);
+				  overCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS, worst);
+	else if(atLimitCount > 0)
+	    base = String.format("Terrain: %d edge(s) at the %.1fm limit (further raising blocked, lowering still OK)",
+				  atLimitCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS);
 	else if(unkCount > 0)
 	    base = String.format("Terrain: %d nearby edge(s) unverifiable (unloaded)", unkCount);
 	else
 	    base = "Terrain: OK";
 	if((mode == SurveyConstraintValidator.Mode.CONSTRAIN) && (lastClamp != null) && (lastClamp.limitingEdge != null)) {
 	    SurveyConstraintValidator.Edge le = lastClamp.limitingEdge;
-	    base += String.format(" [clamped at %s-%s]", le.a, le.b);
+	    SurveyTerrainSnapshot terrain = terrainSnapshot(map);
+	    double mpd = SurveyConstraintValidator.metersPerDzUnit(data.gran);
+	    Double targetDiff = edgeTargetDiffMeters(le, terrain, mpd);
+	    Double ha = terrain.terrainHeight(le.a), hb = terrain.terrainHeight(le.b);
+	    Double actualDiff = ((ha != null) && (hb != null)) ? Math.abs(ha - hb) : null;
+	    base += String.format(" [clamped at %s-%s%s%s]", le.a, le.b,
+				   (targetDiff != null) ? String.format(", target %.2fm", targetDiff) : "",
+				   (actualDiff != null) ? String.format(", actual %.2fm", actualDiff) : "");
 	}
 	terrlbl.settext(base);
+    }
+
+    /** Diagnostic helper: the limiting edge's current target-height difference in metres, for
+     *  whichever endpoint(s) are inside the survey (dz) vs. just outside it (actual terrain). */
+    private Double edgeTargetDiffMeters(SurveyConstraintValidator.Edge e, SurveyTerrainSnapshot terrain, double mpd) {
+	boolean inA = data.varea.contains(e.a), inB = data.varea.contains(e.b);
+	if(inA && inB)
+	    return Math.abs(data.dz[data.varea.ridx(e.a)] - data.dz[data.varea.ridx(e.b)]) * mpd;
+	Coord insideC = inA ? e.a : (inB ? e.b : null);
+	Coord outsideC = inA ? e.b : (inB ? e.a : null);
+	if(insideC == null)
+	    return null;
+	Double oh = terrain.terrainHeight(outsideC);
+	if(oh == null)
+	    return null;
+	return Math.abs((data.dz[data.varea.ridx(insideC)] * mpd) - oh);
     }
 
     /** Clamps a Mover/CMover gesture's requested diff to the largest amount that doesn't newly

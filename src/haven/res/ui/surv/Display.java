@@ -36,11 +36,13 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
     public Area tarea;
     public Coord selected = null;
     public boolean active = false, update;
-    /* Terrain-constraint vertex markers (fork addition, Phase 2). Vertices touching a confirmed
-     * violation or an unverifiable edge, rendered as a separate halo-style pass -- never alters
-     * v_flags bits 1/2 (fill/dig), so the normal status dot colour stays intact underneath. */
+    /* Terrain-constraint vertex markers (fork addition, Phase 2/2.1). Vertices touching a
+     * confirmed violation, an at-limit (but not yet over) edge, or an unverifiable edge,
+     * rendered as a separate halo-style pass -- never alters v_flags bits 1/2 (fill/dig), so the
+     * normal status dot colour stays intact underneath. */
     public Set<Coord> violatingVertices = Collections.emptySet();
     public Set<Coord> uncertainVertices = Collections.emptySet();
+    public Set<Coord> atLimitVertices = Collections.emptySet();
     private final Collection<RenderTree.Slot> slots = new ArrayList<>(1);
     private final Map<RenderTree.Slot, RenderTree.Slot> selslots = new IdentityHashMap<>();
     private final Map<RenderTree.Slot, RenderTree.Slot> wireslots = new IdentityHashMap<>();
@@ -127,6 +129,8 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 		fl |= 16;
 	    else if(uncertainVertices.contains(vc))
 		fl |= 32;
+	    else if(atLimitVertices.contains(vc))
+		fl |= 64;
 	    buf.put(fl);
 	    buf.put((byte)((255 * (vz - data.lo)) / (data.hi - data.lo)));
 	    buf.put((byte)0).put((byte)0);
@@ -209,22 +213,30 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
     public static final Pipe.Op halodraw = Pipe.Op.compose(new RUtils.AdHoc(haloshader), States.Depthtest.none, States.maskdepth,
 							   new Rendered.Order.Default(20106));
 
-    /* Terrain-constraint vertex markers (fork addition, Phase 2): a third halo-style pass, same
-     * idiom as the selection halo above -- it never touches the status dot's own colour (bits
-     * 1/2/flags), just layers a ring on top when bit 16 (confirmed violation, checked first so
-     * it takes priority) or bit 32 (unverifiable) is set. */
+    /* Terrain-constraint vertex markers (fork addition, Phase 2/2.1): a third halo-style pass,
+     * same idiom as the selection halo above -- it never touches the status dot's own colour
+     * (bits 1/2/flags), just layers a ring on top when bit 16 (confirmed violation, red,
+     * checked first so it takes priority), bit 64 (at-limit, amber), or bit 32 (unverifiable,
+     * blue) is set. */
     public static final Uniform u_violCol = new Uniform(VEC4, "survvcol",
 	p -> SurveySettings.fcolor(SurveySettings.TERRAIN_VIOLATION_COLOR, 100));
     public static final Uniform u_uncertainCol = new Uniform(VEC4, "survucol",
 	p -> SurveySettings.fcolor(SurveySettings.TERRAIN_UNKNOWN_COLOR, 100));
+    public static final Uniform u_atLimitCol = new Uniform(VEC4, "survalcol",
+	p -> SurveySettings.fcolor(SurveySettings.TERRAIN_AT_LIMIT_COLOR, 100));
     public static final Uniform u_violSz = new Uniform(FLOAT, "survvsz", p -> SurveySettings.TERRAIN_MARKER_SIZE);
+    /* Priority when more than one bit is set on a vertex (shouldn't normally happen -- the
+     * flags are assigned mutually exclusively in vfill -- but a confirmed violation must never
+     * be visually demoted below an at-limit/unverifiable marker if it ever does): violation (16,
+     * red) > at-limit (64, amber) > unverifiable (32, blue). */
     public static final Function violcol = new Function.Def(VEC4) {{
 	code.add(new If(ne(bitand(f_flags.ref(), l(16)), l(0)), new Return(u_violCol.ref())));
+	code.add(new If(ne(bitand(f_flags.ref(), l(64)), l(0)), new Return(u_atLimitCol.ref())));
 	code.add(new If(ne(bitand(f_flags.ref(), l(32)), l(0)), new Return(u_uncertainCol.ref())));
 	code.add(new Return(vec4(l(0.0), l(0.0), l(0.0), l(0.0))));
     }};
     public static final Function violsize = new Function.Def(FLOAT) {{
-	code.add(new If(eq(bitand(v_flags.ref(), l(48)), l(0)), new Return(l(0.0))));
+	code.add(new If(eq(bitand(v_flags.ref(), l(112)), l(0)), new Return(l(0.0))));
 	code.add(new Return(u_violSz.ref()));
     }};
     public static final ShaderMacro violshader = prog -> {
@@ -269,9 +281,10 @@ public class Display implements RenderTree.Node, TickList.Ticking, TickList.Tick
 			       States.Depthtest.none, States.maskdepth, new Rendered.Order.Default(order)));
     }
 
-    public void setTerrainMarkers(Set<Coord> violating, Set<Coord> uncertain) {
+    public void setTerrainMarkers(Set<Coord> violating, Set<Coord> uncertain, Set<Coord> atLimit) {
 	this.violatingVertices = violating;
 	this.uncertainVertices = uncertain;
+	this.atLimitVertices = atLimit;
 	update = true;
     }
 

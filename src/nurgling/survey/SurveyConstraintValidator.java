@@ -124,13 +124,21 @@ public final class SurveyConstraintValidator {
         SurveyConstraintResult.Status overall = SurveyConstraintResult.Status.VALID;
 
         double mpd = metersPerDzUnit(gran);
+        // Half a dz unit's worth of metres: the band just under the limit that counts as
+        // "AT_LIMIT" rather than "BELOW_LIMIT", so the exact 2.0 m boundary (and the single
+        // increment just short of it, where quantization means nothing finer is reachable
+        // anyway) both get flagged, without flickering on float noise right at the line.
+        double atLimitBand = mpd / 2;
         for(Edge e : edgesWithin(varea)) {
             int ia = varea.ridx(e.a), ib = varea.ridx(e.b);
             double candDiff = Math.abs(candidateDz[ia] - candidateDz[ib]) * mpd;
             double priorDiff = Math.abs(priorDz[ia] - priorDz[ib]) * mpd;
             SurveyConstraintResult.Status s = classify(candDiff, strict ? 0 : priorDiff, maxSlopeMeters);
-            if(s != SurveyConstraintResult.Status.VALID) {
-                findings.add(new SurveyConstraintResult.EdgeFinding(e.a, e.b, s, candDiff, maxSlopeMeters, !strict && (priorDiff > maxSlopeMeters)));
+            SurveyConstraintResult.Severity sev = severity(candDiff, maxSlopeMeters, atLimitBand);
+            if((s != SurveyConstraintResult.Status.VALID) || (sev != SurveyConstraintResult.Severity.BELOW_LIMIT)) {
+                Boolean actualOver = actualOverLimit(terrain, e.a, e.b, maxSlopeMeters);
+                findings.add(new SurveyConstraintResult.EdgeFinding(e.a, e.b, s, sev, candDiff, maxSlopeMeters,
+                                                                     !strict && (priorDiff > maxSlopeMeters), actualOver));
                 overall = worse(overall, s);
             }
         }
@@ -147,15 +155,20 @@ public final class SurveyConstraintValidator {
                 Double oh = terrain.terrainHeight(oc);
                 if(oh == null) {
                     findings.add(new SurveyConstraintResult.EdgeFinding(vc, oc, SurveyConstraintResult.Status.UNKNOWN,
-                                                                         Double.NaN, maxSlopeMeters, false));
+                                                                         SurveyConstraintResult.Severity.UNKNOWN,
+                                                                         Double.NaN, maxSlopeMeters, false, null));
                     overall = worse(overall, SurveyConstraintResult.Status.UNKNOWN);
                     continue;
                 }
                 double candDiff = Math.abs((candidateDz[iv] * mpd) - oh);
                 double priorDiff = Math.abs((priorDz[iv] * mpd) - oh);
                 SurveyConstraintResult.Status s = classify(candDiff, strict ? 0 : priorDiff, maxSlopeMeters);
-                if(s != SurveyConstraintResult.Status.VALID) {
-                    findings.add(new SurveyConstraintResult.EdgeFinding(vc, oc, s, candDiff, maxSlopeMeters, !strict && (priorDiff > maxSlopeMeters)));
+                SurveyConstraintResult.Severity sev = severity(candDiff, maxSlopeMeters, atLimitBand);
+                if((s != SurveyConstraintResult.Status.VALID) || (sev != SurveyConstraintResult.Severity.BELOW_LIMIT)) {
+                    Double vch = terrain.terrainHeight(vc);
+                    Boolean actualOver = (vch == null) ? null : (Math.abs(vch - oh) > maxSlopeMeters + 1e-9);
+                    findings.add(new SurveyConstraintResult.EdgeFinding(vc, oc, s, sev, candDiff, maxSlopeMeters,
+                                                                         !strict && (priorDiff > maxSlopeMeters), actualOver));
                     overall = worse(overall, s);
                 }
             }
@@ -172,6 +185,27 @@ public final class SurveyConstraintValidator {
     static SurveyConstraintResult.Status classify(double candDiff, double priorDiff, double limit) {
         double threshold = Math.max(limit, priorDiff);
         return (candDiff > threshold + 1e-9) ? SurveyConstraintResult.Status.VIOLATION : SurveyConstraintResult.Status.VALID;
+    }
+
+    /** Absolute severity against the real limit, ignoring worsening -- deliberately independent
+     *  of {@link #classify}, so a pre-existing (and therefore non-blocking) over-limit edge still
+     *  reports {@code OVER_LIMIT} rather than looking indistinguishable from a comfortably legal
+     *  one. */
+    static SurveyConstraintResult.Severity severity(double candDiff, double limit, double atLimitBand) {
+        if(candDiff > limit + 1e-9)
+            return SurveyConstraintResult.Severity.OVER_LIMIT;
+        if(candDiff >= limit - atLimitBand - 1e-9)
+            return SurveyConstraintResult.Severity.AT_LIMIT;
+        return SurveyConstraintResult.Severity.BELOW_LIMIT;
+    }
+
+    /** Whether the real, unmodified terrain at both endpoints is itself already over the limit
+     *  -- null (never a safe "false") if either endpoint's real height is unknown. */
+    private static Boolean actualOverLimit(SurveyTerrainSnapshot terrain, Coord a, Coord b, double limit) {
+        Double ha = terrain.terrainHeight(a), hb = terrain.terrainHeight(b);
+        if((ha == null) || (hb == null))
+            return null;
+        return Math.abs(ha - hb) > limit + 1e-9;
     }
 
     private static SurveyConstraintResult.Status worse(SurveyConstraintResult.Status a, SurveyConstraintResult.Status b) {

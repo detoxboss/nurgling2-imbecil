@@ -181,7 +181,11 @@ public class SurveySettings {
      *  separate halo-style render pass, like the selection highlight, so the normal
      *  green/blue/purple status dot underneath is never hidden or replaced. */
     public static final Color TERRAIN_VIOLATION_COLOR = new Color(255, 40, 40);
-    public static final Color TERRAIN_UNKNOWN_COLOR = new Color(255, 200, 0);
+    /** At-limit (not yet over it) marker -- deliberately a distinct amber/orange, separate from
+     *  both red (over-limit violation) and the unknown colour below, per the "AT_LIMIT must be
+     *  visually distinguishable, not just a weaker violation colour" requirement. */
+    public static final Color TERRAIN_AT_LIMIT_COLOR = new Color(255, 165, 0);
+    public static final Color TERRAIN_UNKNOWN_COLOR = new Color(120, 170, 255);
     public static final float TERRAIN_MARKER_SIZE = 13f;
 
     public static FColor fcolor(Color c, int opacityPct) {

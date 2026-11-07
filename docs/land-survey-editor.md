@@ -199,6 +199,71 @@ it. No change was needed to the worsening-aware comparison logic, the drag-solve
 math, or any rendering/UI code — this was purely a unit-conversion defect in how two already-right
 formulas were combined.
 
+### Follow-up: actual terrain slopes vs. target slopes, and AT_LIMIT severity
+
+A second in-game report (after the unit-conversion fix landed) raised a distinct concern: the
+~2.0 m limit applies to the *real terrain itself*, however it got that way (natural, dug/filled,
+or from an earlier survey) — opening a new survey doesn't reset that or grant a fresh 2.0 m of
+headroom. Example: if two real, connected vertices already differ by 0.3 m, raising the higher
+one alone by the "usual" 2.0 m produces 2.3 m against the untouched one, which must be rejected.
+
+**Investigation finding: this was already handled correctly for the geometry that matters, with
+one real gap.** The validator's interior-edge check has always compared *target* height against
+*target* height (never target against actual terrain) — which is the right comparison, because
+the final real terrain *becomes* the committed target once executed; an interior edge's legality
+depends only on the final target shape, not on how far that shape is from today's terrain. Given
+that, the 0.3 m example above was already caught correctly, *provided* the compared vertex's
+`priorDz` reflects its real height — true whenever a survey is initialized via **Ground Level**
+(`LandSurvey.initsurf()`, target := actual terrain) or reopened via `Data.decode()` from a
+previously accurate target. Verified with a new test
+(`SurveyConstraintValidatorTest#groundLevelInit_raisingAloneRespectsExistingActualSlope` /
+`SurveyDragConstraintSolverTest#singleVertexRaiseRespectsExistingActualSlopeWithinSurvey`): the
+solver correctly clamps the raise to +17 units (1.7 m), landing at exactly 2.0 m against the
+untouched neighbour, not the "fresh" 20.
+
+**Ground Level vs. Ground Plane are intentionally different, and both keep working.** Ground
+Plane (`LandSurvey.initplane()`, the default for a brand-new survey) sets every target vertex to
+the same flat average, deliberately discarding today's real per-vertex offsets — because the
+*final* shape it produces (flat) is self-consistent and legal regardless of what the real terrain
+looked like beforehand. A new test
+(`groundPlaneInit_flatTargetIgnoresActualSlopeForFinalShapeLegality`) confirms raising one corner
+of a flat Ground-Plane target by the full 20 units is correctly valid: the real terrain's 0.3 m
+offset is irrelevant to whether the *resulting* shape is legal, only to how much digging/filling
+each vertex individually needs (already shown by the existing "soil required/left over" readout).
+
+**The one real gap: no AT_LIMIT distinction.** `validateAbsolute()` only flagged a strictly-greater
+comparison, so an edge already at *exactly* 2.0 m (reachable, and not uncommon after a prior
+Constrain-mode edit landed exactly on the boundary) got no marker at all, indistinguishable from
+one at 0.3 m. Fixed by adding `SurveyConstraintResult.Severity` (`BELOW_LIMIT` / `AT_LIMIT` /
+`OVER_LIMIT` / `UNKNOWN`), computed independently of the existing worsening-aware `Status`
+(`VALID`/`VIOLATION`/`UNKNOWN`): `Severity` answers "how close to the real limit is this edge,
+full stop", `Status` answers "should this specific candidate edit be blocked". The two are
+deliberately orthogonal — a pre-existing, unworsened cliff is `OVER_LIMIT` severity but `VALID`
+status, and is marked red (not hidden) in the idle view precisely because it's still a real
+over-limit edge, even though editing elsewhere in the survey remains unblocked. `AT_LIMIT` never
+freezes a vertex: lowering it (reducing the slope) is always legal, only a further *raise* trips
+the existing worsening-aware block — unchanged behavior, now just visible on the amber marker
+before the user hits it blind.
+
+**Distinguishing cause: real cliff vs. stale target.** Also added `EdgeFinding.
+actualTerrainOverLimit` (`Boolean`, null when either endpoint's real height is unknown): whether
+the *real, unmodified* terrain at both endpoints is itself already over the limit, independent of
+`preexisting` (which is about the previously committed *target*, possibly stale/not-yet-executed
+and not reflecting real terrain at all — e.g. a target saved before this engine existed, or
+before the survey's dig/fill was executed). `preexisting=true, actualTerrainOverLimit=false`
+means "an old invalid proposal, not a real terrain feature, now correctable"; `actualTerrainOverLimit=true`
+means "a genuine existing cliff, grandfathered because nothing the player did made it worse."
+
+**Intermediate digging/filling reachability — still unverified, left as a known limitation, not a
+new one.** The validator and solver both only ever check the *final* target shape (and, for
+`Mover`/`CMover`, the shape the mouse is live-requesting) — never whether the sequence of
+intermediate dig/fill operations needed to reach that shape stays legal at every step along the
+way (e.g. if the server applies changes vertex-by-vertex rather than atomically). This was already
+flagged as an open question in "What's verified vs. assumed" above and remains exactly that
+uncertain after this follow-up — no code here claims otherwise, and nothing was added that would
+incorrectly reject a geometrically legal target shape on reachability grounds it can't actually
+prove from client-side information.
+
 **Worsening rule:** an edge is a blocking `VIOLATION` iff its candidate difference exceeds
 `max(limit, priorDifference)` — equivalent to "exceeds the limit AND is worse than it already
 was," collapsed into one comparison. This is what lets an existing over-limit cliff be edited
@@ -235,20 +300,36 @@ assertion that `EdgeFinding.candidateDiffMeters` reports real metres (≈2.1) ra
 world-Z value the bug would have produced (≈23.1). `NConfigSyncKeysTest` was updated for the one
 new config key.
 
+Added in the actual-vs-target follow-up: raising/lowering a vertex that already has a real 0.3 m
+offset from its neighbour, under both Ground Level and Ground Plane initialization (validator
+level and, for the raise, drag-solver level too, plus a corner-tilt variant clamped by an
+existing boundary offset); an edge already at exactly the limit reports `Severity.AT_LIMIT` via
+`validateAbsolute()` without being a blocking violation; raising an already-maxed vertex by one
+more unit is a confirmed `OVER_LIMIT`/`VIOLATION`, while lowering it is always legal; reopening a
+survey on a previously player-created maximum slope reports `hasAtLimit()` without
+`hasViolation()`; a genuine existing cliff (target matches a real over-limit terrain feature) sets
+`actualTerrainOverLimit = true`, while a stale/invalid saved target over a flat real terrain sets
+it `false` while still `preexisting`.
+
 **Not covered by automated tests** (needs the full widget/game harness, or live verification):
 Undo/Redo interaction with a clamped drag end-to-end through `LandSurvey`/`SurveyEditHistory`;
 mode changes while a survey window is already open; multiple simultaneous survey sessions;
-`ant jar`/`ant test` were both run clean (see the PR description for the run).
+intermediate dig/fill reachability (see the follow-up section above). `ant jar`/`ant test` were
+both run clean (see the PR description for the run).
 
 ## Known limitations and proposed follow-ups
 
 - **Diagonal rule unverified** — see "What's verified vs. assumed" above for the exact test.
 - **No edge-highlighting**, only vertex markers: `Display` gained a third halo-style render pass
-  (two new flag bits, 16 = violation / 32 = unverifiable) that rings a vertex without touching its
-  existing status-dot color, rather than drawing a colored line along the specific violating edge.
-  A later pass could add a `LINES`-mode overlay keyed off `SurveyConstraintResult`'s edge list, the
-  same way the existing selection outline/wireframe passes work — deferred here to keep this PR's
-  render-pipeline surface small.
+  (three flag bits, 16 = over-limit violation / red, 64 = at-limit / amber, 32 = unverifiable /
+  blue) that rings a vertex without touching its existing status-dot color, rather than drawing a
+  colored line along the specific edge. A later pass could add a `LINES`-mode overlay keyed off
+  `SurveyConstraintResult`'s edge list, the same way the existing selection outline/wireframe
+  passes work — deferred here to keep this PR's render-pipeline surface small.
+- **Intermediate dig/fill reachability is unverified** (see the actual-vs-target follow-up
+  section above) — only the final target shape (and the live drag shape) is checked, never
+  whether the server executes a survey's changes in a way that could reject or reorder
+  intermediate steps.
 - **Paved tiles, buildings, water-adjacency are not checked at all.** `Ridges.brokenp()` is
   captured in every `SurveyTerrainSnapshot` for a future rule to use, but no such rule exists yet.
 - **No opt-in developer diagnostic overlay** (a full per-vertex current/requested/applied readout)
@@ -280,3 +361,14 @@ mode changes while a survey window is already open; multiple simultaneous survey
    server — this is the exact check that caught the original unit-conversion regression, so it's
    worth re-confirming specifically: a vertex on flat ground should now accept roughly 20 units
    (2.0 m) before Constrain mode stops it, not 1-2 units as in the regressed build.
+7. On terrain with an existing real slope (not flat), raise the already-higher of two connected
+   corners with Ground Level active. Confirm it's blocked noticeably *before* the usual ~20 units
+   — by roughly the size of the existing real offset — not given a fresh 20 regardless. Repeat
+   with Ground Plane active on the same terrain and confirm the flat target still accepts the
+   full ~20 units on one corner (the two modes should behave differently here, not identically).
+8. Drive a vertex to exactly the 2.0 m limit in Constrain mode, release, then reopen the status
+   view (or just let it idle). Confirm the vertex shows the amber at-limit marker (not plain green,
+   not red), and that lowering it is still possible while raising it further is still blocked.
+9. With that same at-limit vertex, confirm the status line distinguishes "at the limit" wording
+   from "over the limit" wording, and that a genuine pre-existing cliff elsewhere in the survey
+   still shows red (over-limit) even though editing unrelated vertices remains unblocked.

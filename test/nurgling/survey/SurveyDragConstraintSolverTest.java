@@ -110,6 +110,42 @@ class SurveyDragConstraintSolverTest {
         assertEquals(20f, cr.diff, 0.001);
     }
 
+    // Follow-up report's exact scenario, at the drag-solver level: vertex (1,0) is already 0.3 m
+    // *above* its neighbour (0,0) in real terrain (Ground Level init, so priorDz reflects it).
+    // Raising (1,0) alone ("that vertex alone") must clamp at +17 units (0.3 m already spent,
+    // 1.7 m left before the 2.0 m real limit against the untouched (0,0)), not the "usual" +20.
+    @Test
+    void singleVertexRaiseRespectsExistingActualSlopeWithinSurvey() {
+        Area varea = oneTile();
+        int[] prior = {0, 3, 0, 3}; // (0,0)=0 m, (1,0)=0.3 m, (0,1)=0 m, (1,1)=0.3 m
+        Map<Coord, Double> heights = new HashMap<>();
+        for(Coord c : varea.margin(1))
+            heights.put(c, (c.x == 0) ? 0.0 : 0.3); // matches prior exactly: Ground Level init
+        SurveyTerrainSnapshot terrain = SurveyTerrainSnapshot.forTesting(heights, new HashMap<>(), varea.margin(1));
+        // Mover region is just vertex (1,0) -- global index 1.
+        SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
+            varea, GRAN, prior, new int[] {1}, new float[] {3}, new float[] {1}, 100f, terrain, LIMIT);
+        assertEquals(17f, cr.diff, 0.001);
+    }
+
+    // The same existing-actual-offset effect applies to a corner tilt (CMover), not just a
+    // single-vertex Mover: tilting the "ul" corner up is clamped tighter (+17, not +20) when the
+    // ground immediately outside that corner is already 0.3 m below it.
+    @Test
+    void cornerTiltRespectsExistingActualSlopeAtBoundary() {
+        Area varea = oneTile();
+        int[] prior = {0, 0, 0, 0};
+        float[] coeff = {1f, 0.5f, 0.5f, 0f}; // ul=(0,0) coeff 1, as in cornerTiltClampedByInteriorEdge
+        Map<Coord, Double> heights = new HashMap<>();
+        for(Coord c : varea.margin(1))
+            heights.put(c, 0.0);
+        heights.put(Coord.of(0, -1), -0.3); // ground just outside the ul corner already 0.3 m below it
+        SurveyTerrainSnapshot terrain = SurveyTerrainSnapshot.forTesting(heights, new HashMap<>(), varea.margin(1));
+        SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
+            varea, GRAN, prior, wholeSurveyGidx(), new float[] {0, 0, 0, 0}, coeff, 100f, terrain, LIMIT);
+        assertEquals(17f, cr.diff, 0.001);
+    }
+
     // Unverifiable (unloaded) outside terrain never blocks a drag -- it's surfaced via
     // sawUnknownTerrain instead, per spec ("never treat missing terrain data as height zero").
     @Test

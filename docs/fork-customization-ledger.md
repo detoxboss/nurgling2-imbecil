@@ -525,6 +525,26 @@ client's `10f/11f` — the original `10f` had accidentally made the buggy single
 produce the right-looking number, masking the bug. See `docs/land-survey-editor.md`'s "Regression:
 unit-conversion bug" section for the full derivation.
 
+**Follow-up #2 (same PR, pre-merge): actual terrain slopes vs. target slopes, AT_LIMIT severity.**
+A second in-game report raised a distinct concern (the 2.0 m limit applies to real terrain
+regardless of how it got that way, so a new survey shouldn't grant a fresh 2.0 m of headroom on
+top of an existing real offset). Investigation found the interior-edge check was already correct
+for this (it always compared target-vs-target, which is the right comparison since the final real
+terrain becomes the committed target) *given* an accurate `priorDz` — true for Ground Level init
+or a reopened survey, verified with new tests; Ground Plane's flat init is intentionally
+different and was confirmed to still behave correctly on its own terms. The one real gap:
+`validateAbsolute()` only flagged a strict `>` comparison, so an edge already at exactly 2.0 m got
+no marker. Added `SurveyConstraintResult.Severity` (`BELOW_LIMIT`/`AT_LIMIT`/`OVER_LIMIT`/
+`UNKNOWN`), independent of the existing worsening-aware `Status`, plus `EdgeFinding.
+actualTerrainOverLimit` to distinguish a genuine existing cliff from a stale/invalid saved target.
+`Display` gained a third marker colour (amber, flag bit 64) alongside the existing red/blue ones;
+`LandSurvey`'s status line and idle marker sets are now severity-driven rather than status-driven,
+so a pre-existing unworsened cliff still shows red. No change to the worsening-aware blocking
+logic itself. Intermediate dig/fill reachability remains an open, unverified question (unchanged
+from the original PR). See `docs/land-survey-editor.md`'s "Follow-up: actual terrain slopes vs.
+target slopes" section for the full derivation and the new tests. `ant test`: 407/407 passing (up
+from 397).
+
 ## Fork `BotRegistry` registrations
 
 **File:** `src/nurgling/actions/bots/registry/BotRegistry.java`

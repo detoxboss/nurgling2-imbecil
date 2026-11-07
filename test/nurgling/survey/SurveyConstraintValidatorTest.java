@@ -282,4 +282,176 @@ class SurveyConstraintValidatorTest {
         SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, dz, dz, terrain, LIMIT);
         assertEquals(SurveyConstraintResult.Status.VALID, res.overall);
     }
+
+    // --- Follow-up: actual terrain slopes vs. target slopes, and AT_LIMIT reporting ---
+
+    /** Two adjacent vertices whose real (unmodified) terrain already differs by 0.3 m -- the
+     *  scenario from the follow-up report ("raising that vertex alone by 2.0 m would produce a
+     *  2.3 m difference"). 0.3 m is 3 dz units at the real client gran (0.1 m/unit). */
+    private static SurveyTerrainSnapshot slopedTerrain(Area probed) {
+        Map<Coord, Double> h = new HashMap<>();
+        for(Coord c : probed)
+            h.put(c, (c.x == 0) ? 0.0 : 0.3); // vertex (0,y) at 0 m, vertex (1,y) at 0.3 m
+        return SurveyTerrainSnapshot.forTesting(h, new HashMap<>(), probed);
+    }
+
+    // Ground Level starts the target at actual terrain heights, so the pre-existing 0.3 m real
+    // offset is already baked into priorDz. Vertex (1,0) is the one already 0.3 m *above* its
+    // neighbour (0,0) (per the follow-up report's exact example); raising it alone by the
+    // "usual" full 20 units (2.0 m) reaches 23 units = 2.3 m against the untouched (0,0) --
+    // correctly a violation -- and the largest legal raise is 17 more units (to 20 = 2.0 m).
+    @Test
+    void groundLevelInit_raisingAloneRespectsExistingActualSlope() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = slopedTerrain(varea.margin(1));
+        // Ground Level: dz initialized from actual terrain -- (0,0)=0, (1,0)=3 (0.3 m), etc.
+        int[] prior = {0, 3, 0, 3};
+        int[] fullRaise = {0, 23, 0, 3}; // (1,0): 3 -> 23, a further +20 units (+2.0 m)
+        SurveyConstraintResult full = SurveyConstraintValidator.validate(varea, GRAN, prior, fullRaise, terrain, LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VIOLATION, full.overall);
+
+        int[] maxLegalRaise = {0, 20, 0, 3}; // (1,0): 3 -> 20, +17 units -- lands exactly at 2.0 m
+        SurveyConstraintResult legal = SurveyConstraintValidator.validate(varea, GRAN, prior, maxLegalRaise, terrain, LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VALID, legal.overall);
+
+        int[] oneOver = {0, 21, 0, 3}; // (1,0): 3 -> 21, +18 units -- 2.1 m against (0,0)
+        assertEquals(SurveyConstraintResult.Status.VIOLATION,
+                     SurveyConstraintValidator.validate(varea, GRAN, prior, oneOver, terrain, LIMIT).overall);
+    }
+
+    // Ground Plane starts the target flat (all four corners equal), regardless of the real 0.3 m
+    // terrain offset -- intentionally different from Ground Level (per spec, both modes must
+    // keep working). Raising one corner by the full 20 units is legal: the *final target shape*
+    // (which is what will actually get dug/filled) is flat elsewhere and only 2.0 m at the
+    // raised corner, which is exactly at, not over, the limit. The real terrain's current 0.3 m
+    // offset is irrelevant to the final shape's own legality -- only to how much digging/filling
+    // reaching it will take (a separate, unverified "intermediate reachability" question, not
+    // this check's job).
+    @Test
+    void groundPlaneInit_flatTargetIgnoresActualSlopeForFinalShapeLegality() {
+        Area varea = oneTile();
+        // Real terrain inside the survey has the same 0.3 m offset as above (irrelevant to this
+        // check -- interior legality only ever compares target-vs-target); the ring just outside
+        // the survey is flat at 0.5 m, matching this test's flat Ground Plane target average, so
+        // the boundary-vs-real-ground edges stay uninvolved and this test isolates the interior
+        // question it's actually about.
+        Map<Coord, Double> heights = new HashMap<>();
+        for(Coord c : varea.margin(1))
+            heights.put(c, varea.contains(c) ? ((c.x == 0) ? 0.0 : 0.3) : 0.5);
+        SurveyTerrainSnapshot terrain = SurveyTerrainSnapshot.forTesting(heights, new HashMap<>(), varea.margin(1));
+        int[] prior = {5, 5, 5, 5}; // Ground Plane: flat target at some average, unrelated to 0.3 m real slope
+        int[] cand = {25, 5, 5, 5}; // +20 units on one corner only -- reaches exactly 2.0 m everywhere it touches
+        SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, prior, cand, terrain, LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VALID, res.overall);
+    }
+
+    // An edge already at exactly 2.0 m must be reported AT_LIMIT, not silently VALID with no
+    // marker at all (the gap this follow-up calls out in the original validateAbsolute).
+    @Test
+    void edgeExactlyAtLimitReportsAtLimitSeverity() {
+        Area varea = oneTile();
+        int[] dz = {20, 0, 0, 0}; // exactly 2.0 m
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(varea, GRAN, dz, terrain, LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VALID, res.overall); // not a blocking violation
+        assertTrue(res.hasAtLimit());
+        boolean found = false;
+        for(SurveyConstraintResult.EdgeFinding f : res.findings) {
+            if(varea.contains(f.a) && varea.contains(f.b)) {
+                assertEquals(SurveyConstraintResult.Severity.AT_LIMIT, f.severity);
+                found = true;
+            }
+        }
+        assertTrue(found);
+    }
+
+    // Raising an already-maxed vertex (prior target diff already exactly 2.0 m) by one more
+    // 0.1 m unit must become a confirmed, OVER_LIMIT violation.
+    @Test
+    void raisingAlreadyMaxedVertexByOneUnitViolates() {
+        Area varea = oneTile();
+        int[] prior = {20, 0, 0, 0};
+        int[] cand = {21, 0, 0, 0};
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, prior, cand, terrain, LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VIOLATION, res.overall);
+        boolean found = false;
+        for(SurveyConstraintResult.EdgeFinding f : res.findings)
+            if(varea.contains(f.a) && varea.contains(f.b) && (f.status == SurveyConstraintResult.Status.VIOLATION)) {
+                assertEquals(SurveyConstraintResult.Severity.OVER_LIMIT, f.severity);
+                found = true;
+            }
+        assertTrue(found);
+    }
+
+    // Lowering that already-maxed vertex to reduce the slope is always legal -- AT_LIMIT must
+    // never mean "frozen in every direction".
+    @Test
+    void loweringAlreadyMaxedVertexReducesSlopeAndIsLegal() {
+        Area varea = oneTile();
+        int[] prior = {20, 0, 0, 0};
+        int[] cand = {15, 0, 0, 0}; // 1.5 m -- comfortably below the limit now
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, prior, cand, terrain, LIMIT);
+        assertEquals(SurveyConstraintResult.Status.VALID, res.overall);
+    }
+
+    // Reopening a survey on a previously player-created maximum slope: validateAbsolute (the
+    // idle/on-open status check) must surface AT_LIMIT, not stay silent just because nothing is
+    // being actively edited.
+    @Test
+    void reopeningSurveyOnPreviousMaxSlopeReportsAtLimit() {
+        Area varea = oneTile();
+        int[] savedDz = {20, 0, 0, 0}; // as loaded by Data.decode() from a prior session
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(varea, GRAN, savedDz, terrain, LIMIT);
+        assertTrue(res.hasAtLimit());
+        assertFalse(res.hasViolation());
+    }
+
+    // Existing naturally steep/cliff terrain: when the target matches actual terrain (Ground
+    // Level) and the real terrain itself is already over the limit, actualTerrainOverLimit must
+    // be true -- a genuine existing feature, not a target-only artifact.
+    @Test
+    void existingCliffTerrainMarkedAsActualNotTargetOnly() {
+        Area varea = oneTile();
+        Map<Coord, Double> heights = new HashMap<>();
+        for(Coord c : varea.margin(1))
+            heights.put(c, (c.x == 0) ? 0.0 : 3.0); // a genuine 3.0 m natural cliff
+        SurveyTerrainSnapshot terrain = SurveyTerrainSnapshot.forTesting(heights, new HashMap<>(), varea.margin(1));
+        int[] dz = {0, 30, 0, 30}; // Ground Level: target matches the real cliff exactly
+        SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(varea, GRAN, dz, terrain, LIMIT);
+        boolean found = false;
+        for(SurveyConstraintResult.EdgeFinding f : res.findings) {
+            if(varea.contains(f.a) && varea.contains(f.b)) {
+                assertEquals(Boolean.TRUE, f.actualTerrainOverLimit);
+                found = true;
+            }
+        }
+        assertTrue(found);
+    }
+
+    // A previously invalid *survey target* (e.g. saved by an older/less-strict validator or
+    // under Off mode) that does NOT correspond to a genuinely steep real terrain feature must be
+    // distinguishable: actualTerrainOverLimit is false even though the target itself is over the
+    // limit and "preexisting".
+    @Test
+    void previouslyInvalidTargetDistinctFromGenuineActualCliff() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0); // real terrain is flat
+        int[] dz = {0, 30, 0, 30}; // but the *saved target* already has an invalid 3.0 m cliff
+        // validate (worsening-aware), not validateAbsolute: "preexisting" is only meaningful
+        // relative to a prior-vs-candidate comparison, and validateAbsolute always compares a
+        // shape to itself (strict mode), so it never sets preexisting at all.
+        SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN, dz, dz, terrain, LIMIT);
+        boolean found = false;
+        for(SurveyConstraintResult.EdgeFinding f : res.findings) {
+            if(varea.contains(f.a) && varea.contains(f.b) && (f.severity == SurveyConstraintResult.Severity.OVER_LIMIT)) {
+                assertEquals(Boolean.FALSE, f.actualTerrainOverLimit);
+                assertTrue(f.preexisting);
+                found = true;
+            }
+        }
+        assertTrue(found);
+    }
 }
