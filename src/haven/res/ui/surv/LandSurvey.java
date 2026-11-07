@@ -6,8 +6,13 @@ import haven.render.*;
 import haven.render.sl.*;
 import nurgling.NStyle;
 import nurgling.conf.NDragProp;
+import nurgling.survey.SurveyConstraintResult;
+import nurgling.survey.SurveyConstraintValidator;
+import nurgling.survey.SurveyDragConstraintSolver;
 import nurgling.survey.SurveyEditHistory;
 import nurgling.survey.SurveySettings;
+import nurgling.survey.SurveyTerrainSnapshot;
+import nurgling.survey.SurveyVertexDiagnostics;
 import nurgling.widgets.NDraggableWidget;
 
 import java.util.*;
@@ -24,6 +29,7 @@ public class LandSurvey extends Window {
     public final Area area;
     public final Data data;
     public final Label zdlbl, wlbl, dlbl, errlbl;
+    public final Label terrlbl;
     public Area selection;
     private boolean inited = false;
     private final boolean isNew;
@@ -32,6 +38,17 @@ public class LandSurvey extends Window {
     private RenderTree.Slot s_dsp;
     private final SurveyEditHistory history = new SurveyEditHistory();
     private Button btnUndo, btnRedo;
+    /* Investigation diagnostic: optional, read-only vertex inspector (hover a vertex, same
+     * selection dsp.selected already tracks in Idle mode -- no new mouse listener). Never
+     * affects editing; purely for comparing the current edge-only rule (Model A) against an
+     * all-corners-per-tile rule (Model B) using real terrain + target data side by side. */
+    private boolean diagEnabled = false;
+    private Button btnDiag;
+    private Label[] diagLines;
+    /** The raw, pre-"/11" value of mkwidget's args[2], kept purely for the diagnostics panel's
+     *  unit-provenance line (Follow-up #4) -- never used in any arithmetic itself, since
+     *  data.gran (computed once in mkwidget) is already the authoritative derived value. */
+    private final float rawGranArg;
 
     private ICheckBox btnLock;
 
@@ -44,11 +61,12 @@ public class LandSurvey extends Window {
 		s.dsp.refreshStyle();
     }
 
-    public LandSurvey(Area area, Data data, boolean isNew) {
+    public LandSurvey(Area area, Data data, boolean isNew, float rawGranArg) {
 	super(Coord.z, "Land survey", true);
 	this.area = area;
 	this.data = data;
 	this.isNew = isNew;
+	this.rawGranArg = rawGranArg;
 	Widget prev = add(new Label(String.format("Area: %d m²", area.area())), 0, 0);
 	add(btnLock = new ICheckBox(NStyle.locki[0], NStyle.locki[1], NStyle.locki[2], NStyle.locki[3])
 	{
@@ -83,8 +101,9 @@ public class LandSurvey extends Window {
 	wlbl = add(new Label("..."), zdlbl.pos("bl").adds(0, 1));
 	dlbl = add(new Label("..."), wlbl.pos("bl").adds(0, 1));
 	errlbl = add(new Label(""), dlbl.pos("bl").adds(0, 1));
+	terrlbl = add(new Label(""), errlbl.pos("bl").adds(0, 1));
 	prev = add(new Button(UI.scale(125), "Ground level", false).action(this::initsurf),
-		   errlbl.pos("bl").adds(0, 10));
+		   terrlbl.pos("bl").adds(0, 10));
 	add(new Button(UI.scale(125), "Ground plane", false).action(this::initplane),
 	    prev.pos("ur").adds(10, 0));
 	prev = add(new Button(UI.scale(125), "Dig", false).action(() -> wdgmsg("lvl")),
@@ -95,16 +114,24 @@ public class LandSurvey extends Window {
 		   prev.pos("bl").adds(0, 10));
 	add(btnRedo = new Button(UI.scale(60), "Redo", false).action(this::redo),
 	    prev.pos("ur").adds(10, 0));
+	prev = add(btnDiag = new Button(UI.scale(260), "Diagnostics: off", false).action(this::toggleDiag),
+		   prev.pos("bl").adds(0, 10));
+	diagLines = new Label[SurveyVertexDiagnostics.LINE_COUNT];
+	for(int i = 0; i < diagLines.length; i++) {
+	    diagLines[i] = add(new Label(""), prev.pos("bl").adds(0, (i == 0) ? 10 : 2));
+	    prev = diagLines[i];
+	}
 
 	pack();
     }
 
     public static Widget mkwidget(UI ui, Object... args) {
 	Area area = Area.corn((Coord)args[0], (Coord)args[1]);
-	float gran = ((Number)args[2]).floatValue() / 11;
+	float rawGranArg = ((Number)args[2]).floatValue();
+	float gran = rawGranArg / 11;
 	Data data = new Data(Area.corni(area.ul, area.br), gran);
 	boolean isNew = (args[3] == null);
-	LandSurvey srv = new LandSurvey(area, data, isNew);
+	LandSurvey srv = new LandSurvey(area, data, isNew, rawGranArg);
 	if(!isNew) {
 	    data.decode(Utils.iv(args[3]), (byte[])args[4]);
 	    srv.inited = true;
@@ -170,12 +197,175 @@ public class LandSurvey extends Window {
 	    if(vz > tz)
 		hn += vz - tz;
 	}
-	zdlbl.settext(String.format("Peak to trough: %.1f m", (max - min) / 10.0));
+	/* Follow-up #4 fix: this used to hardcode "/ 10.0", silently assuming gran is always
+	 * 10f/11f (so gran*tilesz.x == 10) -- an assumption the diagnostic investigation found
+	 * false for at least one live survey (gran observed == 1). Over actual terrain (vz), same
+	 * conversion the target side already uses via metersPerDzUnit. */
+	zdlbl.settext(String.format("Peak to trough: %.2f m", (max - min) * SurveyConstraintValidator.metersPerDzUnit(data.gran)));
 	if(sd >= 0)
 	    wlbl.settext(String.format("Units of soil required: %d", sd));
 	else
 	    wlbl.settext(String.format("Units of soil left over: %d", -sd));
 	dlbl.settext(String.format("Units of soil to dig: %d", hn));
+	refreshTerrainStatus(map);
+    }
+
+    /* --- Phase 2: terrain slope constraint engine integration --- */
+
+    private SurveyTerrainSnapshot terrainSnapshot;
+    private int terrainSnapshotMapSeq = -1;
+    /** Diagnostic only: the most recent Constrain-mode clamp result, surfaced on the status
+     *  line so a clamp's limiting edge/amount can be checked in-game without guessing. Cleared
+     *  whenever a gesture ends (mode(new Idle())), not persisted, never affects behavior. */
+    private SurveyDragConstraintSolver.ClampResult lastClamp;
+
+    /** Snapshot is cheap to rebuild but not free (probes a one-vertex ring around the whole
+     *  survey); cached per gesture/tick and only rebuilt when the map actually changed. */
+    SurveyTerrainSnapshot terrainSnapshot(MCache map) {
+	if((terrainSnapshot == null) || (terrainSnapshotMapSeq != map.chseq)) {
+	    terrainSnapshot = SurveyTerrainSnapshot.capture(map, data.varea);
+	    terrainSnapshotMapSeq = map.chseq;
+	}
+	return terrainSnapshot;
+    }
+
+    /** Idle (non-dragging) status: are there any over-limit edges in the currently committed
+     *  shape at all (new or pre-existing), and is any nearby terrain unverifiable. Skips the
+     *  check entirely in Off mode. */
+    private void refreshTerrainStatus(MCache map) {
+	SurveyConstraintValidator.Mode mode = SurveySettings.terrainConstraintMode();
+	if(mode == SurveyConstraintValidator.Mode.OFF) {
+	    terrlbl.settext("");
+	    dsp.setTerrainMarkers(Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
+	    return;
+	}
+	/* Follow-up #6: the shared, gran-aware policy limit (RAW_TICK_LIMIT ticks converted through
+	 * this survey's own live gran) -- no longer the old fixed TERRAIN_MAX_SLOPE_METERS, which
+	 * was found to disagree with the real in-game boundary at gran=1. */
+	double limit = SurveyConstraintValidator.limitMetersFor(data.gran);
+	SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(data.varea, data.gran, data.dz,
+										 terrainSnapshot(map), limit);
+	/* Marker colour and the idle status line are driven purely by Severity (the edge's
+	 * absolute relationship to the real limit), not Status (the worsening-aware blocking
+	 * decision) -- a pre-existing, unworsened cliff is still genuinely over the limit and
+	 * should show red, same as a freshly-created one; see SurveyConstraintResult.Severity's
+	 * class doc for why the two are kept orthogonal. */
+	Set<Coord> over = new HashSet<>(), unk = new HashSet<>(), atLimit = new HashSet<>();
+	int overCount = 0, atLimitCount = 0, unkCount = 0;
+	double worst = 0;
+	for(SurveyConstraintResult.EdgeFinding f : res.findings) {
+	    switch(f.severity) {
+	    case OVER_LIMIT:
+		over.add(f.a); over.add(f.b);
+		overCount++;
+		worst = Math.max(worst, f.candidateDiffMeters);
+		break;
+	    case AT_LIMIT:
+		atLimit.add(f.a); atLimit.add(f.b);
+		atLimitCount++;
+		break;
+	    case UNKNOWN:
+		unk.add(f.a); unk.add(f.b);
+		unkCount++;
+		break;
+	    default:
+		break;
+	    }
+	}
+	dsp.setTerrainMarkers(over, unk, atLimit);
+	String base;
+	if(overCount > 0)
+	    base = String.format("Terrain: %d edge(s) over %.2fm limit (worst %.2fm)",
+				  overCount, limit, worst);
+	else if(atLimitCount > 0)
+	    base = String.format("Terrain: %d edge(s) at the %.2fm limit (further raising blocked, lowering still OK)",
+				  atLimitCount, limit);
+	else if(unkCount > 0)
+	    base = String.format("Terrain: %d nearby edge(s) unverifiable (unloaded)", unkCount);
+	else
+	    base = "Terrain: OK";
+	if((mode == SurveyConstraintValidator.Mode.CONSTRAIN) && (lastClamp != null) && (lastClamp.limitingEdge != null)) {
+	    SurveyConstraintValidator.Edge le = lastClamp.limitingEdge;
+	    SurveyTerrainSnapshot terrain = terrainSnapshot(map);
+	    double mpd = SurveyConstraintValidator.metersPerDzUnit(data.gran);
+	    Double targetDiff = edgeTargetDiffMeters(le, terrain, mpd);
+	    Double ha = terrain.terrainHeight(le.a), hb = terrain.terrainHeight(le.b);
+	    Double actualDiff = ((ha != null) && (hb != null)) ? Math.abs(ha - hb) : null;
+	    base += String.format(" [clamped at %s-%s%s%s]", le.a, le.b,
+				   (targetDiff != null) ? String.format(", target %.2fm", targetDiff) : "",
+				   (actualDiff != null) ? String.format(", actual %.2fm", actualDiff) : "");
+	}
+	terrlbl.settext(base);
+    }
+
+    /** Diagnostic helper: the limiting edge's current target-height difference in metres, for
+     *  whichever endpoint(s) are inside the survey (dz) vs. just outside it (actual terrain). */
+    private Double edgeTargetDiffMeters(SurveyConstraintValidator.Edge e, SurveyTerrainSnapshot terrain, double mpd) {
+	boolean inA = data.varea.contains(e.a), inB = data.varea.contains(e.b);
+	if(inA && inB)
+	    return Math.abs(data.dz[data.varea.ridx(e.a)] - data.dz[data.varea.ridx(e.b)]) * mpd;
+	Coord insideC = inA ? e.a : (inB ? e.b : null);
+	Coord outsideC = inA ? e.b : (inB ? e.a : null);
+	if(insideC == null)
+	    return null;
+	Double oh = terrain.terrainHeight(outsideC);
+	if(oh == null)
+	    return null;
+	return Math.abs((data.dz[data.varea.ridx(insideC)] * mpd) - oh);
+    }
+
+    /** Clamps a Mover/CMover gesture's requested diff to the largest amount that doesn't newly
+     *  violate (or worsen) the slope rule, in Constrain mode only -- Off/Warn never alter the
+     *  drag itself; Warn's live feedback instead comes from updmap()'s per-tick absolute check
+     *  above, which already runs every tick during a drag since it sets upd=true. */
+    float clampDrag(int[] gidx, float[] sz, float[] coeff, int[] priorDz, float requestedDiff) {
+	if((SurveySettings.terrainConstraintMode() != SurveyConstraintValidator.Mode.CONSTRAIN) || (requestedDiff == 0))
+	    return requestedDiff;
+	SurveyTerrainSnapshot terrain = terrainSnapshot(mv.ui.sess.glob.map);
+	SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
+	    data.varea, data.gran, priorDz, gidx, sz, coeff, requestedDiff, terrain,
+	    SurveyConstraintValidator.limitMetersFor(data.gran));
+	lastClamp = cr;
+	return cr.diff;
+    }
+
+    private void toggleDiag() {
+	diagEnabled = !diagEnabled;
+	btnDiag.change(diagEnabled ? "Diagnostics: on" : "Diagnostics: off");
+	if(!diagEnabled)
+	    for(Label l : diagLines)
+		l.settext("");
+    }
+
+    /** Fills the diagnostic panel from the currently hovered/selected vertex (dsp.selected,
+     *  already tracked by Idle's mouse-move handling for the existing highlight), or clears it
+     *  with a hint if nothing is selected. Read-only: never touches data/dz, history, or
+     *  clamping. */
+    private void updateDiag(MCache map) {
+	Coord vc = dsp.selected;
+	if(vc == null) {
+	    diagLines[0].settext("Hover over a vertex to inspect it.");
+	    for(int i = 1; i < diagLines.length; i++)
+		diagLines[i].settext("");
+	    pack(); // re-fit the window now that long diagnostic lines may have shrunk back down
+	    return;
+	}
+	SurveyTerrainSnapshot terrain = terrainSnapshot(map);
+	double limit = SurveyConstraintValidator.limitMetersFor(data.gran);
+	SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(
+	    data.varea, data.gran, rawGranArg, data.dz, terrain, limit, vc);
+	SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(
+	    data.varea, data.gran, data.dz, terrain, limit);
+	String[] lines = SurveyVertexDiagnostics.formatLines(r, cmp);
+	for(int i = 0; i < diagLines.length; i++)
+	    diagLines[i].settext(lines[i]);
+	/* Follow-up #4 fix: Label.settext() resizes the Label itself (haven.Label#settext calls
+	 * resize()), but nothing previously re-packed the Window around it -- these lines start
+	 * as "" at construction time, so the window's initial pack() sized itself far too narrow
+	 * for the real diagnostic text, which then rendered clipped at the window's edge. pack()
+	 * is cheap when nothing actually changed size (Widget#resize no-ops on an unchanged
+	 * Coord), so calling it every tick the panel is open is fine. */
+	pack();
     }
 
     private void lock(boolean enabled) {
@@ -324,6 +514,8 @@ public class LandSurvey extends Window {
 	public final UI.Grab grab;
 	public final float[] sz;
 	public final int[] gidx;
+	public final float[] coeff;
+	public final int[] priorDz;
 	public final float zsz;
 
 	public Mover(Coord vc, Area area, Coord sc) {
@@ -333,10 +525,13 @@ public class LandSurvey extends Window {
 	    this.zsz = dsp.zsize(vc);
 	    this.sz = new float[area.area()];
 	    this.gidx = new int[area.area()];
+	    this.coeff = new float[area.area()];
 	    for(Coord iv : area) {
 		gidx[area.ridx(iv)] = data.varea.ridx(iv);
 		this.sz[area.ridx(iv)] = data.wz[data.varea.ridx(iv)];
+		this.coeff[area.ridx(iv)] = 1f;
 	    }
+	    this.priorDz = data.dz.clone();
 	    grab = mv.ui.grabmouse(mv);
 	    dsp.active = true;
 	    dsp.update = true;
@@ -345,6 +540,7 @@ public class LandSurvey extends Window {
 	public boolean handle(MouseEvent ev) {
 	    if(ev instanceof MouseMoveEvent) {
 		float diff = Math.round((sc.y - ev.c.y) / zsz);
+		diff = clampDrag(gidx, sz, coeff, priorDz, diff);
 		for(Coord mv : area)
 		    data.wz[data.varea.ridx(mv)] = sz[area.ridx(mv)] + diff;
 		data.dupdate();
@@ -360,6 +556,7 @@ public class LandSurvey extends Window {
 			after[i] = data.wz[gidx[i]];
 		    history.push(gidx, sz, after);
 		    send();
+		    lastClamp = null;
 		    mode(new Idle());
 		    return(true);
 		}
@@ -375,6 +572,8 @@ public class LandSurvey extends Window {
 	public final UI.Grab grab;
 	public final float[] sz;
 	public final int[] gidx;
+	public final float[] coeff;
+	public final int[] priorDz;
 	public final float zsz;
 
 	public CMover(Coord vc, Area area, String corn, Coord sc) {
@@ -385,10 +584,20 @@ public class LandSurvey extends Window {
 	    this.zsz = dsp.zsize(vc);
 	    this.sz = new float[area.area()];
 	    this.gidx = new int[area.area()];
+	    this.coeff = new float[area.area()];
+	    float ul = corn.equals("ul") ? 1 : 0;
+	    float ur = corn.equals("ur") ? 1 : 0;
+	    float br = corn.equals("br") ? 1 : 0;
+	    float bl = corn.equals("bl") ? 1 : 0;
+	    float iw = 1f / (area.br.x - 1 - area.ul.x), ih = 1f / (area.br.y - 1 - area.ul.y);
 	    for(Coord iv : area) {
 		gidx[area.ridx(iv)] = data.varea.ridx(iv);
 		this.sz[area.ridx(iv)] = data.wz[data.varea.ridx(iv)];
+		float fx = (iv.x - area.ul.x) * iw, fy = (iv.y - area.ul.y) * ih;
+		this.coeff[area.ridx(iv)] = (((ul * (1 - fx)) + (ur * fx)) * (1 - fy)) +
+					    (((bl * (1 - fx)) + (br * fx)) * fy);
 	    }
+	    this.priorDz = data.dz.clone();
 	    grab = mv.ui.grabmouse(mv);
 	    dsp.active = true;
 	    dsp.update = true;
@@ -397,17 +606,9 @@ public class LandSurvey extends Window {
 	public boolean handle(MouseEvent ev) {
 	    if(ev instanceof MouseMoveEvent) {
 		float diff = Math.round((sc.y - ev.c.y) / zsz);
-		float ul = (corn == "ul") ? diff : 0;
-		float ur = (corn == "ur") ? diff : 0;
-		float br = (corn == "br") ? diff : 0;
-		float bl = (corn == "bl") ? diff : 0;
-		float iw = 1f / (area.br.x - 1 - area.ul.x), ih = 1f / (area.br.y - 1 - area.ul.y);
-		for(Coord mv : area) {
-		    float fx = (mv.x - area.ul.x) * iw, fy = (mv.y - area.ul.y) * ih;
-		    float cd = (((ul * (1 - fx)) + (ur * fx)) * (1 - fy)) +
-			       (((bl * (1 - fx)) + (br * fx)) * fy);
-		    data.wz[data.varea.ridx(mv)] = sz[area.ridx(mv)] + cd;
-		}
+		diff = clampDrag(gidx, sz, coeff, priorDz, diff);
+		for(Coord mv : area)
+		    data.wz[data.varea.ridx(mv)] = sz[area.ridx(mv)] + (coeff[area.ridx(mv)] * diff);
 		data.dupdate();
 		data.seq++;
 		upd = true;
@@ -421,6 +622,7 @@ public class LandSurvey extends Window {
 			after[i] = data.wz[gidx[i]];
 		    history.push(gidx, sz, after);
 		    send();
+		    lastClamp = null;
 		    mode(new Idle());
 		    return(true);
 		}
@@ -451,6 +653,12 @@ public class LandSurvey extends Window {
 	if(btnUndo != null) {
 	    btnUndo.disable(!history.canUndo());
 	    btnRedo.disable(!history.canRedo());
+	}
+	if(diagEnabled && inited) {
+	    try {
+		updateDiag(mv.ui.sess.glob.map);
+	    } catch(Loading l) {
+	    }
 	}
 	super.tick(dt);
     }

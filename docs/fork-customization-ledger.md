@@ -433,6 +433,68 @@ retire. Individual keys retire only when the fork feature they back is removed.
 lock-button usability, undo/redo, and height-encoding safety) without duplicating the editor or
 touching the server protocol; see the PR for the full requirements.
 
+## Land Survey terrain constraint engine (Phase 2: slope validation, Off/Warn/Constrain)
+
+**Files:**
+- `src/nurgling/survey/SurveyTerrainSnapshot.java` (new) — immutable capture of real terrain
+  elevations (metres — `MCache.getfz()` divided by `MCache.tilesz.x`, fixed in the follow-up below;
+  see "Follow-up fix" for why the division is needed) and cliff-tile classification
+  (`Ridges.brokenp`) around a survey's vertex area plus a one-vertex outside ring. Absence means
+  unknown, never zero.
+- `src/nurgling/survey/SurveyConstraintResult.java` (new) — validation outcome: overall status
+  (`VALID`/`VIOLATION`/`UNKNOWN`) plus the specific non-valid edges found.
+- `src/nurgling/survey/SurveyConstraintValidator.java` (new) — the deterministic, render- and
+  NConfig-independent slope rule itself (~2.0 m between connected vertices; see the Phase 2
+  investigation report linked from `docs/README.md` for what is and isn't verified about this).
+  Takes explicit `Area`/`gran`/dz-array/`SurveyTerrainSnapshot`/limit parameters rather than
+  reading `SurveySettings`/`NConfig`, so it's exercised with synthetic grids in
+  `test/nurgling/survey/SurveyConstraintValidatorTest.java` without touching game resources.
+- `src/nurgling/survey/SurveyDragConstraintSolver.java` (new) — finds the largest in-bounds drag
+  amount for one `Mover`/`CMover` gesture without distorting its shape (never clamps vertices
+  independently); exact per-edge analytic solve, not a search, since each edge's height
+  difference is affine in the gesture's one scalar parameter. See
+  `test/nurgling/survey/SurveyDragConstraintSolverTest.java`.
+- `src/nurgling/survey/SurveySettings.java` — added `terrainConstraintMode()` /
+  `setTerrainConstraintMode()` (backed by the new `NConfig.Key.surveyTerrainConstraintMode`,
+  default `WARN`) and fixed (not user-configurable) violation/uncertain marker colors.
+- `src/nurgling/widgets/nsettings/SurveySettingsPanel.java` — new "Terrain Constraints" section:
+  an Off/Warn/Constrain `haven.RadioGroup`.
+- `src/haven/res/ui/surv/Display.java`, `src/haven/res/ui/surv/LandSurvey.java` (both
+  `@FromResource`, upstream-owned) — see below.
+- `src/nurgling/NConfig.java` — one new key, `surveyTerrainConstraintMode` (String, `"OFF"` /
+  `"WARN"` / `"CONSTRAIN"`, default `"WARN"`).
+
+**Fork behavior:**
+- `LandSurvey.updmap()` (already called whenever the committed shape or map changes) now also
+  runs `SurveyConstraintValidator.validateAbsolute()` against the live committed `dz` shape and a
+  cached `SurveyTerrainSnapshot` (rebuilt only when `MCache.chseq` changes), updating a new status
+  label (`terrlbl`) and `Display`'s violation/uncertain vertex marker sets. This runs in Warn and
+  Constrain mode; Off skips it entirely. Because this already fires every tick while `upd` is set
+  (which a drag does continuously), Warn mode gets live drag feedback for free, with no separate
+  per-mouse-move validation pass.
+- `LandSurvey.Mover`/`CMover` each now also capture `priorDz` (the committed `dz` shape at gesture
+  start) and a per-vertex `coeff` array (1 for `Mover`; the same bilinear corner weight `CMover`
+  already computed for its interpolation, factored out so the solver can use it too) and route
+  the requested `diff` through `LandSurvey.clampDrag()`. In Constrain mode this clamps `diff` to
+  `SurveyDragConstraintSolver`'s answer before applying it; Off/Warn pass `diff` through
+  unchanged. Ground Level/Ground Plane/Undo/Redo are not separately gated — they already route
+  through `updmap()`'s status refresh, and per spec are never auto-corrected, only warned about.
+- `Display` gained a third halo-style vertex render pass (same idiom as the existing selection
+  halo), driven by two new per-vertex flag bits (16 = confirmed violation, 32 = unverifiable);
+  it layers a ring on top without ever touching the existing status-dot color/bits, so a
+  violation marker and the normal green/blue/purple dot are both visible together.
+- Diagonal (corner-to-corner) vertex pairs are deliberately **not** checked by default
+  (`SurveyConstraintValidator.CHECK_DIAGONALS = false`) — unverified against the server; see the
+  class doc for the exact in-game test that would resolve it.
+- Edge-highlighting (as opposed to vertex marking) and paved-tile/obstruction detection beyond
+  the existing `Ridges.brokenp` cliff-tile check are explicitly out of scope for this PR; see its
+  description for the full list of known limitations and proposed follow-ups.
+
+**Why:** Phase 2 of the Land Survey overhaul — stop users from dragging a survey into a shape the
+server's terraforming rules can't actually produce, without hard-blocking edits whose legality
+under that rule isn't actually verified; see the PR for the full requirements and the
+investigation report for the evidence behind the ~2.0 m figure and what remains unconfirmed.
+
 **Minimum hook that must survive:** `Data.encode()`'s return type now includes a checked
 `throws HeightRangeExceededException` — a hafen integration that regenerates `Data.java` from
 upstream will drop this unless re-applied. `Display`/`LandSurvey`'s `@FromResource(name = "ui/surv",
@@ -448,6 +510,125 @@ smoke-test checklist.
 **Superseded when:** a future hafen integration changes `ui/surv`'s resource version or the
 `data`/`lock` message shapes; re-verify this entire entry against the new `Display.java`/
 `LandSurvey.java` at that point.
+
+**Follow-up fix (same PR, pre-merge):** in-game testing of the above found the slope rule roughly
+11x too strict (ordinary edges flagged after ~0.1-0.2 m instead of ~2.0 m). Root cause:
+`MCache.getfz()` returns world-Z units, which `MCache.Grid`'s z-decode pre-multiplies by
+`MCache.tilesz.x` (11) to align with the x/y grid — it is not metres on its own. The validator and
+solver originally divided a `dz` difference only by `gran`, recovering world-Z units and then
+comparing those directly against the 2.0 m limit. Fixed by adding
+`SurveyConstraintValidator.metersPerDzUnit(gran)` (`1 / (gran * MCache.tilesz.x)`) as the one
+authoritative dz-to-metres factor, used everywhere the old `/ gran` division was, and by fixing
+`SurveyTerrainSnapshot.capture()` to divide `MCache.getfz()` by `MCache.tilesz.x` before storing
+it. Both test files' `GRAN` constant was also corrected from an unrealistic `10f` to the real
+client's `10f/11f` — the original `10f` had accidentally made the buggy single-division formula
+produce the right-looking number, masking the bug. See `docs/land-survey-editor.md`'s "Regression:
+unit-conversion bug" section for the full derivation.
+
+**Follow-up #2 (same PR, pre-merge): actual terrain slopes vs. target slopes, AT_LIMIT severity.**
+A second in-game report raised a distinct concern (the 2.0 m limit applies to real terrain
+regardless of how it got that way, so a new survey shouldn't grant a fresh 2.0 m of headroom on
+top of an existing real offset). Investigation found the interior-edge check was already correct
+for this (it always compared target-vs-target, which is the right comparison since the final real
+terrain becomes the committed target) *given* an accurate `priorDz` — true for Ground Level init
+or a reopened survey, verified with new tests; Ground Plane's flat init is intentionally
+different and was confirmed to still behave correctly on its own terms. The one real gap:
+`validateAbsolute()` only flagged a strict `>` comparison, so an edge already at exactly 2.0 m got
+no marker. Added `SurveyConstraintResult.Severity` (`BELOW_LIMIT`/`AT_LIMIT`/`OVER_LIMIT`/
+`UNKNOWN`), independent of the existing worsening-aware `Status`, plus `EdgeFinding.
+actualTerrainOverLimit` to distinguish a genuine existing cliff from a stale/invalid saved target.
+`Display` gained a third marker colour (amber, flag bit 64) alongside the existing red/blue ones;
+`LandSurvey`'s status line and idle marker sets are now severity-driven rather than status-driven,
+so a pre-existing unworsened cliff still shows red. No change to the worsening-aware blocking
+logic itself. Intermediate dig/fill reachability remains an open, unverified question (unchanged
+from the original PR). See `docs/land-survey-editor.md`'s "Follow-up: actual terrain slopes vs.
+target slopes" section for the full derivation and the new tests. `ant test`: 407/407 passing (up
+from 397).
+
+**Follow-up #3 (same PR, pre-merge): diagonal-corner discrepancy investigation.** A third in-game
+report: a manually-maxed vertex (server already refused further soil) still showed up to ~0.2 m of
+headroom in the editor, and a large survey's worst-edge readout didn't match individually-inspected
+vertices. Primary hypothesis: `CHECK_DIAGONALS = false` (unchanged since Phase 2) means the
+edge-only validator can miss a tile's diagonal corner-pair being the tightest relationship even
+when every edge-adjacent pair is comfortably legal. Confirmed architecturally with a worked
+example (interior spike 2.0 m up, edge-adjacent neighbors at 0.2 m each giving 1.8 m edges, a
+diagonal corner at 0 m giving the true 2.0 m) and regression tests, but **not** confirmed against
+the server — whether the real rule is a flat 2.0 m on every corner pair or a distance-scaled
+diagonal threshold remains open, and this follow-up does not decide between them. No change to
+production behavior: `CHECK_DIAGONALS` stays `false`, `validate()`/`clamp()` are untouched. Added,
+read-only: `SurveyConstraintValidator.compareModels()` (Model A edge-only vs. Model B all-six-
+corner-pairs, same snapshot, violation counts + worst difference) and
+`nurgling.survey.SurveyVertexDiagnostics` (per-vertex actual/target height, all 8 neighbors, all 4
+sharing tiles' corner spreads, each model's limiting relationship and target-based permitted-raise
+figure) plus an in-game **Diagnostics** toggle in `LandSurvey` reusing the existing hover-selection
+(`Display.selected`) to drive it, so it adds no new mouse handling. See
+`docs/land-survey-editor.md`'s "Follow-up #3" section for the worked numbers, the in-game test that
+would actually resolve the open question, and the full new-tests list. `ant test`: 417/417 passing
+(up from 407).
+
+**Follow-up #4 (same PR, pre-merge): unit/threshold semantics -- live `gran` is not always
+10/11.** New screenshots from the Follow-up #3 diagnostics panel contradicted this PR's own
+standing assumption that live `gran` is "always" `10f/11f`: a baseline-to-+3 dz sequence
+(239/240/241/242 against a flat northern/NE/NW neighbor at 219) reproduced observed target
+heights (21.73/21.82/21.91/22.00), diffs (1.82/1.91/2.00/2.09), and A==B permitted-raise figures
+(0.18/0.09/0.00/-0.09) to 2 decimal places **only** under `gran = 1` (raw `mkwidget` `args[2] ==
+11`), not `10f/11f` (which would move the target by exactly 0.10 m per dz step, not the observed
+0.09 m). Model A and Model B agreed throughout this sequence (N/NE/NW all tied), so this
+particular symptom is fully explained by the `gran` mismatch and is **not** an example of the
+Follow-up #3 diagonal gap -- that question remains exactly as open as before. Root cause: two
+places assumed a specific `gran` instead of reading the one actually passed in -- a stale doc
+comment on `metersPerDzUnit` claiming the 10/11 value was "verified empirically" (now corrected),
+and a real bug in `LandSurvey#updmap`'s "Peak to trough" readout, which hardcoded `/ 10.0` instead
+of calling `metersPerDzUnit(data.gran)` like every other readout already does (now fixed). No
+change to `metersPerDzUnit()`'s own arithmetic was needed -- it already took `gran` as a
+parameter. The 2.0 m limit's provenance was traced independently of `MCache`'s own `*11` z-buffer
+decode (a separately-sourced protocol constant that happens to equal `tilesz.x`) and still rests
+only on the wiki citation; the manual soil-placement test once thought to corroborate it never
+logged its own live `gran`, so it no longer can be assumed to confirm 2.0 m specifically under
+`10f/11f`. Added: raw `args[2]`/`gran`/`mpd`/raw-`dz`/build-tag and the limit-in-three-units to the
+per-vertex Diagnostics panel, signed (not just absolute) neighbor diffs, and a `pack()` call after
+every diagnostics update so long lines stop clipping at the window's edge. See
+`docs/land-survey-editor.md`'s "Follow-up #4" section for the full table, worked arithmetic, and
+the controlled live experiment (recording accepted/refused soil placements) that was asked for but
+explicitly **not** run. `ant test`: 421/421 passing (up from 417).
+
+**Follow-up #5 (same PR, pre-merge): dz-native raw-tick candidate model (Model C).** Fresh
+screenshots showed the *same* "extra headroom" symptom persisting after Follow-up #4's gran fix,
+this time traced to a second, independent assumption: that the 2.0 m limit is metres-native and
+should be re-derived into dz-ticks via the current survey's `gran`, rather than being a fixed
+dz-tick count the server checks directly. A user-run in-game test (20 dirt placements accepted on
+a flat 5x2-tile plateau, no more) confirmed the real cap was exactly 20 raw dz-ticks under
+`gran = 1` -- two ticks short of the 22 ticks (2.0 m / `metersPerDzUnit(1)`) Model A/B predict.
+Hand arithmetic directly from the screenshots (vertex dz=241, neighbor dz=221, diff=20) matches.
+Added `SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS = 20` (later renamed `RAW_TICK_LIMIT`,
+see Follow-up #6) and a diagnostic-only Model C (cardinal-topology, raw-tick-native, no gran/mpd
+conversion between two in-survey endpoints) to `compareModels()` and `SurveyVertexDiagnostics`,
+surfaced in the panel alongside (not replacing) Models A/B. At the time, did **not** change
+`validate()`/`clamp()`/`maxSlopeMeters` or any production blocking behavior -- see Follow-up #6
+immediately below for why that changed. `ant test`: 424/424 passing (up from 421).
+
+**Follow-up #6 (same PR, pre-merge): production correction -- the 20-raw-tick limit is now
+enforced.** Testing after Follow-up #5 still showed amber/red at the old (wrong) 22-tick boundary,
+because Model C sat beside production as a comparison nobody's edits were actually bound by.
+`SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS` was renamed `RAW_TICK_LIMIT` and gained
+`limitMetersFor(gran)` (`RAW_TICK_LIMIT * metersPerDzUnit(gran)`), the single shared conversion now
+used by every production call site: `LandSurvey.refreshTerrainStatus` (validateAbsolute/status
+text/markers), `LandSurvey.clampDrag` (the drag solver), and `LandSurvey.updateDiag`
+(diagnostics/compareModels). No change to `classify()`/`severity()`/the drag solver's own math,
+boundary-edge handling, worsening-aware logic, undo/redo, or `Data` encoding -- only the limit
+*value* those call sites were handed changed, from the fixed `SurveySettings
+.TERRAIN_MAX_SLOPE_METERS` (2.0 m, now a historical-reference-only constant kept for older tests)
+to the gran-aware `limitMetersFor(data.gran)`. Confirmed correct at `gran=1` only; applied at
+every `gran` as the best current model, not as independently re-confirmed cross-`gran` invariance.
+Also corrected a Follow-up #5 documentation claim: a `gran=1` refusal-message log at the 21st
+placement cannot distinguish "fixed 20 ticks" from "fixed ~1.818 m" (both predict the same
+boundary there) -- only a second, different `gran` can. New production-path regression tests
+(`SurveyConstraintValidatorTest`): `limitMetersFor` reconciling both known `gran` values; the
+19/20/21/22/23-tick severity/status sequence through `validateAbsolute()` against the real
+production limit; a boundary edge against real outside terrain at the corrected limit; the drag
+solver clamping to 20 ticks (not 22) with the clamped shape reading back as exactly `AT_LIMIT`;
+and lowering an at-cap edge remaining legal. See `docs/land-survey-editor.md`'s "Follow-up #6"
+section. `ant test`: 429/429 passing (up from 424).
 
 ## Fork `BotRegistry` registrations
 

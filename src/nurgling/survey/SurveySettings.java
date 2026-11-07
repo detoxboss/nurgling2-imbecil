@@ -156,6 +156,43 @@ public class SurveySettings {
         return flag(NConfig.Key.surveyNewUnlocked, true);
     }
 
+    /** Historical wiki-sourced reference value only, kept for existing tests that want a fixed
+     *  (gran-independent) limit -- <b>no longer the production limit</b>. Follow-up #6: every
+     *  production call site (validate/clamp/drag-solver/markers/status text/diagnostics) now
+     *  derives its working limit from {@code SurveyConstraintValidator.limitMetersFor(gran)}
+     *  (a fixed 20-raw-dz-tick count, converted through the survey's own live {@code gran}),
+     *  since the fixed-2.0-m-everywhere model this constant represents was found to disagree
+     *  with the real in-game boundary at {@code gran=1} (22 ticks predicted vs. 20 actual). Not
+     *  currently user-configurable. */
+    public static final double TERRAIN_MAX_SLOPE_METERS = 2.0;
+
+    public static SurveyConstraintValidator.Mode terrainConstraintMode() {
+        Object v = NConfig.get(NConfig.Key.surveyTerrainConstraintMode);
+        if(v instanceof String) {
+            try {
+                return SurveyConstraintValidator.Mode.valueOf((String)v);
+            } catch(IllegalArgumentException e) {
+                // fall through to default
+            }
+        }
+        return SurveyConstraintValidator.Mode.WARN;
+    }
+
+    public static void setTerrainConstraintMode(SurveyConstraintValidator.Mode mode) {
+        NConfig.set(NConfig.Key.surveyTerrainConstraintMode, mode.name());
+    }
+
+    /** Fixed (not user-configurable) colours for the terrain-constraint vertex overlay -- a
+     *  separate halo-style render pass, like the selection highlight, so the normal
+     *  green/blue/purple status dot underneath is never hidden or replaced. */
+    public static final Color TERRAIN_VIOLATION_COLOR = new Color(255, 40, 40);
+    /** At-limit (not yet over it) marker -- deliberately a distinct amber/orange, separate from
+     *  both red (over-limit violation) and the unknown colour below, per the "AT_LIMIT must be
+     *  visually distinguishable, not just a weaker violation colour" requirement. */
+    public static final Color TERRAIN_AT_LIMIT_COLOR = new Color(255, 165, 0);
+    public static final Color TERRAIN_UNKNOWN_COLOR = new Color(120, 170, 255);
+    public static final float TERRAIN_MARKER_SIZE = 13f;
+
     public static FColor fcolor(Color c, int opacityPct) {
         return new FColor(c.getRed() / 255f, c.getGreen() / 255f, c.getBlue() / 255f, opacityPct / 100f);
     }
