@@ -56,16 +56,28 @@ public final class MarketApiClient {
         return MarketLayout.parse(requestJson("GET", "/api/v1/layout", null, attempts));
     }
 
-    public void saveWorldCoordinates(JSONObject payload) throws IOException, InterruptedException {
-        requestJson("PUT", "/api/v1/layout/world-coordinates", payload, attempts);
+    /** Reports every stand detected in the sweep, including ones the layout does not know yet. */
+    public void reportDiscovery(JSONObject payload) throws IOException, InterruptedException {
+        requestJson("POST", "/api/v1/discovery", payload, attempts);
     }
 
-    public void putStand(String scanId, int houseId, JSONObject payload) throws IOException, InterruptedException {
-        requestJson("PUT", "/api/v1/scans/" + path(scanId) + "/stands/" + houseId, payload, attempts);
+    public void putStand(String scanId, int standId, JSONObject payload) throws IOException, InterruptedException {
+        requestJson("PUT", "/api/v1/scans/" + path(scanId) + "/stands/" + standId, payload, attempts);
     }
 
-    public void complete(String scanId) throws IOException, InterruptedException {
-        requestJson("POST", "/api/v1/scans/" + path(scanId) + "/complete", new JSONObject(), attempts);
+    /**
+     * Publishes the scan. {@code allowPartial} is the scanner's explicit statement that some commissioned
+     * stands could not be read; the server then keeps their last known listing instead of dropping them.
+     */
+    public void complete(String scanId, boolean allowPartial, java.util.Collection<Integer> unreachable, String note)
+            throws IOException, InterruptedException {
+        JSONObject payload = new JSONObject();
+        payload.put("allowPartial", allowPartial);
+        payload.put("unreachable", new org.json.JSONArray(unreachable));
+        if (note != null && !note.isEmpty()) {
+            payload.put("note", note.length() > 500 ? note.substring(0, 500) : note);
+        }
+        requestJson("POST", "/api/v1/scans/" + path(scanId) + "/complete", payload, attempts);
     }
 
     public void ensureIcon(String resource, byte[] png) throws IOException, InterruptedException {

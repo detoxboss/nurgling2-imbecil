@@ -5,35 +5,36 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Server-owned identity and map position for every physical H4D barter stand. */
+/**
+ * Server-owned stand identity (schema 2).
+ *
+ * Carries permanent identity, cluster membership and the private physical reference only. Customer
+ * map presentation (marker positions, artwork) is deliberately absent: it can change freely without
+ * ever affecting which physical stand is which.
+ */
 public final class MarketLayout {
     public static final class Stand {
-        public final int houseId;
+        public final int standId;
         public final String standKey;
         public final int clusterId;
         public final int stallNumber;
-        public final int routeOrder;
-        public final double mapX;
-        public final double mapY;
-        public final Double worldX;
-        public final Double worldY;
+        /** Null until the stand has been commissioned (bound to a physical position). */
+        public final PhysicalRef physical;
 
-        Stand(int houseId, String standKey, int clusterId, int stallNumber, int routeOrder,
-              double mapX, double mapY, Double worldX, Double worldY) {
-            this.houseId = houseId;
+        Stand(int standId, String standKey, int clusterId, int stallNumber, PhysicalRef physical) {
+            this.standId = standId;
             this.standKey = standKey;
             this.clusterId = clusterId;
             this.stallNumber = stallNumber;
-            this.routeOrder = routeOrder;
-            this.mapX = mapX;
-            this.mapY = mapY;
-            this.worldX = worldX;
-            this.worldY = worldY;
+            this.physical = physical;
+        }
+
+        public boolean isBound() {
+            return physical != null;
         }
     }
 
@@ -46,6 +47,10 @@ public final class MarketLayout {
     }
 
     public static MarketLayout parse(JSONObject json) throws IOException {
+        if (json.optInt("schema", 1) != 2) {
+            throw new IOException("The H4D Market server still serves the legacy layout; upgrade the server to "
+                    + "v0.4.0 or newer before running this scanner");
+        }
         int version = json.optInt("version", 0);
         JSONArray clusters = json.optJSONArray("clusters");
         if (version < 1 || clusters == null) {
@@ -60,49 +65,42 @@ public final class MarketLayout {
             JSONArray clusterStands = cluster.getJSONArray("stands");
             for (int standIndex = 0; standIndex < clusterStands.length(); standIndex++) {
                 JSONObject source = clusterStands.getJSONObject(standIndex);
-                int houseId = source.getInt("houseId");
+                int standId = source.getInt("standId");
                 String standKey = source.getString("standKey");
-                if (!ids.add(houseId) || !keys.add(standKey)) {
+                if (!ids.add(standId) || !keys.add(standKey)) {
                     throw new IOException("Market layout contains duplicate stand identities");
                 }
-                stands.add(new Stand(
-                        houseId,
-                        standKey,
-                        source.optInt("clusterId", clusterId),
-                        source.getInt("stallNumber"),
-                        source.optInt("routeOrder", houseId),
-                        source.getDouble("x"),
-                        source.getDouble("y"),
-                        optionalDouble(source, "worldX"),
-                        optionalDouble(source, "worldY")
-                ));
+                PhysicalRef physical = source.isNull("physical") || !source.has("physical")
+                        ? null : PhysicalRef.fromJson(source.getJSONObject("physical"));
+                stands.add(new Stand(standId, standKey, source.optInt("clusterId", clusterId),
+                        source.getInt("stallNumber"), physical));
             }
-        }
-        stands.sort(Comparator.comparingInt(stand -> stand.routeOrder));
-        if (stands.isEmpty()) {
-            throw new IOException("Market layout contains no stands");
         }
         return new MarketLayout(version, stands);
     }
 
-    public boolean isCalibrated() {
+    /** Stands that have a physical position and therefore can be scanned. */
+    public List<Stand> boundStands() {
+        List<Stand> bound = new ArrayList<>();
         for (Stand stand : stands) {
-            if (stand.worldX == null || stand.worldY == null) {
-                return false;
+            if (stand.isBound()) {
+                bound.add(stand);
             }
         }
-        return true;
+        return bound;
     }
 
-    public int calibratedCount() {
-        int count = 0;
+    public Set<Integer> boundIds() {
+        Set<Integer> ids = new HashSet<>();
         for (Stand stand : stands) {
-            if (stand.worldX != null && stand.worldY != null) count++;
+            if (stand.isBound()) {
+                ids.add(stand.standId);
+            }
         }
-        return count;
+        return ids;
     }
 
-    private static Double optionalDouble(JSONObject json, String name) {
-        return !json.has(name) || json.isNull(name) ? null : json.getDouble(name);
+    public int unboundCount() {
+        return stands.size() - boundStands().size();
     }
 }
