@@ -37,7 +37,14 @@ original manual test ran under. **Caveat added in Follow-up #5:** even the "metr
 gran-independent" framing above is now itself only one of two live hypotheses — a direct in-game
 test under `gran = 1` found a real cap of exactly 20 raw dz-ticks (1.818 m), not 22 ticks (2.0 m);
 see Follow-up #5 for the full writeup and the diagnostic-only Model C this added to compare against
-further testing.
+further testing. **Follow-up #6: this is no longer diagnostic-only.** The 20-raw-dz-tick figure
+is now the enforced production limit (`SurveyConstraintValidator.RAW_TICK_LIMIT`, converted
+through each survey's own live `gran` via `limitMetersFor`), replacing the fixed 2.0 m constant
+every blocking/marker/status code path used to read directly. This is confirmed correct at
+`gran=1` only; it is applied at every `gran` because it is the best current model (it fits every
+data point gathered, including the one that disproves the old fixed-metres alternative), not
+because cross-`gran` invariance has itself been independently verified a second time. See
+Follow-up #6 below for exactly what changed and what's still open.
 
 **From the cited wiki pages** (`ringofbrodgar.com/wiki/Terraforming`, `.../wiki/Survey`) and forum
 thread: a maximum slope of approximately 2.0 m is described as applying between "connected"
@@ -179,8 +186,12 @@ MCache.tilesz.x)`) wherever a limit (metres) and a difference (dz units) need to
 `SurveyTerrainSnapshot.capture()` also divides `MCache.getfz()` by `MCache.tilesz.x` at capture
 time, so `terrainHeight()` always returns real metres too — every value `SurveyConstraintValidator`
 and `SurveyDragConstraintSolver` compare is in metres by the time it's compared, with no scattered
-hardcoded `10`/`11` conversions anywhere else. The 2.0 m limit itself lives in
-`SurveySettings.TERRAIN_MAX_SLOPE_METERS`.
+hardcoded `10`/`11` conversions anywhere else. **Follow-up #6:** the enforced limit itself is no
+longer a fixed metres constant -- it's `SurveyConstraintValidator.limitMetersFor(gran)`, which
+converts a fixed 20-raw-dz-tick count (`RAW_TICK_LIMIT`) through whatever `gran` the survey being
+checked actually reports. `SurveySettings.TERRAIN_MAX_SLOPE_METERS` (2.0 m) still exists but is no
+longer read by any production call site -- only by older tests that want a fixed, gran-independent
+limit value for generic arithmetic checks.
 
 ### Regression: unit-conversion bug (fixed)
 
@@ -490,10 +501,74 @@ gran-invariant for edges entirely inside the survey). `compareModels()`'s `Model
 `modelCViolations`/`modelCWorstTicks`; `SurveyVertexDiagnostics.Report` gained
 `rawTickDiffByDir`/`modelCLimiting`/`modelCPermittedRaiseTicks`; the Diagnostics panel gained a
 line showing Model C's limiting relationship and permitted raise in ticks, and the whole-survey
-summary line now also reports Model C's violation count and worst tick diff. **This does not
-change `validate()`/`clamp()`/`maxSlopeMeters` or any blocking behavior** — Model C is diagnostic
-only, exactly like Model B, until further live evidence (a third `gran` data point, or an explicit
-refusal-message log) either confirms or refutes it.
+summary line now also reports Model C's violation count and worst tick diff. **At the time this
+was written, this did not change `validate()`/`clamp()`/`maxSlopeMeters` or any blocking
+behavior** — Model C was diagnostic only, exactly like Model B. **Follow-up #6 (below) changed
+that**, after the symptom was confirmed still present even with Model C surfaced only as a
+comparison.
+
+### Follow-up #6: production correction — the 20-raw-tick limit is now enforced
+
+Follow-up #5 added Model C as a diagnostic-only comparison so the 20-tick hypothesis could be
+checked against further live testing before anything was enforced on it. The requester reported
+that testing continued to show amber at +2 above the real terrain cap and red at +3 — i.e. the
+*displayed* severity, the drag clamp, and `validate()`/`validateAbsolute()` were still all keyed
+off the old fixed 2.0 m limit (22 ticks at `gran=1`), with Model C sitting uselessly alongside as
+a comparison nobody's edits were actually bound by. That defeats the point: a confirmed 2-tick
+discrepancy at the one `gran` value actually measured should not keep driving production behavior
+just because a second `gran` data point hasn't been measured yet.
+
+**What changed.** `SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS` was renamed to
+`RAW_TICK_LIMIT` (it's no longer a hypothesis sitting beside production behavior — it drives
+it), and gained `limitMetersFor(gran)`, the single shared conversion (`RAW_TICK_LIMIT *
+metersPerDzUnit(gran)`) every production call site now uses to get its working limit:
+`LandSurvey.refreshTerrainStatus` (feeds `validateAbsolute`, the idle status text, and the marker
+sets), `LandSurvey.clampDrag` (feeds `SurveyDragConstraintSolver.clamp`, the live drag clamp), and
+`LandSurvey.updateDiag` (feeds both `SurveyVertexDiagnostics.compute` and `compareModels`). None
+of those call sites, nor `validate()`/`validateAbsolute()`/`SurveyDragConstraintSolver.clamp()`
+themselves, changed their own logic or signature — `classify()`'s worsening-aware comparison,
+`severity()`'s AT_LIMIT banding, the drag solver's affine boundary-solving math, boundary-edge
+handling against real outside terrain, unknown-terrain handling, undo/redo, and `Data` encoding
+are all untouched. Only the *value* every one of those call sites was handed changed, from a
+fixed `SurveySettings.TERRAIN_MAX_SLOPE_METERS` (2.0 m) to `limitMetersFor(data.gran)` (20 ticks,
+converted through whichever `gran` that survey actually reports). `SurveySettings
+.TERRAIN_MAX_SLOPE_METERS` itself still exists, now documented as a historical reference value
+kept only for tests that want a fixed limit, not the production one.
+
+Because `classify()`/`severity()` already compared a dz-tick difference (converted to metres via
+`mpd`) against a limit expressed in metres with an AT_LIMIT band of exactly half a dz-unit's worth
+of metres, swapping in a limit of exactly `20 * mpd` instead of a fixed `2.0` was sufficient to
+get the full 19/20/21-tick banding right at any `gran`, with no change to the comparison
+arithmetic itself: 19 ticks now falls below the AT_LIMIT band, 20 ticks (the real proven cap)
+lands exactly at it (`VALID`/`AT_LIMIT`, not blocking), and 21+ ticks is `VIOLATION`/`OVER_LIMIT`
+(blocking in Constrain mode, lowering still always legal).
+
+**Height representation.** The policy is defined in raw `dz` ticks — the survey's own
+quantization unit — not world-Z and not metres; `limitMetersFor` is the one place that number is
+turned into whatever unit a given comparison needs. At `gran=1`, `dz` and world-Z happen to
+coincide numerically, which is why the one measured data point looks the same whichever way you
+describe it — that coincidence is specific to `gran=1` and is not, by itself, evidence that the
+rule is tick-native (rather than, say, world-Z-native, or a fixed real-metres distance) at every
+`gran`. The constant is still applied universally, because it is the best current model (every
+data point gathered so far is consistent with it, including the one that disproves the
+old fixed-metres-everywhere alternative), not because cross-`gran` invariance has been
+independently confirmed a second time. A future data point at a *different* `gran` that disagrees
+with `limitMetersFor` is the thing that would overturn `RAW_TICK_LIMIT`, not undermine the
+`gran=1` fix itself.
+
+**Correction to the Follow-up #5 checklist (item 15):** capturing the exact refusal message at
+the 21st placement on the `gran=1` plateau would confirm the boundary is 20 ticks there — it
+would *not* distinguish "the real limit is a fixed 20 dz-ticks, gran-invariant" from "the real
+limit is a fixed ~1.818 m, and 2.0 m was always an imprecise wiki rounding." Both hypotheses
+predict the exact same 20-tick boundary at `gran=1` (20 ticks × `metersPerDzUnit(1)` *is* 1.818 m
+— there is nothing for a `gran=1`-only refusal to disambiguate between). Only a second, different
+live `gran` where the two predictions diverge (checklist item 16) can actually settle that
+question. A `gran=1` refusal log verifies the boundary value, not gran invariance — useful
+confirmation, but not the resolving test item 15 was previously described as.
+
+**Not changed by this fix, still open:** whether `RAW_TICK_LIMIT` holds at any `gran` other than
+1 (see "Height representation" above); the diagonal-corner question (Follow-up #3, `CHECK_DIAGONALS`
+still defaults to `false`, untouched here); intermediate dig/fill reachability.
 
 ## Testing
 
@@ -553,14 +628,34 @@ through `validateAbsolute()` directly, reproducing the AT_LIMIT-then-OVER_LIMIT 
 transition at +2/+3. Both are explicitly commented as assuming the current best-guess 2.0 m limit,
 not as independent confirmation of it.
 
-Added in the Follow-up #5 Model C investigation: `rawTickLimitHypothesis_isTwenty` (the constant
+Added in the Follow-up #5 Model C investigation: `rawTickLimit_isTwenty` (the constant
 itself); `gran1_observedCapSequence_modelCDisagreesWithModelA` reproduces the 20/21/22/23-tick
 sequence via `compareModels()` on an interior center vertex (isolated from boundary-vs-outside
 contamination, which a 1x1-tile survey's all-boundary vertices would otherwise introduce), showing
-Model C calls the +1 case a violation while Model A still reports it `VALID`; and
+Model C calls the +1 case a violation while Model A still reports it `VALID` (at the time, before
+Follow-up #6 corrected Model A's own limit too -- this test still passes unchanged, since Model C
+and the now-corrected Model A agree on the +0 case and Model C still flags +1 first due to float
+rounding in Model A's mpd-based comparison); and
 `gran1_observedCap_modelCPermittedRaiseIsZeroTicksAtTheRealLimit` checks
 `SurveyVertexDiagnostics.compute()` directly: at the proven real cap, Model C's permitted raise is
-exactly 0 ticks while Model A's is still the false +0.18 m. `ant test`: 424/424 (up from 421).
+exactly 0 ticks while Model A's is still the false +0.18 m (also unchanged, since that test built
+its own explicit `LIMIT` from the old constant to document the symptom, not from
+`limitMetersFor`).
+
+Added in the Follow-up #6 production-correction investigation (all in
+`SurveyConstraintValidatorTest`): `rawTickLimit_limitMetersFor_reconcilesBothKnownGranValues`
+checks `limitMetersFor` against both known `gran` data points (1 and 10/11); `gran1_productionLimit
+_19BelowLimit_20AtLimit_21AndAboveOverLimit` reproduces the confirmed fixture through
+`validateAbsolute()` using the real production-derived limit (not the old fixed 2.0 m), covering
+19/20/21/22/23 ticks; `gran1_productionLimit_boundaryEdgeAgainstRealOutsideTerrain` confirms a
+boundary edge against real (unmodified) outside terrain honors the same corrected limit, isolated
+from interior edges via a uniform vertex raise; `gran1_dragSolver_clampsToTwentyTicks
+_matchingProductionSeverity` drives `SurveyDragConstraintSolver.clamp()` with a large requested
+raise and confirms it clamps to the real 20-tick cap (not the old 22-tick one), and that the
+clamped shape reads back through `validateAbsolute()` as exactly `AT_LIMIT`, never `OVER_LIMIT` --
+i.e. the solver and the displayed severity agree at the boundary; and
+`gran1_productionLimit_loweringAnAtCapEdgeRemainsLegal` confirms lowering an edge already at the
+real cap is still always legal under the corrected limit. `ant test`: 429/429 (up from 424).
 
 **Not covered by automated tests** (needs the full widget/game harness, or live verification):
 Undo/Redo interaction with a clamped drag end-to-end through `LandSurvey`/`SurveyEditHistory`;
@@ -589,14 +684,18 @@ both run clean (see the PR description for the run).
   described in that follow-up (recording accepted vs. refused soil placements with their raw
   height changes) has not been run and would be the way to actually re-confirm 2.0 m independent
   of the wiki.
-- **Whether the limit is metres-native or dz-tick-native is now an open question, not just its
-  numeric value** — Follow-up #5 found a direct in-game cap of exactly 20 raw dz-ticks under
-  `gran=1` (1.818 m), not the 22 ticks (2.0 m) Model A/B predict. `RAW_TICK_LIMIT_HYPOTHESIS = 20`
-  / Model C encodes the alternative (fixed tick count, gran-invariant) as a diagnostic-only
-  candidate. Neither hypothesis is confirmed over the other yet: it would take a third `gran` data
-  point, or an explicit refusal-message log at the boundary, to distinguish "the true limit is a
-  fixed 20 ticks" from "the true limit is a fixed ~1.818 m and 2.0 m was always an imprecise
-  wiki rounding."
+- **Whether `RAW_TICK_LIMIT` (20 raw dz-ticks) actually holds at any `gran` other than the one
+  measured (1) is still open, even though it is now the enforced production value.** Follow-up #5
+  found a direct in-game cap of exactly 20 raw dz-ticks under `gran=1` (1.818 m), not the 22 ticks
+  (2.0 m) the old fixed-metres model predicted; Follow-up #6 adopted the 20-tick count as the
+  enforced policy at every `gran`, via `SurveyConstraintValidator.limitMetersFor`, because it is
+  the best current model (consistent with every data point gathered, including the one that
+  disproves the old alternative) — not because cross-`gran` invariance has itself been
+  independently confirmed a second time. **A `gran=1` refusal-message log at the boundary would
+  not settle this**, even though an earlier version of this doc implied it would: both "fixed 20
+  dz-ticks" and "fixed ~1.818 m" predict the identical boundary at `gran=1`, since 20 ticks ×
+  `metersPerDzUnit(1)` *is* 1.818 m. Only a second, different live `gran` where the two
+  predictions diverge (checklist item 16) can actually distinguish them.
 - **No edge-highlighting**, only vertex markers: `Display` gained a third halo-style render pass
   (three flag bits, 16 = over-limit violation / red, 64 = at-limit / amber, 32 = unverifiable /
   blue) that rings a vertex without touching its existing status-dot color, rather than drawing a
@@ -636,16 +735,19 @@ both run clean (see the PR description for the run).
 6. Compare this validator's block point against the exact in-game soil-placement limit on fresh,
    perfectly flat ground, to confirm the corrected `metersPerDzUnit()` conversion matches the live
    server — this is the exact check that caught the original unit-conversion regression, so it's
-   worth re-confirming specifically: a vertex on flat ground should now accept roughly 20 units
-   (2.0 m) before Constrain mode stops it, not 1-2 units as in the regressed build.
+   worth re-confirming specifically: a vertex on flat ground should now accept exactly 20 raw
+   dz-ticks (`RAW_TICK_LIMIT`) before Constrain mode stops it — **≈1.8 m if that survey's `gran=1`,
+   ≈2.0 m if `gran=10/11`; check the Diagnostics panel's "Units:" line for that survey's actual
+   `gran` before judging the metres figure** — not 1-2 units as in the regressed build.
 7. On terrain with an existing real slope (not flat), raise the already-higher of two connected
-   corners with Ground Level active. Confirm it's blocked noticeably *before* the usual ~20 units
+   corners with Ground Level active. Confirm it's blocked noticeably *before* the usual ~20 ticks
    — by roughly the size of the existing real offset — not given a fresh 20 regardless. Repeat
    with Ground Plane active on the same terrain and confirm the flat target still accepts the
-   full ~20 units on one corner (the two modes should behave differently here, not identically).
-8. Drive a vertex to exactly the 2.0 m limit in Constrain mode, release, then reopen the status
-   view (or just let it idle). Confirm the vertex shows the amber at-limit marker (not plain green,
-   not red), and that lowering it is still possible while raising it further is still blocked.
+   full ~20 ticks on one corner (the two modes should behave differently here, not identically).
+8. Drive a vertex to exactly the 20-tick limit (`RAW_TICK_LIMIT`; its metres value depends on that
+   survey's `gran` — see item 6) in Constrain mode, release, then reopen the status view (or just
+   let it idle). Confirm the vertex shows the amber at-limit marker (not plain green, not red), and
+   that lowering it is still possible while raising it further is still blocked.
 9. With that same at-limit vertex, confirm the status line distinguishes "at the limit" wording
    from "over the limit" wording, and that a genuine pre-existing cliff elsewhere in the survey
    still shows red (over-limit) even though editing unrelated vertices remains unblocked.
@@ -676,17 +778,21 @@ both run clean (see the PR description for the run).
     raising until the server refuses one; note the last accepted height and the refused attempt's
     message. Repeat after lowering by one increment, and again on a different, unrelated patch.
     This is what would actually re-confirm (or correct) the 2.0 m limit independent of the wiki.
-15. The single most diagnostic missing artifact from Follow-up #5: on the exact plateau where 20
-    dirt placements were accepted, attempt one more (the 21st) and capture whatever the game shows
-    (a refusal message, a silent no-op, or something else). This is what would distinguish "the
-    real limit is a fixed 20 dz-ticks" (Model C) from "the real limit is a fixed ~1.818 m and the
-    20-tick figure was gran=1-specific" — both currently fit the one data point in hand equally
-    well.
-16. Repeat the Diagnostics panel's new Model C line (limiting relationship, permitted raise in
-    ticks) on a survey opened under a **different** live `gran` than 1 or `10f/11f`, if one is ever
-    observed. A third gran value where Model C's 20-tick prediction and Model A/B's metres-based
-    prediction diverge, with a confirmed in-game accept/refuse result, would settle Follow-up #5
-    either way.
+15. On the exact plateau where 20 dirt placements were accepted, attempt one more (the 21st) and
+    capture whatever the game shows (a refusal message, a silent no-op, or something else). Useful
+    confirmation that the enforced 20-tick limit matches the server at `gran=1` specifically — but
+    **(corrected in Follow-up #6) this cannot distinguish "the real limit is a fixed 20 dz-ticks,
+    gran-invariant" from "the real limit is a fixed ~1.818 m, and 2.0 m was always an imprecise
+    wiki rounding."** Both predict the identical 20-tick boundary at `gran=1` (20 ticks ×
+    `metersPerDzUnit(1)` *is* 1.818 m), so a refusal here verifies the boundary value, not gran
+    invariance. Item 16 is the one that can actually settle that question.
+16. Repeat the Diagnostics panel's Model C line (limiting relationship, permitted raise in ticks)
+    on a survey opened under a **different** live `gran` than 1 or `10f/11f`, if one is ever
+    observed, and compare its prediction against what Constrain mode and the status line (now also
+    driven by `RAW_TICK_LIMIT`, per Follow-up #6) actually enforce there. A third `gran` value
+    where the tick-native and old metres-native predictions diverge, with a confirmed in-game
+    accept/refuse result, is what would actually confirm or overturn `RAW_TICK_LIMIT`'s
+    cross-`gran` validity.
 15. Reopen a survey previously edited under this PR's old `/10.0`-based "Peak to trough" display
     (if one exists from before this fix) and confirm the readout changes only if that survey's real
     `gran` isn't `10f/11f` — on a survey where it is, the fix should produce an identical number to

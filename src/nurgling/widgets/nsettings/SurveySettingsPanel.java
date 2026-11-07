@@ -173,7 +173,7 @@ public class SurveySettingsPanel extends Panel {
             public void set(boolean val) { a = val; }
         }, x0);
 
-        section("Terrain Constraints (approximate 2.0 m terraforming slope limit)");
+        section("Terrain Constraints (20 raw-tick terraforming limit, scaled by survey gran)");
         terrainMode = new RadioGroup(content) {
             public void changed(int btn, String lbl) { pending.terrainMode = btn; }
         };

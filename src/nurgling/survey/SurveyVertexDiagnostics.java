@@ -75,7 +75,7 @@ public final class SurveyVertexDiagnostics {
     }
 
     /** Model C counterpart of {@link Relationship}: a raw dz-tick difference instead of a
-     *  metres one (Follow-up #5, see {@link SurveyConstraintValidator#RAW_TICK_LIMIT_HYPOTHESIS}). */
+     *  metres one (Follow-up #5/#6, see {@link SurveyConstraintValidator#RAW_TICK_LIMIT}). */
     public static final class TickRelationship {
         public final String dir;
         public final int diffTicks;
@@ -115,12 +115,14 @@ public final class SurveyVertexDiagnostics {
         public final float gran, rawGranArg;
         public final double mpd, maxSlopeMeters;
         public final Integer vertexRawDz;
-        /** Model C (Follow-up #5 candidate, see {@link SurveyConstraintValidator#RAW_TICK_LIMIT_HYPOTHESIS}):
+        /** Model C (Follow-up #5/#6, see {@link SurveyConstraintValidator#RAW_TICK_LIMIT}):
          *  raw dz-tick diffs for the 4 cardinal directions (same topology as Model A), this
          *  vertex's tightest such relationship, and how many more raw ticks it could be raised
-         *  (holding neighbors fixed) before hitting {@code RAW_TICK_LIMIT_HYPOTHESIS}. Null
-         *  fields mean no neighbor's raw-tick-equivalent was computable (unknown outside
-         *  terrain). */
+         *  (holding neighbors fixed) before hitting {@code RAW_TICK_LIMIT}. Since Model A's own
+         *  limit is now also derived from the same constant (via {@code limitMetersFor}), this
+         *  is an integer-exact cross-check of Model A's metres-based figure, not a competing
+         *  model. Null fields mean no neighbor's raw-tick-equivalent was computable (unknown
+         *  outside terrain). */
         public final Map<String, Integer> rawTickDiffByDir;
         public final TickRelationship modelCLimiting;
         public final Integer modelCPermittedRaiseTicks;
@@ -218,7 +220,7 @@ public final class SurveyVertexDiagnostics {
             rawTickDiffByDir.put(d, ((vTicks == null) || (nTicks == null)) ? null : Math.abs(vTicks - nTicks));
         }
         TickRelationship modelCLimiting = limitingTicks(rawTickDiffByDir);
-        Integer modelCPermitted = permittedRaiseTicks(vTicks, neighborTicksByDir, SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS);
+        Integer modelCPermitted = permittedRaiseTicks(vTicks, neighborTicksByDir, SurveyConstraintValidator.RAW_TICK_LIMIT);
 
         return new Report(vc, actualHeight, targetHeight, actualByDir, targetByDir, actualDiffByDir, targetDiffByDir,
                            actualSignedDiffByDir, targetSignedDiffByDir,
@@ -360,8 +362,8 @@ public final class SurveyVertexDiagnostics {
                                    fmtRel(r.modelBLimitingTarget), fmtRel(r.modelBLimitingActual));
         lines[16] = String.format("Permitted raise before limit (target-based): A=%s  B=%s",
                                    fmt(r.modelAPermittedRaiseMeters), fmt(r.modelBPermittedRaiseMeters));
-        lines[17] = String.format("Model C (dz-native, HYPOTHESIS limit=%dticks): limiting %s  permitted raise=%s",
-                                   SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS, fmtTickRel(r.modelCLimiting),
+        lines[17] = String.format("Model C (dz-native cross-check, limit=%dticks): limiting %s  permitted raise=%s",
+                                   SurveyConstraintValidator.RAW_TICK_LIMIT, fmtTickRel(r.modelCLimiting),
                                    (r.modelCPermittedRaiseTicks == null) ? "?" : (r.modelCPermittedRaiseTicks + "ticks"));
         return lines;
     }

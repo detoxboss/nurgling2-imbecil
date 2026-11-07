@@ -239,8 +239,12 @@ public class LandSurvey extends Window {
 	    dsp.setTerrainMarkers(Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
 	    return;
 	}
+	/* Follow-up #6: the shared, gran-aware policy limit (RAW_TICK_LIMIT ticks converted through
+	 * this survey's own live gran) -- no longer the old fixed TERRAIN_MAX_SLOPE_METERS, which
+	 * was found to disagree with the real in-game boundary at gran=1. */
+	double limit = SurveyConstraintValidator.limitMetersFor(data.gran);
 	SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(data.varea, data.gran, data.dz,
-										 terrainSnapshot(map), SurveySettings.TERRAIN_MAX_SLOPE_METERS);
+										 terrainSnapshot(map), limit);
 	/* Marker colour and the idle status line are driven purely by Severity (the edge's
 	 * absolute relationship to the real limit), not Status (the worsening-aware blocking
 	 * decision) -- a pre-existing, unworsened cliff is still genuinely over the limit and
@@ -271,11 +275,11 @@ public class LandSurvey extends Window {
 	dsp.setTerrainMarkers(over, unk, atLimit);
 	String base;
 	if(overCount > 0)
-	    base = String.format("Terrain: %d edge(s) over %.1fm limit (worst %.1fm)",
-				  overCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS, worst);
+	    base = String.format("Terrain: %d edge(s) over %.2fm limit (worst %.2fm)",
+				  overCount, limit, worst);
 	else if(atLimitCount > 0)
-	    base = String.format("Terrain: %d edge(s) at the %.1fm limit (further raising blocked, lowering still OK)",
-				  atLimitCount, SurveySettings.TERRAIN_MAX_SLOPE_METERS);
+	    base = String.format("Terrain: %d edge(s) at the %.2fm limit (further raising blocked, lowering still OK)",
+				  atLimitCount, limit);
 	else if(unkCount > 0)
 	    base = String.format("Terrain: %d nearby edge(s) unverifiable (unloaded)", unkCount);
 	else
@@ -319,7 +323,8 @@ public class LandSurvey extends Window {
 	    return requestedDiff;
 	SurveyTerrainSnapshot terrain = terrainSnapshot(mv.ui.sess.glob.map);
 	SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
-	    data.varea, data.gran, priorDz, gidx, sz, coeff, requestedDiff, terrain, SurveySettings.TERRAIN_MAX_SLOPE_METERS);
+	    data.varea, data.gran, priorDz, gidx, sz, coeff, requestedDiff, terrain,
+	    SurveyConstraintValidator.limitMetersFor(data.gran));
 	lastClamp = cr;
 	return cr.diff;
     }
@@ -346,7 +351,7 @@ public class LandSurvey extends Window {
 	    return;
 	}
 	SurveyTerrainSnapshot terrain = terrainSnapshot(map);
-	double limit = SurveySettings.TERRAIN_MAX_SLOPE_METERS;
+	double limit = SurveyConstraintValidator.limitMetersFor(data.gran);
 	SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(
 	    data.varea, data.gran, rawGranArg, data.dz, terrain, limit, vc);
 	SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(

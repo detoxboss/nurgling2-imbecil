@@ -600,13 +600,35 @@ dz-tick count the server checks directly. A user-run in-game test (20 dirt place
 a flat 5x2-tile plateau, no more) confirmed the real cap was exactly 20 raw dz-ticks under
 `gran = 1` -- two ticks short of the 22 ticks (2.0 m / `metersPerDzUnit(1)`) Model A/B predict.
 Hand arithmetic directly from the screenshots (vertex dz=241, neighbor dz=221, diff=20) matches.
-Added `SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS = 20` and a diagnostic-only Model C
-(cardinal-topology, raw-tick-native, no gran/mpd conversion between two in-survey endpoints) to
-`compareModels()` and `SurveyVertexDiagnostics`, surfaced in the panel alongside (not replacing)
-Models A/B. Does **not** change `validate()`/`clamp()`/`maxSlopeMeters` or any production blocking
-behavior -- the 20-ticks-vs-~1.818m-fixed question remains open pending a third `gran` data point
-or an explicit refusal-message log; see `docs/land-survey-editor.md`'s "Follow-up #5" section.
-`ant test`: 424/424 passing (up from 421).
+Added `SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS = 20` (later renamed `RAW_TICK_LIMIT`,
+see Follow-up #6) and a diagnostic-only Model C (cardinal-topology, raw-tick-native, no gran/mpd
+conversion between two in-survey endpoints) to `compareModels()` and `SurveyVertexDiagnostics`,
+surfaced in the panel alongside (not replacing) Models A/B. At the time, did **not** change
+`validate()`/`clamp()`/`maxSlopeMeters` or any production blocking behavior -- see Follow-up #6
+immediately below for why that changed. `ant test`: 424/424 passing (up from 421).
+
+**Follow-up #6 (same PR, pre-merge): production correction -- the 20-raw-tick limit is now
+enforced.** Testing after Follow-up #5 still showed amber/red at the old (wrong) 22-tick boundary,
+because Model C sat beside production as a comparison nobody's edits were actually bound by.
+`SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS` was renamed `RAW_TICK_LIMIT` and gained
+`limitMetersFor(gran)` (`RAW_TICK_LIMIT * metersPerDzUnit(gran)`), the single shared conversion now
+used by every production call site: `LandSurvey.refreshTerrainStatus` (validateAbsolute/status
+text/markers), `LandSurvey.clampDrag` (the drag solver), and `LandSurvey.updateDiag`
+(diagnostics/compareModels). No change to `classify()`/`severity()`/the drag solver's own math,
+boundary-edge handling, worsening-aware logic, undo/redo, or `Data` encoding -- only the limit
+*value* those call sites were handed changed, from the fixed `SurveySettings
+.TERRAIN_MAX_SLOPE_METERS` (2.0 m, now a historical-reference-only constant kept for older tests)
+to the gran-aware `limitMetersFor(data.gran)`. Confirmed correct at `gran=1` only; applied at
+every `gran` as the best current model, not as independently re-confirmed cross-`gran` invariance.
+Also corrected a Follow-up #5 documentation claim: a `gran=1` refusal-message log at the 21st
+placement cannot distinguish "fixed 20 ticks" from "fixed ~1.818 m" (both predict the same
+boundary there) -- only a second, different `gran` can. New production-path regression tests
+(`SurveyConstraintValidatorTest`): `limitMetersFor` reconciling both known `gran` values; the
+19/20/21/22/23-tick severity/status sequence through `validateAbsolute()` against the real
+production limit; a boundary edge against real outside terrain at the corrected limit; the drag
+solver clamping to 20 ticks (not 22) with the clamped shape reading back as exactly `AT_LIMIT`;
+and lowering an at-cap edge remaining legal. See `docs/land-survey-editor.md`'s "Follow-up #6"
+section. `ant test`: 429/429 passing (up from 424).
 
 ## Fork `BotRegistry` registrations
 

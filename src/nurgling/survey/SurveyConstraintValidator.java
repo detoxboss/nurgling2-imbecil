@@ -61,36 +61,78 @@ public final class SurveyConstraintValidator {
      * test that seemed to corroborate it was run under whatever {@code gran} was live at the
      * time, which was never logged, so it does not independently confirm 2.0 m under a
      * <i>different</i> gran. Treat 2.0 m as the best current guess, not as re-verified here.
+     *
+     * <p><b>Follow-up #6 correction:</b> the 2.0 m figure above is no longer the production
+     * limit at all -- see {@link #RAW_TICK_LIMIT} and {@link #limitMetersFor}. This method
+     * itself was never wrong and remains the sole dz-to-metres conversion; it's just no longer
+     * multiplied by a fixed metres constant to get the enforced limit.
      */
     public static double metersPerDzUnit(float gran) {
         return 1.0 / (gran * MCache.tilesz.x);
     }
 
     /**
-     * Candidate alternative to the metres-based limit above (Follow-up #5): the hypothesis that
-     * the server actually enforces a fixed count of raw dz-ticks per edge, compared directly,
-     * rather than a fixed metres distance divided by this survey's current {@code gran}-derived
-     * {@link #metersPerDzUnit}.
+     * Follow-up #6: the authoritative, production-enforced terraforming limit, expressed in the
+     * survey's own raw {@code dz} ticks rather than metres. This is the single shared policy
+     * value for {@link #validate}, {@link #validateAbsolute}, {@link SurveyDragConstraintSolver},
+     * the idle-status text, the vertex markers, and {@code SurveyVertexDiagnostics}'s
+     * permitted-raise figures -- every one of those now derives its working limit via {@link
+     * #limitMetersFor(float)}, never a fixed metres constant.
+     *
+     * <p><b>Height representation this policy is defined against:</b> {@code dz} is the survey's
+     * own integer quantization unit (see {@code haven.res.ui.surv.Data#dz}); dividing it by
+     * {@code gran} recovers world-Z, and dividing world-Z by {@code MCache.tilesz.x} recovers real
+     * metres ({@link #metersPerDzUnit}). This constant is defined in raw {@code dz} ticks -- the
+     * survey's own quantization -- not world-Z and not metres. At {@code gran=1} those three
+     * scales happen to coincide numerically for dz itself (dz IS world-Z when gran=1), but that
+     * coincidence is specific to {@code gran=1} and is not by itself evidence that the server's
+     * real rule is dz-tick-native at every {@code gran} -- see the scope caveat below.
      *
      * <p>Evidence: an in-game test under {@code gran=1} (raw {@code mkwidget args[2]==11}) found
      * the real achievable edge difference against flat, untouched neighbor terrain was exactly
      * 20 raw dz-ticks (1.818 m under this gran's mpd) -- two ticks short of the 22 ticks / 2.0 m
-     * this class's existing meters-based {@code maxSlopeMeters} predicts at that gran. If the
-     * historical "2.0 m" wiki figure was itself measured under the long-assumed {@code
-     * gran=10/11} convention, 20 ticks * {@code metersPerDzUnit(10f/11f)} (0.1) also equals
-     * 2.0 m exactly -- the same raw-tick count reconciles both data points under two different
-     * {@code gran} values, something a metres-native limit re-divided by the current gran cannot
-     * do (it predicts a different tick count, 22, at {@code gran=1}).
+     * the old fixed-metres model ({@code SurveySettings.TERRAIN_MAX_SLOPE_METERS}, now
+     * superseded) predicted at that gran, which is a confirmed, reproduced-by-arithmetic
+     * discrepancy, not a hypothesis. If the historical "2.0 m" wiki figure was itself measured
+     * under the long-assumed {@code gran=10/11} convention, 20 ticks * {@code
+     * metersPerDzUnit(10f/11f)} (0.1) also equals 2.0 m exactly -- the same raw-tick count
+     * reconciles both data points under two different {@code gran} values, something a
+     * metres-native limit re-divided by the current gran cannot do.
      *
-     * <p><b>Not proven.</b> Exactly one direct in-game data point (gran=1); the old 2.0 m figure
-     * was never independently re-measured under a logged {@code gran}, so its reconciliation
-     * with 20 ticks is an assumption, not a second confirmed observation. No explicit "21st
-     * placement refused" log exists yet either. Diagnostic-only: does not replace {@link
-     * #validate}/{@link #validateAbsolute}'s production behavior or {@code maxSlopeMeters} --
-     * surfaced only via {@link #compareModels} (Model C) and {@code SurveyVertexDiagnostics} so
-     * it can be compared against further live testing before anything is enforced on it.
+     * <p><b>Scope of what is and isn't established.</b> Confirmed: at {@code gran=1}, 20 raw
+     * dz-ticks is the real enforced boundary, and the old fixed-2.0 m-everywhere model is wrong
+     * there. Adopted as policy, not independently confirmed: that the same raw-dz-tick count
+     * (rather than, say, a fixed real-metres distance, or a fixed world-Z distance that would
+     * only coincide with dz at gran=1) holds at every other {@code gran}. This constant is applied
+     * universally anyway because it is the best current model -- it is strictly consistent with
+     * every data point gathered so far, including the one that disproves the alternative -- not
+     * because cross-gran invariance has itself been separately verified. A future data point at a
+     * second, different {@code gran} that disagrees with {@link #limitMetersFor} is the thing that
+     * would overturn this constant, not undermine the gran=1 fix below it.
+     *
+     * <p><b>What a refusal-message log can and cannot show.</b> Capturing the exact in-game
+     * refusal at the 21st placement on a {@code gran=1} plateau (checklist item 15) would confirm
+     * the boundary is 20 ticks there -- it would <i>not</i> distinguish "the real limit is a fixed
+     * 20 dz-ticks, gran-invariant" from "the real limit is a fixed ~1.818 m, and the 2.0 m wiki
+     * figure was always an imprecise rounding": both predict the exact same 20-tick boundary at
+     * {@code gran=1}, since 20 ticks * {@code metersPerDzUnit(1)} IS 1.818 m. Only a second,
+     * different live {@code gran} where the two predictions diverge (checklist item 16) can
+     * actually settle that question; a gran=1 refusal log verifies the boundary, not gran
+     * invariance.
      */
-    public static final int RAW_TICK_LIMIT_HYPOTHESIS = 20;
+    public static final int RAW_TICK_LIMIT = 20;
+
+    /**
+     * The single shared conversion of {@link #RAW_TICK_LIMIT} into this survey's current-gran
+     * metres -- the one function every production call site (validate/clamp/drag-solver/markers/
+     * status text/diagnostics) now goes through to get its working limit, so they can never drift
+     * out of sync with each other the way the old fixed {@code SurveySettings.TERRAIN_MAX_SLOPE_METERS}
+     * constant risked once gran stopped being assumed constant (Follow-up #4) and then was found
+     * to be the wrong unit basis entirely (Follow-up #5/#6).
+     */
+    public static double limitMetersFor(float gran) {
+        return RAW_TICK_LIMIT * metersPerDzUnit(gran);
+    }
 
     private SurveyConstraintValidator() {}
 
@@ -278,14 +320,17 @@ public final class SurveyConstraintValidator {
     public static final class ModelComparison {
         public final int modelAViolations, modelBViolations;
         public final double modelAWorstMeters, modelBWorstMeters;
-        /** Model C (Follow-up #5 candidate, see {@link #RAW_TICK_LIMIT_HYPOTHESIS}): same edge
-         *  topology as Model A (cardinal-only -- independent of the still-open diagonal
-         *  question), but compared as raw dz-tick differences against {@code
-         *  RAW_TICK_LIMIT_HYPOTHESIS} directly, with no gran/mpd conversion between two in-survey
-         *  endpoints. A boundary edge against undisturbed outside terrain still converts that
-         *  real-metres height into this survey's own current-gran tick-equivalent (outside
-         *  terrain has no raw dz of its own), so this model is only fully gran-invariant for
-         *  edges entirely inside the survey. */
+        /** Model C (Follow-up #5/#6): same edge topology as Model A (cardinal-only --
+         *  independent of the still-open diagonal question), but compared as raw dz-tick
+         *  differences against {@link #RAW_TICK_LIMIT} directly, with no gran/mpd conversion
+         *  between two in-survey endpoints. Now that Model A's own {@code maxSlopeMeters} input
+         *  is itself derived from {@link #limitMetersFor} (production policy), Model A and Model
+         *  C agree on every edge entirely inside the survey by construction, modulo float
+         *  rounding -- Model C's value is kept as an integer-exact cross-check free of that
+         *  rounding, not as a rival hypothesis anymore. A boundary edge against undisturbed
+         *  outside terrain still converts that real-metres height into this survey's own
+         *  current-gran tick-equivalent (outside terrain has no raw dz of its own), so this model
+         *  is only fully gran-invariant for edges entirely inside the survey. */
         public final int modelCViolations, modelCWorstTicks;
 
         ModelComparison(int modelAViolations, int modelBViolations, double modelAWorstMeters, double modelBWorstMeters,
@@ -344,7 +389,7 @@ public final class SurveyConstraintValidator {
         for(Edge e : edgesWithin(varea, false)) {
             int diffTicks = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]);
             a.see(diffTicks * mpd, maxSlopeMeters);
-            c.see(diffTicks, RAW_TICK_LIMIT_HYPOTHESIS);
+            c.see(diffTicks, RAW_TICK_LIMIT);
         }
         for(Edge e : edgesWithin(varea, true)) {
             double diff = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]) * mpd;
@@ -366,7 +411,7 @@ public final class SurveyConstraintValidator {
                 a.see(Math.abs((dz[iv] * mpd) - oh), maxSlopeMeters);
                 Integer ocTicks = rawTicksAt(varea, dz, mpd, terrain, oc);
                 if(ocTicks != null)
-                    c.see(Math.abs(dz[iv] - ocTicks), RAW_TICK_LIMIT_HYPOTHESIS);
+                    c.see(Math.abs(dz[iv] - ocTicks), RAW_TICK_LIMIT);
             }
             for(Coord off : ALL_OFFSETS) {
                 Coord oc = vc.add(off);

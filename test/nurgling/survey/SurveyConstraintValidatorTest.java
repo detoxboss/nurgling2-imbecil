@@ -582,10 +582,13 @@ class SurveyConstraintValidatorTest {
     // The dz=239/219 peak/northern-neighbor fixture from the Follow-up #4 screenshots, isolated
     // to a single edge via a flat second column (so the boundary-vs-outside-ground edges this
     // 1x1-tile survey also produces can't be confused with the one relationship under test; see
-    // the found-edge filter below). Unlike the arithmetic test above, this one assumes the
-    // current best-guess 2.0 m limit is correct -- it is a validator-level regression check
-    // against the exact AT_LIMIT/OVER_LIMIT banding reported in-game, not independent
-    // confirmation that 2.0 m is the real server threshold.
+    // the found-edge filter below). This test deliberately passes the fixed 2.0 m LIMIT
+    // constant explicitly (not SurveyConstraintValidator.limitMetersFor(gran)) to exercise the
+    // validator's generic AT_LIMIT/OVER_LIMIT banding arithmetic given an arbitrary caller-
+    // supplied limit; it is not a claim about what gran=1's real production limit is -- Follow-up
+    // #6 found that production limit is actually ~1.818 m (20 ticks), not 2.0 m, at this gran.
+    // See gran1_productionLimit_19BelowLimit_20AtLimit_21AndAboveOverLimit below for the
+    // corrected fixture against the real production-derived limit.
     @Test
     void gran1_observedPeakSequenceReproducesAtLimitThenOverLimitBanding() {
         Area varea = oneTile();
@@ -621,17 +624,17 @@ class SurveyConstraintValidatorTest {
         }
     }
 
-    // --- Follow-up #5: dz-native raw-tick candidate model (Model C), see
-    // SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS. A further in-game test (same gran=1
-    // session) raised one vertex's dz in a 2.0m-limit survey against an untouched flat neighbor
-    // and found the real achievable cap was exactly 20 raw dz-ticks (vertex dz=241, neighbor
-    // dz=221) -- NOT the 22 ticks (2.0m / mpd(gran=1)) the existing meters-based Model A/B
-    // predict. These tests cover Model C's own arithmetic only; they do not claim 20 ticks is
-    // the confirmed universal server rule (see the field javadoc). ---
+    // --- Follow-up #5: dz-native raw-tick model (Model C), see
+    // SurveyConstraintValidator.RAW_TICK_LIMIT. A further in-game test (same gran=1
+    // session) raised one vertex's dz against an untouched flat neighbor and found the real
+    // achievable cap was exactly 20 raw dz-ticks (vertex dz=241, neighbor dz=221) -- NOT the 22
+    // ticks (2.0m / mpd(gran=1)) the old fixed-metres model predicted. As of Follow-up #6, Model
+    // A's own limit is also derived from this same constant (via limitMetersFor), so these tests
+    // now double as regressions for that production fix too, not just Model C's own arithmetic. ---
 
     @Test
-    void rawTickLimitHypothesis_isTwenty() {
-        assertEquals(20, SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS);
+    void rawTickLimit_isTwenty() {
+        assertEquals(20, SurveyConstraintValidator.RAW_TICK_LIMIT);
     }
 
     // The exact dz=241/221 fixture from the newest screenshots: at the baseline (+0), Model C
@@ -679,5 +682,128 @@ class SurveyConstraintValidatorTest {
         assertEquals(0, r.modelCPermittedRaiseTicks, "no raw-tick headroom left at the real observed cap");
         // The false headroom the screenshots showed, for contrast -- same vertex, meters-based model.
         assertEquals(0.18, r.modelAPermittedRaiseMeters, 0.005);
+    }
+
+    // --- Follow-up #6: production correction. RAW_TICK_LIMIT (20 raw dz-ticks) is now the
+    // single enforced policy behind validate()/validateAbsolute()/the drag solver/markers/status
+    // text/diagnostics, via SurveyConstraintValidator.limitMetersFor(gran) -- replacing the fixed
+    // SurveySettings.TERRAIN_MAX_SLOPE_METERS (2.0 m) constant those production call sites used
+    // to pass directly, which Follow-up #5 found disagreed with the real in-game boundary at
+    // gran=1 (predicted 22 ticks; the confirmed real cap is 20). These tests exercise the
+    // production call sites themselves against the confirmed gran=1 fixture (vertex dz=241 at
+    // the real proven cap, neighbor dz=221, diff=20 ticks) -- not just Model C's own diagnostic
+    // arithmetic, which the Follow-up #5 tests above already cover and which still passes
+    // unchanged (Model C and the now-corrected Model A agree by construction, modulo float
+    // rounding, since both now derive from the same RAW_TICK_LIMIT). ---
+
+    @Test
+    void rawTickLimit_limitMetersFor_reconcilesBothKnownGranValues() {
+        assertEquals(20, SurveyConstraintValidator.RAW_TICK_LIMIT);
+        // gran=1 (the confirmed real data point): 20 ticks * (1/11) m/tick.
+        assertEquals(20.0 / 11, SurveyConstraintValidator.limitMetersFor(GRAN_1), 1e-9);
+        // gran=10/11 (the old wiki/manual-test assumption): the same 20-tick policy reconciles
+        // exactly with the historical 2.0 m figure -- this is why 20 ticks, not 22, was adopted.
+        assertEquals(2.0, SurveyConstraintValidator.limitMetersFor(GRAN), 1e-6);
+    }
+
+    // The confirmed fixture, run against the production-derived limit (not the old fixed 2.0 m
+    // constant): 19 ticks must stay below the AT_LIMIT band entirely (no finding at all), 20
+    // ticks (the real proven cap) must be VALID/AT_LIMIT (amber, not blocking), and 21+ ticks
+    // must be VIOLATION/OVER_LIMIT (red, blocking).
+    @Test
+    void gran1_productionLimit_19BelowLimit_20AtLimit_21AndAboveOverLimit() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        double limit = SurveyConstraintValidator.limitMetersFor(GRAN_1);
+        int[] diffTicks = {19, 20, 21, 22, 23};
+        SurveyConstraintResult.Severity[] expectedSeverity = {
+            null, SurveyConstraintResult.Severity.AT_LIMIT, SurveyConstraintResult.Severity.OVER_LIMIT,
+            SurveyConstraintResult.Severity.OVER_LIMIT, SurveyConstraintResult.Severity.OVER_LIMIT};
+        SurveyConstraintResult.Status[] expectedStatus = {
+            null, SurveyConstraintResult.Status.VALID, SurveyConstraintResult.Status.VIOLATION,
+            SurveyConstraintResult.Status.VIOLATION, SurveyConstraintResult.Status.VIOLATION};
+
+        for(int i = 0; i < diffTicks.length; i++) {
+            // Column x=0 holds the raised peak (both its vertices), column x=1 holds the flat
+            // neighbor at dz=0 -- isolates the (0,0)-(1,0) edge to exactly this tick diff.
+            int[] dz = {diffTicks[i], 0, diffTicks[i], 0};
+            SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(varea, GRAN_1, dz, terrain, limit);
+            SurveyConstraintResult.EdgeFinding found = null;
+            for(SurveyConstraintResult.EdgeFinding f : res.findings)
+                if((f.a.equals(Coord.of(0, 0)) && f.b.equals(Coord.of(1, 0))) ||
+                   (f.b.equals(Coord.of(0, 0)) && f.a.equals(Coord.of(1, 0))))
+                    found = f;
+            if(expectedSeverity[i] == null) {
+                assertTrue(found == null, diffTicks[i] + " ticks should be below the AT_LIMIT band");
+            } else {
+                assertEquals(expectedSeverity[i], found.severity, diffTicks[i] + " ticks");
+                assertEquals(expectedStatus[i], found.status, diffTicks[i] + " ticks");
+            }
+        }
+    }
+
+    // Boundary edges against real (unmodified) outside terrain must also honor the
+    // production-derived limit, not the old fixed 2.0 m one. A uniform raise of every vertex
+    // leaves every interior edge at 0 diff, isolating the test to boundary-vs-outside-terrain
+    // edges only.
+    @Test
+    void gran1_productionLimit_boundaryEdgeAgainstRealOutsideTerrain() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        double limit = SurveyConstraintValidator.limitMetersFor(GRAN_1);
+
+        int[] atCap = {20, 20, 20, 20}; // uniform +20 ticks: interior diffs stay 0, boundary diffs = 20 ticks
+        SurveyConstraintResult atCapRes = SurveyConstraintValidator.validateAbsolute(varea, GRAN_1, atCap, terrain, limit);
+        assertTrue(atCapRes.hasAtLimit(), "boundary edges at the real proven cap should be AT_LIMIT");
+        assertFalse(atCapRes.hasViolation());
+
+        int[] overCap = {21, 21, 21, 21}; // uniform +21 ticks: boundary diffs = 21 ticks, over the limit
+        SurveyConstraintResult overCapRes = SurveyConstraintValidator.validateAbsolute(varea, GRAN_1, overCap, terrain, limit);
+        assertTrue(overCapRes.hasViolation(), "boundary edges one tick past the real proven cap should violate");
+    }
+
+    // The drag solver must clamp to the same production limit validate()/validateAbsolute() now
+    // use -- not the old fixed 2.0 m one, which at gran=1 permitted clamping 2 ticks too far (22
+    // instead of 20). Raising a single vertex against a flat, untouched neighbor (coeff 0) from a
+    // huge requested diff must clamp to (within float rounding) exactly 20 ticks, matching the
+    // confirmed real cap, and reading that clamped shape back through validateAbsolute() must
+    // report exactly AT_LIMIT, never OVER_LIMIT -- i.e. the solver and the displayed severity
+    // agree exactly at the boundary, the same 19/20/21-tick banding the validator itself reports.
+    @Test
+    void gran1_dragSolver_clampsToTwentyTicks_matchingProductionSeverity() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        double limit = SurveyConstraintValidator.limitMetersFor(GRAN_1);
+        int[] priorDz = {0, 0, 0, 0};
+        int[] gidx = {0}; // region is just vertex (0,0)
+        float[] startWz = {0f};
+        float[] coeff = {1f};
+
+        SurveyDragConstraintSolver.ClampResult cr = SurveyDragConstraintSolver.clamp(
+            varea, GRAN_1, priorDz, gidx, startWz, coeff, 1000f, terrain, limit);
+        // Sub-float-ulp tolerance for the x*mpd/mpd round-trip -- see the production comment on
+        // SurveyConstraintValidator.limitMetersFor for why this isn't asserted as exact equality.
+        assertEquals(20f, cr.diff, 0.01f, "solver must clamp at the real 20-tick cap, not the old 22-tick one");
+
+        int clampedTick = Math.round(cr.diff);
+        int[] clampedDz = {clampedTick, 0, 0, 0};
+        SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(varea, GRAN_1, clampedDz, terrain, limit);
+        assertEquals(SurveyConstraintResult.Status.VALID, res.overall);
+        assertTrue(res.hasAtLimit(), "the solver's own clamp point should read back as exactly AT_LIMIT");
+        assertFalse(res.hasViolation());
+    }
+
+    // Lowering an already-at-cap edge must remain legal under the corrected production limit too
+    // (worsening-aware classify() logic is untouched by Follow-up #6 -- only the limit value
+    // callers pass in changed).
+    @Test
+    void gran1_productionLimit_loweringAnAtCapEdgeRemainsLegal() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        double limit = SurveyConstraintValidator.limitMetersFor(GRAN_1);
+        int[] prior = {20, 0, 0, 0}; // already at the real 20-tick cap
+        int[] lowered = {15, 0, 0, 0}; // comfortably below it now
+        SurveyConstraintResult res = SurveyConstraintValidator.validate(varea, GRAN_1, prior, lowered, terrain, limit);
+        assertEquals(SurveyConstraintResult.Status.VALID, res.overall);
     }
 }

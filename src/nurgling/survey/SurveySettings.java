@@ -156,9 +156,14 @@ public class SurveySettings {
         return flag(NConfig.Key.surveyNewUnlocked, true);
     }
 
-    /** Verified terraforming slope limit (metres) -- see SurveyConstraintValidator's class doc
-     *  for the evidence. Not currently user-configurable: changing it would need the same
-     *  in-game verification the 2.0 m figure itself does. */
+    /** Historical wiki-sourced reference value only, kept for existing tests that want a fixed
+     *  (gran-independent) limit -- <b>no longer the production limit</b>. Follow-up #6: every
+     *  production call site (validate/clamp/drag-solver/markers/status text/diagnostics) now
+     *  derives its working limit from {@code SurveyConstraintValidator.limitMetersFor(gran)}
+     *  (a fixed 20-raw-dz-tick count, converted through the survey's own live {@code gran}),
+     *  since the fixed-2.0-m-everywhere model this constant represents was found to disagree
+     *  with the real in-game boundary at {@code gran=1} (22 ticks predicted vs. 20 actual). Not
+     *  currently user-configurable. */
     public static final double TERRAIN_MAX_SLOPE_METERS = 2.0;
 
     public static SurveyConstraintValidator.Mode terrainConstraintMode() {
