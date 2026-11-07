@@ -68,10 +68,31 @@ public final class SurveyConstraintValidator {
         Coord.of(1, 0), Coord.of(-1, 0), Coord.of(0, 1), Coord.of(0, -1),
     };
 
+    private static final Coord[] DIAGONAL_OFFSETS = {
+        Coord.of(1, 1), Coord.of(1, -1), Coord.of(-1, 1), Coord.of(-1, -1),
+    };
+
+    private static final Coord[] ALL_OFFSETS = {
+        Coord.of(1, 0), Coord.of(-1, 0), Coord.of(0, 1), Coord.of(0, -1),
+        Coord.of(1, 1), Coord.of(1, -1), Coord.of(-1, 1), Coord.of(-1, -1),
+    };
+
     /** Every adjacent-vertex edge within {@code area} (both axes), plus diagonals when
      *  {@link #CHECK_DIAGONALS} is set. Shared by the validator and the drag solver so both
      *  agree on exactly which pairs are constrained. */
     public static List<Edge> edgesWithin(Area area) {
+        return edgesWithin(area, CHECK_DIAGONALS);
+    }
+
+    /** Same as {@link #edgesWithin(Area)}, but with the diagonal switch passed explicitly
+     *  instead of read from the static {@link #CHECK_DIAGONALS} flag -- used by
+     *  {@link #compareModels} to evaluate Model B (all six corner pairs per tile) without
+     *  touching the flag that governs production validate()/clamp() behavior. For a full tile
+     *  (corners c, c+(1,0), c+(0,1), c+(1,1)) the diagonals-on case adds exactly the two
+     *  corner-to-corner pairs the edges-only case misses; combined with the edges every vertex
+     *  iteration already contributes, that's all six unique corner pairs per tile, i.e.
+     *  equivalent to "max(four corners) - min(four corners)" per tile. */
+    public static List<Edge> edgesWithin(Area area, boolean diagonals) {
         List<Edge> edges = new ArrayList<>();
         for(int y = area.ul.y; y < area.br.y; y++) {
             for(int x = area.ul.x; x < area.br.x; x++) {
@@ -80,7 +101,7 @@ public final class SurveyConstraintValidator {
                     edges.add(new Edge(c, Coord.of(x + 1, y)));
                 if(y + 1 < area.br.y)
                     edges.add(new Edge(c, Coord.of(x, y + 1)));
-                if(CHECK_DIAGONALS) {
+                if(diagonals) {
                     if((x + 1 < area.br.x) && (y + 1 < area.br.y)) {
                         edges.add(new Edge(c, Coord.of(x + 1, y + 1)));
                         edges.add(new Edge(Coord.of(x + 1, y), Coord.of(x, y + 1)));
@@ -214,5 +235,79 @@ public final class SurveyConstraintValidator {
         if((a == SurveyConstraintResult.Status.UNKNOWN) || (b == SurveyConstraintResult.Status.UNKNOWN))
             return SurveyConstraintResult.Status.UNKNOWN;
         return SurveyConstraintResult.Status.VALID;
+    }
+
+    /** Read-only result of {@link #compareModels}: how many edges (interior + boundary) are
+     *  over the limit, and the worst single difference, under each model -- against the exact
+     *  same snapshot and dz shape. Never derived from or fed back into validate()/clamp(). */
+    public static final class ModelComparison {
+        public final int modelAViolations, modelBViolations;
+        public final double modelAWorstMeters, modelBWorstMeters;
+
+        ModelComparison(int modelAViolations, int modelBViolations, double modelAWorstMeters, double modelBWorstMeters) {
+            this.modelAViolations = modelAViolations; this.modelBViolations = modelBViolations;
+            this.modelAWorstMeters = modelAWorstMeters; this.modelBWorstMeters = modelBWorstMeters;
+        }
+    }
+
+    private static final class ModelAccum {
+        int violations = 0;
+        double worst = 0;
+        void see(double diff, double limit) {
+            worst = Math.max(worst, diff);
+            if(diff > limit + 1e-9)
+                violations++;
+        }
+    }
+
+    /**
+     * Evaluates the current committed shape ({@code dz}) under both Model A (edge-only --
+     * exactly what validate()/clamp() use today) and Model B (every corner pair of every tile,
+     * i.e. including diagonals, and the same for boundary tiles against undisturbed outside
+     * ground) over the whole survey, from the same {@code terrain} snapshot. Purpose: gather
+     * in-game evidence on whether the server's real rule includes diagonal corner pairs, without
+     * changing what CONSTRAIN mode actually blocks ({@link #CHECK_DIAGONALS} stays whatever it
+     * already was -- this never reads or writes it).
+     */
+    public static ModelComparison compareModels(Area varea, float gran, int[] dz,
+                                                   SurveyTerrainSnapshot terrain, double maxSlopeMeters) {
+        double mpd = metersPerDzUnit(gran);
+        ModelAccum a = new ModelAccum(), b = new ModelAccum();
+
+        for(Edge e : edgesWithin(varea, false)) {
+            double diff = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]) * mpd;
+            a.see(diff, maxSlopeMeters);
+        }
+        for(Edge e : edgesWithin(varea, true)) {
+            double diff = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]) * mpd;
+            b.see(diff, maxSlopeMeters);
+        }
+
+        for(Coord vc : varea) {
+            boolean onBoundary = (vc.x == varea.ul.x) || (vc.x == varea.br.x - 1) || (vc.y == varea.ul.y) || (vc.y == varea.br.y - 1);
+            if(!onBoundary)
+                continue;
+            int iv = varea.ridx(vc);
+            for(Coord off : NEIGHBOR_OFFSETS) {
+                Coord oc = vc.add(off);
+                if(varea.contains(oc))
+                    continue;
+                Double oh = terrain.terrainHeight(oc);
+                if(oh == null)
+                    continue;
+                a.see(Math.abs((dz[iv] * mpd) - oh), maxSlopeMeters);
+            }
+            for(Coord off : ALL_OFFSETS) {
+                Coord oc = vc.add(off);
+                if(varea.contains(oc))
+                    continue;
+                Double oh = terrain.terrainHeight(oc);
+                if(oh == null)
+                    continue;
+                b.see(Math.abs((dz[iv] * mpd) - oh), maxSlopeMeters);
+            }
+        }
+
+        return new ModelComparison(a.violations, b.violations, a.worst, b.worst);
     }
 }

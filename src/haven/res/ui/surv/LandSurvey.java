@@ -12,6 +12,7 @@ import nurgling.survey.SurveyDragConstraintSolver;
 import nurgling.survey.SurveyEditHistory;
 import nurgling.survey.SurveySettings;
 import nurgling.survey.SurveyTerrainSnapshot;
+import nurgling.survey.SurveyVertexDiagnostics;
 import nurgling.widgets.NDraggableWidget;
 
 import java.util.*;
@@ -37,6 +38,13 @@ public class LandSurvey extends Window {
     private RenderTree.Slot s_dsp;
     private final SurveyEditHistory history = new SurveyEditHistory();
     private Button btnUndo, btnRedo;
+    /* Investigation diagnostic: optional, read-only vertex inspector (hover a vertex, same
+     * selection dsp.selected already tracks in Idle mode -- no new mouse listener). Never
+     * affects editing; purely for comparing the current edge-only rule (Model A) against an
+     * all-corners-per-tile rule (Model B) using real terrain + target data side by side. */
+    private boolean diagEnabled = false;
+    private Button btnDiag;
+    private Label[] diagLines;
 
     private ICheckBox btnLock;
 
@@ -101,6 +109,13 @@ public class LandSurvey extends Window {
 		   prev.pos("bl").adds(0, 10));
 	add(btnRedo = new Button(UI.scale(60), "Redo", false).action(this::redo),
 	    prev.pos("ur").adds(10, 0));
+	prev = add(btnDiag = new Button(UI.scale(260), "Diagnostics: off", false).action(this::toggleDiag),
+		   prev.pos("bl").adds(0, 10));
+	diagLines = new Label[SurveyVertexDiagnostics.LINE_COUNT];
+	for(int i = 0; i < diagLines.length; i++) {
+	    diagLines[i] = add(new Label(""), prev.pos("bl").adds(0, (i == 0) ? 10 : 2));
+	    prev = diagLines[i];
+	}
 
 	pack();
     }
@@ -297,6 +312,36 @@ public class LandSurvey extends Window {
 	    data.varea, data.gran, priorDz, gidx, sz, coeff, requestedDiff, terrain, SurveySettings.TERRAIN_MAX_SLOPE_METERS);
 	lastClamp = cr;
 	return cr.diff;
+    }
+
+    private void toggleDiag() {
+	diagEnabled = !diagEnabled;
+	btnDiag.change(diagEnabled ? "Diagnostics: on" : "Diagnostics: off");
+	if(!diagEnabled)
+	    for(Label l : diagLines)
+		l.settext("");
+    }
+
+    /** Fills the diagnostic panel from the currently hovered/selected vertex (dsp.selected,
+     *  already tracked by Idle's mouse-move handling for the existing highlight), or clears it
+     *  with a hint if nothing is selected. Read-only: never touches data/dz, history, or
+     *  clamping. */
+    private void updateDiag(MCache map) {
+	Coord vc = dsp.selected;
+	if(vc == null) {
+	    diagLines[0].settext("Hover over a vertex to inspect it.");
+	    for(int i = 1; i < diagLines.length; i++)
+		diagLines[i].settext("");
+	    return;
+	}
+	SurveyTerrainSnapshot terrain = terrainSnapshot(map);
+	double limit = SurveySettings.TERRAIN_MAX_SLOPE_METERS;
+	SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(data.varea, data.gran, data.dz, terrain, limit, vc);
+	SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(
+	    data.varea, data.gran, data.dz, terrain, limit);
+	String[] lines = SurveyVertexDiagnostics.formatLines(r, cmp);
+	for(int i = 0; i < diagLines.length; i++)
+	    diagLines[i].settext(lines[i]);
     }
 
     private void lock(boolean enabled) {
@@ -584,6 +629,12 @@ public class LandSurvey extends Window {
 	if(btnUndo != null) {
 	    btnUndo.disable(!history.canUndo());
 	    btnRedo.disable(!history.canRedo());
+	}
+	if(diagEnabled && inited) {
+	    try {
+		updateDiag(mv.ui.sess.glob.map);
+	    } catch(Loading l) {
+	    }
 	}
 	super.tick(dt);
     }

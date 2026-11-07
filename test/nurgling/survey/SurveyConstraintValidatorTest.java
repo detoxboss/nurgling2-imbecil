@@ -454,4 +454,109 @@ class SurveyConstraintValidatorTest {
         }
         assertTrue(found);
     }
+
+    // --- Diagonal-corner discrepancy investigation (compareModels: Model A edge-only vs.
+    // Model B all-six-corner-pairs-per-tile) ---
+
+    /** A 2x2-tile (3x3 vertex) survey, so a center vertex is strictly interior -- no edge of its
+     *  own touches the survey boundary (and therefore undisturbed outside ground), isolating the
+     *  comparison to interior edge-vs-diagonal relationships only. A 1x1-tile survey can't do
+     *  this: every one of its 4 vertices is itself a boundary corner, so a spike placed on any
+     *  of them always also produces a same-sized boundary cardinal edge against (flat) outside
+     *  ground, which happens to reach the same 2.0m figure Model B's diagonal would -- masking
+     *  exactly the gap these tests are meant to demonstrate. */
+    private static Area twoByTwoTiles() {
+        return Area.sized(Coord.of(0, 0), Coord.of(3, 3));
+    }
+
+    // The task's exact hypothetical, reproduced at the interior center vertex of a 2x2-tile
+    // survey: the center is a 2.0m spike, its 4 cardinal (edge-adjacent) neighbors are each
+    // 0.2m, and its 4 diagonal neighbors (the tile corners) are each 0m. Every edge-adjacent
+    // pair touching the spike differs by 1.8m -- comfortably under the 2.0m limit, so Model A
+    // (today's production rule) sees 0.2m of room to spare. Every diagonal pair touching the
+    // spike differs by the full 2.0m (AT_LIMIT, not yet over) -- Model B already sees the true
+    // limit reached. That 0.2m gap between the two models' worst figures, at a vertex no
+    // boundary edge touches, is exactly the discrepancy reported in-game.
+    @Test
+    void compareModels_hypotheticalSpike_modelBSeesTighterWorstThanModelA() {
+        Area varea = twoByTwoTiles();
+        // Row-major dz (0.1 m/unit): row y=0: NW,N,NE corners = 0,2,0; row y=1: W,center,E = 2,20,2;
+        // row y=2: SW,S,SE corners = 0,2,0.
+        int[] dz = {0, 2, 0, 2, 20, 2, 0, 2, 0};
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(varea, GRAN, dz, terrain, LIMIT);
+        assertEquals(0, cmp.modelAViolations);
+        assertEquals(0, cmp.modelBViolations); // exactly at the limit, not over it
+        assertEquals(1.8, cmp.modelAWorstMeters, 0.01);
+        assertEquals(2.0, cmp.modelBWorstMeters, 0.01); // Model B already sees the true limit reached
+    }
+
+    // Push the interior spike one more unit past the hypothetical above (center = 21 instead of
+    // 20): every edge-adjacent pair touching it is still under the limit (now 1.9m), so Model A
+    // still reports no violation at all -- exactly the "validator allows another 0.1-0.2m before
+    // showing anything" in-game symptom -- while Model B catches it via all four of the center's
+    // symmetric diagonal-to-corner relationships (each now 2.1m -- the center sits at the shared
+    // corner of all 4 tiles, so the same overrun shows up once per tile).
+    @Test
+    void compareModels_spikePastDiagonalLimit_modelAMissesIt_modelBCatchesIt() {
+        Area varea = twoByTwoTiles();
+        int[] dz = {0, 2, 0, 2, 21, 2, 0, 2, 0};
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(varea, GRAN, dz, terrain, LIMIT);
+        assertEquals(0, cmp.modelAViolations, "Model A (today's production rule) must not see this as a violation");
+        assertEquals(4, cmp.modelBViolations, "Model B must catch all 4 symmetric diagonal overruns (one per tile)");
+        assertEquals(2.1, cmp.modelBWorstMeters, 0.01);
+    }
+
+    // A mild, uniform slope (north corners 0.2m above south corners, no spike) must not make
+    // Model B pessimistic relative to Model A when there genuinely is no tighter diagonal
+    // relationship: all four corner-pairs (two edges, two diagonals) differ by the same 0.2m, so
+    // both models agree.
+    @Test
+    void compareModels_mildUniformSlope_bothModelsAgree() {
+        Area varea = oneTile();
+        int[] dz = {2, 2, 0, 0}; // (0,0)=(1,0)=0.2m (north), (0,1)=(1,1)=0m (south)
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(varea, GRAN, dz, terrain, LIMIT);
+        assertEquals(cmp.modelAWorstMeters, cmp.modelBWorstMeters, 0.001);
+        assertEquals(0, cmp.modelAViolations);
+        assertEquals(0, cmp.modelBViolations);
+    }
+
+    // A spike whose diagonally-opposite corner is actually *lower* than both edge-adjacent
+    // corners (rather than flat/equal) makes the diagonal relationship strictly the worst one
+    // in the tile -- Model A, which never looks at it, must still read as valid.
+    @Test
+    void compareModels_diagonalOppositeLowerThanEdgeNeighbors_onlyModelBFlags() {
+        Area varea = oneTile();
+        // NW spike = 2.0m (20 units), its two edge-adjacent corners NE/SW = 0.3m (3 units, closer
+        // to the spike than the hypothetical above), diagonal SE = -0.2m (-2 units, i.e. *below*
+        // the flat 0m reference) -- NW-SE difference is 2.2m, strictly the tile's worst relationship,
+        // and not visible from any edge-adjacent pair (NW-NE/NW-SW = 1.7m, NE-SE/SW-SE = 0.5m).
+        int[] dz = {20, 3, 3, -2};
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(varea, GRAN, dz, terrain, LIMIT);
+        assertEquals(0, cmp.modelAViolations);
+        assertEquals(1, cmp.modelBViolations);
+        assertEquals(2.2, cmp.modelBWorstMeters, 0.01);
+    }
+
+    // A tile straddling the survey boundary: the spike sits on the boundary vertex, and its
+    // diagonal partner is just outside the survey in real (actual) terrain. compareModels must
+    // use the real terrain height there for Model B's boundary diagonal check, same as it already
+    // does for Model A's boundary cardinal check.
+    @Test
+    void compareModels_boundaryTileDiagonalUsesRealOutsideTerrain() {
+        Area varea = oneTile(); // vertices (0,0)-(1,1); (1,1) is the br boundary vertex
+        Map<Coord, Double> heights = new HashMap<>();
+        for(Coord c : varea.margin(1))
+            heights.put(c, 0.0);
+        heights.put(Coord.of(2, 2), 2.5); // outside, diagonal from (1,1) -- a 2.5 m cliff
+        SurveyTerrainSnapshot terrain = SurveyTerrainSnapshot.forTesting(heights, new HashMap<>(), varea.margin(1));
+        int[] dz = {0, 0, 0, 0}; // survey itself flat at 0 m; (1,1) is 2.5 m below the outside diagonal point
+        SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(varea, GRAN, dz, terrain, LIMIT);
+        assertEquals(0, cmp.modelAViolations, "no cardinal boundary pair touches the diagonal cliff");
+        assertEquals(1, cmp.modelBViolations, "Model B's boundary diagonal check must catch it");
+        assertEquals(2.5, cmp.modelBWorstMeters, 0.01);
+    }
 }

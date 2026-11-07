@@ -545,6 +545,27 @@ from the original PR). See `docs/land-survey-editor.md`'s "Follow-up: actual ter
 target slopes" section for the full derivation and the new tests. `ant test`: 407/407 passing (up
 from 397).
 
+**Follow-up #3 (same PR, pre-merge): diagonal-corner discrepancy investigation.** A third in-game
+report: a manually-maxed vertex (server already refused further soil) still showed up to ~0.2 m of
+headroom in the editor, and a large survey's worst-edge readout didn't match individually-inspected
+vertices. Primary hypothesis: `CHECK_DIAGONALS = false` (unchanged since Phase 2) means the
+edge-only validator can miss a tile's diagonal corner-pair being the tightest relationship even
+when every edge-adjacent pair is comfortably legal. Confirmed architecturally with a worked
+example (interior spike 2.0 m up, edge-adjacent neighbors at 0.2 m each giving 1.8 m edges, a
+diagonal corner at 0 m giving the true 2.0 m) and regression tests, but **not** confirmed against
+the server — whether the real rule is a flat 2.0 m on every corner pair or a distance-scaled
+diagonal threshold remains open, and this follow-up does not decide between them. No change to
+production behavior: `CHECK_DIAGONALS` stays `false`, `validate()`/`clamp()` are untouched. Added,
+read-only: `SurveyConstraintValidator.compareModels()` (Model A edge-only vs. Model B all-six-
+corner-pairs, same snapshot, violation counts + worst difference) and
+`nurgling.survey.SurveyVertexDiagnostics` (per-vertex actual/target height, all 8 neighbors, all 4
+sharing tiles' corner spreads, each model's limiting relationship and target-based permitted-raise
+figure) plus an in-game **Diagnostics** toggle in `LandSurvey` reusing the existing hover-selection
+(`Display.selected`) to drive it, so it adds no new mouse handling. See
+`docs/land-survey-editor.md`'s "Follow-up #3" section for the worked numbers, the in-game test that
+would actually resolve the open question, and the full new-tests list. `ant test`: 417/417 passing
+(up from 407).
+
 ## Fork `BotRegistry` registrations
 
 **File:** `src/nurgling/actions/bots/registry/BotRegistry.java`

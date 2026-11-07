@@ -154,6 +154,9 @@ SurveyDragConstraintSolver
   .clamp(...)              -- exact per-edge analytic solve for the largest same-direction drag
                               amount that doesn't newly violate anything, given a gesture's
                               per-vertex coefficients; used only in Constrain mode
+SurveyVertexDiagnostics  -- read-only, on-demand per-vertex inspection (actual vs. target height,
+                              all 8 neighbors, all 4 sharing tiles, Model A vs. B's limiting
+                              relationship); never consulted by validate()/clamp()
 ```
 
 All four types are plain data/logic classes with no dependency on `MCache`, `NConfig`, or the
@@ -264,6 +267,80 @@ uncertain after this follow-up — no code here claims otherwise, and nothing wa
 incorrectly reject a geometrically legal target shape on reachability grounds it can't actually
 prove from client-side information.
 
+### Follow-up #3: diagonal-corner discrepancy investigation
+
+A third in-game report, after the actual-vs-target follow-up landed: on real (non-flat) terrain, a
+vertex manually raised with soil until the server refused further placement (i.e. already at the
+real limit) still showed up to ~0.2 m of additional headroom in the editor before AT_LIMIT, and a
+large survey reported some edges as far over the limit as expected while individually-inspected
+vertices looked fine within 0.1-0.2 m of their starting height. Primary hypothesis: the validator's
+edge-only model (`SurveyConstraintValidator.CHECK_DIAGONALS = false`, unchanged since Phase 2 —
+see "What's verified vs. assumed" above) misses a tile's two diagonal corner-pairs, which can be
+the tightest relationship in a tile even when every edge-adjacent pair is comfortably under the
+limit.
+
+**Confirmed architecturally, not yet confirmed against the server.** Worked a concrete example:
+a vertex 2.0 m above a flat plane, with both of its edge-adjacent neighbors at 0.2 m (so each
+edge-adjacent difference is 1.8 m — comfortably legal) and its diagonally-opposite corner still at
+0 m (so the diagonal difference is the full 2.0 m — already at the true limit). Edge-only Model A
+reports 0.2 m of headroom that Model B (every one of a tile's six corner pairs, i.e.
+`max(four corners) - min(four corners)`) correctly reports as none. Pushing the spike one more
+0.1 m unit past that point: Model A still reports zero violations survey-wide, while Model B
+catches it immediately — this is architecturally identical to the reported "extra 0.1-0.2 m before
+anything shows" symptom. See
+`SurveyConstraintValidatorTest#compareModels_hypotheticalSpike_modelBSeesTighterWorstThanModelA`
+and `#compareModels_spikePastDiagonalLimit_modelAMissesIt_modelBCatchesIt` for the worked numbers
+(built on a 2x2-tile survey so the spike vertex is strictly interior — a 1x1-tile survey's every
+vertex is itself a boundary corner, which independently produces a same-sized boundary edge against
+flat outside ground and would mask the exact gap being demonstrated).
+
+**What this does *not* establish:** that the server's real rule actually is "all six corner pairs,
+same flat 2.0 m limit, no distance scaling." That remains exactly as unverified as it was in Phase
+2 — the task that prompted this investigation explicitly noted the diagonal distance is ~1.41x an
+edge's, so a distance-scaled diagonal threshold (e.g. ~2.83 m) is equally consistent with "the
+manual soil test blocked around 19-20 units on edge-adjacent corners" as the flat-2.0m-everywhere
+Model B implemented here for comparison purposes. **No distance scaling was implemented** — Model B
+uses the exact same flat limit for every corner pair, since that's the literal comparison the task
+asked for and the manual soil-placement evidence (blocked after the real terrain already had no
+room left, consistent with *some* diagonal check existing, but not which threshold it uses)
+doesn't distinguish the two. `CHECK_DIAGONALS` stays `false` and CONSTRAIN mode's actual blocking
+behavior is **unchanged** by this follow-up — flipping it, or picking a distance-scaled variant,
+needs the specific in-game test described below first.
+
+**What was added, read-only:**
+- `SurveyConstraintValidator.edgesWithin(Area, boolean)` — the existing diagonal-aware edge
+  enumeration, with the diagonal switch now also takeable as an explicit parameter instead of only
+  via the static `CHECK_DIAGONALS` flag, so a comparison can evaluate Model B without touching the
+  flag that governs production behavior.
+- `SurveyConstraintValidator.compareModels(...)` — evaluates a survey's current committed shape
+  under both models (interior tile corner-pairs, and boundary vertices against real outside
+  terrain) from the same snapshot, returning each model's violation count and worst difference.
+  Never read by `validate()`/`clamp()`; purely an evidence-gathering tool.
+- `nurgling.survey.SurveyVertexDiagnostics` — a per-vertex, read-only report: actual terrain and
+  target height for the inspected vertex and all 8 neighbors (4 cardinal, 4 diagonal); each of the
+  4 tiles sharing it (per-tile corner spread, actual and target); which relationship each model
+  considers tightest (`Relationship`, both from target heights — what `validate()`/`clamp()`
+  actually compare — and from real terrain, for comparison); and a target-based "how far could
+  this vertex still be raised before each model's tightest relationship hits the limit" figure
+  (negative if already over). A vertex outside the survey has no target of its own, so its
+  "target" is defined as its unchanged real terrain height, per spec.
+- An in-game **Diagnostics** toggle button in the Land Survey window, below Undo/Redo: when on, a
+  fixed stack of label lines shows the whole-survey Model A-vs-B comparison plus the full
+  `SurveyVertexDiagnostics` report for whichever vertex is currently hovered/selected — reusing
+  `Display.selected` (already tracked by the existing Idle-mode hover highlight), so it adds no new
+  mouse handling and never interferes with editing. Updated once per tick while enabled; cleared to
+  a hint message when nothing is selected.
+
+**The in-game test that would actually resolve this** (still not run, same caveat as the original
+diagonal-rule question in Phase 2): on a flat multi-tile survey, raise one *interior* vertex (not a
+survey corner, so no boundary edge confounds the reading) until its edge-adjacent neighbors show
+the dig/fill limit; open the Diagnostics panel on that vertex and compare its Model A vs. Model B
+permitted-raise figures against whether the server actually still accepts more soil at that point.
+If the server stops accepting soil at Model B's figure rather than Model A's, that's confirmation
+to flip `CHECK_DIAGONALS` (or implement whatever distance-scaled variant the evidence actually
+supports) in production; if it stops partway between the two, neither model as implemented is
+exactly right and the distance-scaling question needs its own follow-up.
+
 **Worsening rule:** an edge is a blocking `VIOLATION` iff its candidate difference exceeds
 `max(limit, priorDifference)` — equivalent to "exceeds the limit AND is worse than it already
 was," collapsed into one comparison. This is what lets an existing over-limit cliff be edited
@@ -311,6 +388,19 @@ survey on a previously player-created maximum slope reports `hasAtLimit()` witho
 `actualTerrainOverLimit = true`, while a stale/invalid saved target over a flat real terrain sets
 it `false` while still `preexisting`.
 
+Added in the diagonal-corner discrepancy investigation: `SurveyConstraintValidatorTest` gained
+`compareModels_*` cases building the task's exact hypothetical spike (and a push past it) on a
+2x2-tile survey so the spike vertex is strictly interior, a mild uniform slope where both models
+agree, a spike whose diagonal partner is lower than its edge-adjacent neighbors (so the diagonal
+is strictly the tightest relationship, not just tied), and a boundary tile whose diagonal partner
+is outside the survey (confirming the boundary comparison uses real outside terrain, same as the
+existing cardinal boundary check already did). A new `SurveyVertexDiagnosticsTest` covers the same
+spike scenario from the inspected vertex's own report (confirming Model A's and B's differing
+limiting relationship and permitted-raise figures), a tile's corner-spread figure reflecting all
+four corners rather than only its edges, an unknown real-terrain neighbor never being treated as a
+known zero, and the panel's whole-survey summary line matching `compareModels()` directly (i.e.
+the diagnostic UI reads the real comparison rather than reimplementing it).
+
 **Not covered by automated tests** (needs the full widget/game harness, or live verification):
 Undo/Redo interaction with a clamped drag end-to-end through `LandSurvey`/`SurveyEditHistory`;
 mode changes while a survey window is already open; multiple simultaneous survey sessions;
@@ -319,7 +409,12 @@ both run clean (see the PR description for the run).
 
 ## Known limitations and proposed follow-ups
 
-- **Diagonal rule unverified** — see "What's verified vs. assumed" above for the exact test.
+- **Diagonal rule unverified** — see "What's verified vs. assumed" above and "Follow-up #3" for
+  the exact in-game test, and `SurveyConstraintValidator.compareModels`/`SurveyVertexDiagnostics`
+  for the read-only tooling added to gather that evidence without changing production behavior.
+  Even once "some diagonal check exists" is confirmed, whether it's a flat 2.0 m limit on every
+  corner pair (as Model B assumes for comparison) or a distance-scaled one is a separate, still
+  entirely open question.
 - **No edge-highlighting**, only vertex markers: `Display` gained a third halo-style render pass
   (three flag bits, 16 = over-limit violation / red, 64 = at-limit / amber, 32 = unverifiable /
   blue) that rings a vertex without touching its existing status-dot color, rather than drawing a
@@ -372,3 +467,18 @@ both run clean (see the PR description for the run).
 9. With that same at-limit vertex, confirm the status line distinguishes "at the limit" wording
    from "over the limit" wording, and that a genuine pre-existing cliff elsewhere in the survey
    still shows red (over-limit) even though editing unrelated vertices remains unblocked.
+10. Click the new **Diagnostics** button (below Undo/Redo) and hover a vertex. Confirm the panel
+    fills in with real numbers (not "?" placeholders) for actual/target height, all 8 neighbor
+    directions, the 4 sharing tiles' corner spreads, and both models' limiting relationship and
+    permitted-raise figures, and that it clears/shows the hint text when nothing is hovered.
+    Confirm toggling it off/on doesn't affect editing in any way.
+11. This is the test that would actually resolve the diagonal-rule question (see "Follow-up #3"):
+    on real, non-flat terrain, raise an *interior* vertex of a multi-tile survey (not a corner of
+    the survey itself) until the server refuses more soil. Open the Diagnostics panel on that
+    vertex and compare its Model A vs. Model B permitted-raise figures (the last diag line)
+    against what the server actually still allows. Report back whether the server's real stopping
+    point matches Model B's figure, Model A's, or neither.
+12. On a large survey with a mix of comfortably-legal and at/over-limit terrain, compare the
+    Diagnostics panel's whole-survey "A viol=.../B viol=..." summary line against what Warn mode's
+    own status line and markers report, to confirm the two independent code paths agree on today's
+    (edge-only, Model A) production rule.
