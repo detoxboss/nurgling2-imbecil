@@ -2,6 +2,7 @@ package nurgling.survey;
 
 import haven.Area;
 import haven.Coord;
+import haven.MCache;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -78,6 +79,11 @@ public final class SurveyVertexDiagnostics {
         public final Double actualHeight, targetHeight;
         public final Map<String, Double> actualByDir, targetByDir;
         public final Map<String, Double> actualDiffByDir, targetDiffByDir;
+        /** Signed (vertex minus neighbor) counterparts of the above -- positive means the
+         *  inspected vertex is higher. Added for Follow-up #4 (unit/threshold investigation):
+         *  the absolute-only diffs can't tell a reader which side is which without separately
+         *  checking actualByDir/targetByDir. */
+        public final Map<String, Double> actualSignedDiffByDir, targetSignedDiffByDir;
         public final TileInfo[] tiles; // order matches TILE_NAMES: NW, NE, SW, SE
         /** Which relationship each model considers tightest for this vertex, computed from the
          *  target (dz-derived) heights -- what validate()/clamp() actually compare -- and,
@@ -91,22 +97,37 @@ public final class SurveyVertexDiagnostics {
          *  the magnitude is how far it would need to come back down to reach the limit exactly).
          *  Null if no relevant neighbor height is known. */
         public final Double modelAPermittedRaiseMeters, modelBPermittedRaiseMeters;
+        /** Unit-provenance fields (Follow-up #4): the exact {@code gran} and derived
+         *  metres-per-dz-unit used for every conversion above, the raw pre-"/11" mkwidget
+         *  args[2] value (purely for display -- never itself used in arithmetic), the limit
+         *  these comparisons were run against, and this vertex's own raw dz integer if it's
+         *  inside the survey (null if it's an outside/terrain-only vertex). Exist so an in-game
+         *  reading can be cross-checked by hand against screenshots without guessing what gran
+         *  or build produced it. */
+        public final float gran, rawGranArg;
+        public final double mpd, maxSlopeMeters;
+        public final Integer vertexRawDz;
 
         Report(Coord vertex, Double actualHeight, Double targetHeight,
                Map<String, Double> actualByDir, Map<String, Double> targetByDir,
                Map<String, Double> actualDiffByDir, Map<String, Double> targetDiffByDir,
+               Map<String, Double> actualSignedDiffByDir, Map<String, Double> targetSignedDiffByDir,
                TileInfo[] tiles,
                Relationship modelALimitingTarget, Relationship modelBLimitingTarget,
                Relationship modelALimitingActual, Relationship modelBLimitingActual,
-               Double modelAPermittedRaiseMeters, Double modelBPermittedRaiseMeters) {
+               Double modelAPermittedRaiseMeters, Double modelBPermittedRaiseMeters,
+               float gran, float rawGranArg, double mpd, double maxSlopeMeters, Integer vertexRawDz) {
             this.vertex = vertex; this.actualHeight = actualHeight; this.targetHeight = targetHeight;
             this.actualByDir = actualByDir; this.targetByDir = targetByDir;
             this.actualDiffByDir = actualDiffByDir; this.targetDiffByDir = targetDiffByDir;
+            this.actualSignedDiffByDir = actualSignedDiffByDir; this.targetSignedDiffByDir = targetSignedDiffByDir;
             this.tiles = tiles;
             this.modelALimitingTarget = modelALimitingTarget; this.modelBLimitingTarget = modelBLimitingTarget;
             this.modelALimitingActual = modelALimitingActual; this.modelBLimitingActual = modelBLimitingActual;
             this.modelAPermittedRaiseMeters = modelAPermittedRaiseMeters;
             this.modelBPermittedRaiseMeters = modelBPermittedRaiseMeters;
+            this.gran = gran; this.rawGranArg = rawGranArg; this.mpd = mpd; this.maxSlopeMeters = maxSlopeMeters;
+            this.vertexRawDz = vertexRawDz;
         }
 
         public Double targetMinusActual() {
@@ -122,14 +143,20 @@ public final class SurveyVertexDiagnostics {
         return terrain.terrainHeight(c);
     }
 
-    public static Report compute(Area varea, float gran, int[] dz, SurveyTerrainSnapshot terrain,
+    /** @param rawGranArg the raw, pre-"/11" value of mkwidget's args[2] -- purely for the
+     *  report's unit-provenance display; never used in any conversion here (gran already is the
+     *  authoritative derived value). Tests that don't care about this display field can pass any
+     *  placeholder (e.g. {@code gran * 11}). */
+    public static Report compute(Area varea, float gran, float rawGranArg, int[] dz, SurveyTerrainSnapshot terrain,
                                    double maxSlopeMeters, Coord vc) {
         double mpd = SurveyConstraintValidator.metersPerDzUnit(gran);
         Double actualHeight = terrain.terrainHeight(vc);
         Double targetHeight = targetHeightAt(varea, dz, mpd, terrain, vc);
+        Integer vertexRawDz = varea.contains(vc) ? dz[varea.ridx(vc)] : null;
 
         Map<String, Double> actualByDir = new LinkedHashMap<>(), targetByDir = new LinkedHashMap<>();
         Map<String, Double> actualDiffByDir = new LinkedHashMap<>(), targetDiffByDir = new LinkedHashMap<>();
+        Map<String, Double> actualSignedDiffByDir = new LinkedHashMap<>(), targetSignedDiffByDir = new LinkedHashMap<>();
         for(Map.Entry<String, Coord> e : DIRS.entrySet()) {
             Coord nc = vc.add(e.getValue());
             Double na = terrain.terrainHeight(nc);
@@ -138,6 +165,8 @@ public final class SurveyVertexDiagnostics {
             targetByDir.put(e.getKey(), nt);
             actualDiffByDir.put(e.getKey(), ((actualHeight == null) || (na == null)) ? null : Math.abs(actualHeight - na));
             targetDiffByDir.put(e.getKey(), ((targetHeight == null) || (nt == null)) ? null : Math.abs(targetHeight - nt));
+            actualSignedDiffByDir.put(e.getKey(), ((actualHeight == null) || (na == null)) ? null : (actualHeight - na));
+            targetSignedDiffByDir.put(e.getKey(), ((targetHeight == null) || (nt == null)) ? null : (targetHeight - nt));
         }
 
         TileInfo[] tiles = new TileInfo[4];
@@ -161,8 +190,9 @@ public final class SurveyVertexDiagnostics {
         Double modelBPermitted = permittedRaise(targetHeight, targetByDir, ALL_DIRS, maxSlopeMeters);
 
         return new Report(vc, actualHeight, targetHeight, actualByDir, targetByDir, actualDiffByDir, targetDiffByDir,
+                           actualSignedDiffByDir, targetSignedDiffByDir,
                            tiles, modelALimitingTarget, modelBLimitingTarget, modelALimitingActual, modelBLimitingActual,
-                           modelAPermitted, modelBPermitted);
+                           modelAPermitted, modelBPermitted, gran, rawGranArg, mpd, maxSlopeMeters, vertexRawDz);
     }
 
     private static Relationship limiting(Map<String, Double> diffByDir, String[] dirs) {
@@ -196,18 +226,39 @@ public final class SurveyVertexDiagnostics {
         return (v == null) ? "?" : String.format("%.2fm", v);
     }
 
+    private static String fmtSigned(Double v) {
+        return (v == null) ? "?" : String.format("%+.2fm", v);
+    }
+
     private static String fmtRel(Relationship r) {
         return (r == null) ? "?" : String.format("%s=%.2fm", r.dir, r.diffMeters);
+    }
+
+    /** One build-identifying tag, bumped by hand whenever this diagnostic's own data model
+     *  changes -- lets a screenshot be matched back to the exact jar that produced it (Follow-up
+     *  #4 asked for "build/commit identity" alongside the raw numbers; this file has no runtime
+     *  access to the actual git commit, so this manually-maintained tag is the practical
+     *  substitute). */
+    private static final String BUILD_TAG = "followup4-units";
+
+    private static String dirLine(String dir, Report r) {
+        return String.format("%-2s: tgt vc=%s nbr=%s d=%s(|%s|)  act vc=%s nbr=%s d=%s(|%s|)",
+                              dir,
+                              fmt(r.targetHeight), fmt(r.targetByDir.get(dir)),
+                              fmtSigned(r.targetSignedDiffByDir.get(dir)), fmt(r.targetDiffByDir.get(dir)),
+                              fmt(r.actualHeight), fmt(r.actualByDir.get(dir)),
+                              fmtSigned(r.actualSignedDiffByDir.get(dir)), fmt(r.actualDiffByDir.get(dir)));
     }
 
     /**
      * Compact multi-line rendering, one survey-wide summary line (Model A vs. B violation counts
      * and worst difference over the whole survey, from {@link SurveyConstraintValidator#compareModels})
      * followed by this vertex's own report. Designed to map 1:1 onto a fixed stack of Label
-     * widgets (see haven.res.ui.surv.LandSurvey) -- always returns exactly {@link #LINE_COUNT}
-     * lines.
+     * widgets (see haven.res.ui.surv.LandSurvey, which now re-{@code pack()}s around them every
+     * update so long lines are no longer clipped at the window edge) -- always returns exactly
+     * {@link #LINE_COUNT} lines.
      */
-    public static final int LINE_COUNT = 11;
+    public static final int LINE_COUNT = 17;
 
     public static String[] formatLines(Report r, SurveyConstraintValidator.ModelComparison whole) {
         String[] lines = new String[LINE_COUNT];
@@ -216,29 +267,34 @@ public final class SurveyVertexDiagnostics {
                                   whole.modelBViolations, fmt(whole.modelBWorstMeters));
         lines[1] = String.format("Vertex %s: actual=%s target=%s (target-actual=%s)",
                                   r.vertex, fmt(r.actualHeight), fmt(r.targetHeight), fmt(r.targetMinusActual()));
-        lines[2] = String.format("N: t=%s a=%s   S: t=%s a=%s",
-                                  fmt(r.targetDiffByDir.get("N")), fmt(r.actualDiffByDir.get("N")),
-                                  fmt(r.targetDiffByDir.get("S")), fmt(r.actualDiffByDir.get("S")));
-        lines[3] = String.format("E: t=%s a=%s   W: t=%s a=%s",
-                                  fmt(r.targetDiffByDir.get("E")), fmt(r.actualDiffByDir.get("E")),
-                                  fmt(r.targetDiffByDir.get("W")), fmt(r.actualDiffByDir.get("W")));
-        lines[4] = String.format("NE: t=%s a=%s   NW: t=%s a=%s",
-                                  fmt(r.targetDiffByDir.get("NE")), fmt(r.actualDiffByDir.get("NE")),
-                                  fmt(r.targetDiffByDir.get("NW")), fmt(r.actualDiffByDir.get("NW")));
-        lines[5] = String.format("SE: t=%s a=%s   SW: t=%s a=%s",
-                                  fmt(r.targetDiffByDir.get("SE")), fmt(r.actualDiffByDir.get("SE")),
-                                  fmt(r.targetDiffByDir.get("SW")), fmt(r.actualDiffByDir.get("SW")));
-        lines[6] = String.format("Tile NW spread: t=%s a=%s   Tile NE spread: t=%s a=%s",
-                                  fmt(r.tiles[0].targetCornerSpread()), fmt(r.tiles[0].actualCornerSpread()),
-                                  fmt(r.tiles[1].targetCornerSpread()), fmt(r.tiles[1].actualCornerSpread()));
-        lines[7] = String.format("Tile SW spread: t=%s a=%s   Tile SE spread: t=%s a=%s",
-                                  fmt(r.tiles[2].targetCornerSpread()), fmt(r.tiles[2].actualCornerSpread()),
-                                  fmt(r.tiles[3].targetCornerSpread()), fmt(r.tiles[3].actualCornerSpread()));
-        lines[8] = String.format("Model A limiting: target %s  actual %s",
-                                  fmtRel(r.modelALimitingTarget), fmtRel(r.modelALimitingActual));
-        lines[9] = String.format("Model B limiting: target %s  actual %s",
-                                  fmtRel(r.modelBLimitingTarget), fmtRel(r.modelBLimitingActual));
-        lines[10] = String.format("Permitted raise before limit (target-based): A=%s  B=%s",
+        // Follow-up #4: raw units, so a screenshot's numbers can be hand-checked against the
+        // exact gran/mpd that produced them instead of an assumed constant.
+        lines[2] = String.format("Units: raw_arg=%.3f gran=%.6f mpd=%.6fm/dz vertex_dz=%s  build=%s",
+                                  r.rawGranArg, r.gran, r.mpd,
+                                  (r.vertexRawDz == null) ? "?(outside survey)" : r.vertexRawDz.toString(),
+                                  BUILD_TAG);
+        lines[3] = String.format("Limit: %.4fm = %.4f dz-units = %.4f world-Z (tilesz.x=%d)",
+                                  r.maxSlopeMeters, r.maxSlopeMeters / r.mpd,
+                                  r.maxSlopeMeters * MCache.tilesz.x, (int)MCache.tilesz.x);
+        lines[4] = dirLine("N", r);
+        lines[5] = dirLine("S", r);
+        lines[6] = dirLine("E", r);
+        lines[7] = dirLine("W", r);
+        lines[8] = dirLine("NE", r);
+        lines[9] = dirLine("NW", r);
+        lines[10] = dirLine("SE", r);
+        lines[11] = dirLine("SW", r);
+        lines[12] = String.format("Tile NW spread: t=%s a=%s   Tile NE spread: t=%s a=%s",
+                                   fmt(r.tiles[0].targetCornerSpread()), fmt(r.tiles[0].actualCornerSpread()),
+                                   fmt(r.tiles[1].targetCornerSpread()), fmt(r.tiles[1].actualCornerSpread()));
+        lines[13] = String.format("Tile SW spread: t=%s a=%s   Tile SE spread: t=%s a=%s",
+                                   fmt(r.tiles[2].targetCornerSpread()), fmt(r.tiles[2].actualCornerSpread()),
+                                   fmt(r.tiles[3].targetCornerSpread()), fmt(r.tiles[3].actualCornerSpread()));
+        lines[14] = String.format("Model A limiting: target %s  actual %s",
+                                   fmtRel(r.modelALimitingTarget), fmtRel(r.modelALimitingActual));
+        lines[15] = String.format("Model B limiting: target %s  actual %s",
+                                   fmtRel(r.modelBLimitingTarget), fmtRel(r.modelBLimitingActual));
+        lines[16] = String.format("Permitted raise before limit (target-based): A=%s  B=%s",
                                    fmt(r.modelAPermittedRaiseMeters), fmt(r.modelBPermittedRaiseMeters));
         return lines;
     }

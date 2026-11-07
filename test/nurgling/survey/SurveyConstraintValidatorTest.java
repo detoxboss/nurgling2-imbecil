@@ -14,18 +14,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Exercises SurveyConstraintValidator against synthetic height grids. Internal units throughout
- * are "dz" (haven.res.ui.surv.Data#dz) with {@code gran = 10f/11f} -- the real value the live
- * client sends (see haven.res.ui.surv.LandSurvey#mkwidget, {@code args[2] / 11}), NOT a
- * convenient round number. 1 dz unit is 0.1 m (matching the manual soil-placement test in the
- * Phase 2 investigation report: 0.1 m per soil, blocked at ~20 units = 2.0 m), but only because
- * {@link SurveyConstraintValidator#metersPerDzUnit} divides by {@code gran * MCache.tilesz.x}
- * -- a prior version of this test used an unrealistic {@code gran = 10f}, which combined with a
- * then-buggy validator that divided by {@code gran} alone to produce the right-looking 0.1 m/unit
- * number for the wrong reason, masking the regression this gran value is chosen to catch (with
- * the real 10f/11f, the same buggy single-division code computes 1.1 m/unit instead -- wildly
- * over-restrictive, matching the reported in-game symptom). All terrain snapshots are built with
- * {@link SurveyTerrainSnapshot#forTesting} so nothing here touches MCache or any other game
- * resource.
+ * are "dz" (haven.res.ui.surv.Data#dz) with {@code gran = 10f/11f} for most of this file -- a
+ * representative non-round value chosen to catch a real regression (see below), NOT a confirmed
+ * universal constant: Follow-up #4 (docs/land-survey-editor.md) found a live survey whose
+ * {@code gran} was observed as {@code 1} instead (raw {@code mkwidget} {@code args[2] == 11}),
+ * so {@code gran} must be treated as sent per-survey by the server, never assumed. The
+ * {@code gran1_*} tests below cover that case explicitly. 1 dz unit is 0.1 m under {@code
+ * gran = 10f/11f} specifically (matching the manual soil-placement test in the Phase 2
+ * investigation report: 0.1 m per soil, blocked at ~20 units = 2.0 m -- though that manual test
+ * never logged its own live {@code gran}, so it doesn't independently confirm 2.0 m under a
+ * different one), because {@link SurveyConstraintValidator#metersPerDzUnit} divides by
+ * {@code gran * MCache.tilesz.x} -- a prior version of this test used an unrealistic {@code gran
+ * = 10f}, which combined with a then-buggy validator that divided by {@code gran} alone to
+ * produce the right-looking 0.1 m/unit number for the wrong reason, masking the regression this
+ * gran value is chosen to catch (with 10f/11f, the same buggy single-division code computes
+ * 1.1 m/unit instead -- wildly over-restrictive, matching the reported in-game symptom). All
+ * terrain snapshots are built with {@link SurveyTerrainSnapshot#forTesting} so nothing here
+ * touches MCache or any other game resource.
  */
 class SurveyConstraintValidatorTest {
     private static final float GRAN = 10f / 11f;
@@ -558,5 +563,61 @@ class SurveyConstraintValidatorTest {
         assertEquals(0, cmp.modelAViolations, "no cardinal boundary pair touches the diagonal cliff");
         assertEquals(1, cmp.modelBViolations, "Model B's boundary diagonal check must catch it");
         assertEquals(2.5, cmp.modelBWorstMeters, 0.01);
+    }
+
+    // --- Follow-up #4: unit/threshold semantics under gran=1 (observed live, not 10/11) ---
+
+    private static final float GRAN_1 = 1f;
+
+    /** Pure conversion arithmetic -- independent of any claim about what the server's real
+     *  limit is, just that the dz-to-metres conversion tracks whatever gran actually is. */
+    @Test
+    void metersPerDzUnit_gran1EqualsOneEleventhNotOneTenth() {
+        assertEquals(1.0 / 11.0, SurveyConstraintValidator.metersPerDzUnit(GRAN_1), 1e-9);
+        // GRAN (10f/11f) loses float precision before this division even happens, so a 1e-9
+        // delta is tighter than the float -> double promotion can actually guarantee here.
+        assertEquals(0.1, SurveyConstraintValidator.metersPerDzUnit(GRAN), 1e-6);
+    }
+
+    // The dz=239/219 peak/northern-neighbor fixture from the Follow-up #4 screenshots, isolated
+    // to a single edge via a flat second column (so the boundary-vs-outside-ground edges this
+    // 1x1-tile survey also produces can't be confused with the one relationship under test; see
+    // the found-edge filter below). Unlike the arithmetic test above, this one assumes the
+    // current best-guess 2.0 m limit is correct -- it is a validator-level regression check
+    // against the exact AT_LIMIT/OVER_LIMIT banding reported in-game, not independent
+    // confirmation that 2.0 m is the real server threshold.
+    @Test
+    void gran1_observedPeakSequenceReproducesAtLimitThenOverLimitBanding() {
+        Area varea = oneTile();
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        int[] peakDz = {239, 240, 241, 242}; // baseline, +1, +2, +3
+        double[] expectedDiff = {20.0 / 11, 21.0 / 11, 22.0 / 11, 23.0 / 11};
+        // peak=239,240: diff stays below the AT_LIMIT band -- no finding recorded for this edge
+        // at all (both VALID and BELOW_LIMIT). peak=241: exactly 2.0 m, AT_LIMIT but still VALID
+        // (not blocking). peak=242: over 2.0 m, OVER_LIMIT and VIOLATION.
+        SurveyConstraintResult.Severity[] expectedSeverity = {null, null,
+            SurveyConstraintResult.Severity.AT_LIMIT, SurveyConstraintResult.Severity.OVER_LIMIT};
+        SurveyConstraintResult.Status[] expectedStatus = {null, null,
+            SurveyConstraintResult.Status.VALID, SurveyConstraintResult.Status.VIOLATION};
+
+        for(int i = 0; i < peakDz.length; i++) {
+            // Column x=0 holds the peak (both its vertices), column x=1 holds the flat
+            // northern-style neighbor at dz=219 -- the (0,0)-(1,0) edge is exactly the
+            // peak-vs-neighbor relationship from the screenshots.
+            int[] dz = {peakDz[i], 219, peakDz[i], 219};
+            SurveyConstraintResult res = SurveyConstraintValidator.validateAbsolute(varea, GRAN_1, dz, terrain, LIMIT);
+            SurveyConstraintResult.EdgeFinding found = null;
+            for(SurveyConstraintResult.EdgeFinding f : res.findings)
+                if((f.a.equals(Coord.of(0, 0)) && f.b.equals(Coord.of(1, 0))) ||
+                   (f.b.equals(Coord.of(0, 0)) && f.a.equals(Coord.of(1, 0))))
+                    found = f;
+            if(expectedSeverity[i] == null) {
+                assertTrue(found == null, "peak dz=" + peakDz[i] + " should be below the AT_LIMIT band");
+            } else {
+                assertEquals(expectedDiff[i], found.candidateDiffMeters, 0.001, "peak dz=" + peakDz[i]);
+                assertEquals(expectedSeverity[i], found.severity, "peak dz=" + peakDz[i]);
+                assertEquals(expectedStatus[i], found.status, "peak dz=" + peakDz[i]);
+            }
+        }
     }
 }

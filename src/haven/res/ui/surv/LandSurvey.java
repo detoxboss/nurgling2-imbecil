@@ -45,6 +45,10 @@ public class LandSurvey extends Window {
     private boolean diagEnabled = false;
     private Button btnDiag;
     private Label[] diagLines;
+    /** The raw, pre-"/11" value of mkwidget's args[2], kept purely for the diagnostics panel's
+     *  unit-provenance line (Follow-up #4) -- never used in any arithmetic itself, since
+     *  data.gran (computed once in mkwidget) is already the authoritative derived value. */
+    private final float rawGranArg;
 
     private ICheckBox btnLock;
 
@@ -57,11 +61,12 @@ public class LandSurvey extends Window {
 		s.dsp.refreshStyle();
     }
 
-    public LandSurvey(Area area, Data data, boolean isNew) {
+    public LandSurvey(Area area, Data data, boolean isNew, float rawGranArg) {
 	super(Coord.z, "Land survey", true);
 	this.area = area;
 	this.data = data;
 	this.isNew = isNew;
+	this.rawGranArg = rawGranArg;
 	Widget prev = add(new Label(String.format("Area: %d m²", area.area())), 0, 0);
 	add(btnLock = new ICheckBox(NStyle.locki[0], NStyle.locki[1], NStyle.locki[2], NStyle.locki[3])
 	{
@@ -122,10 +127,11 @@ public class LandSurvey extends Window {
 
     public static Widget mkwidget(UI ui, Object... args) {
 	Area area = Area.corn((Coord)args[0], (Coord)args[1]);
-	float gran = ((Number)args[2]).floatValue() / 11;
+	float rawGranArg = ((Number)args[2]).floatValue();
+	float gran = rawGranArg / 11;
 	Data data = new Data(Area.corni(area.ul, area.br), gran);
 	boolean isNew = (args[3] == null);
-	LandSurvey srv = new LandSurvey(area, data, isNew);
+	LandSurvey srv = new LandSurvey(area, data, isNew, rawGranArg);
 	if(!isNew) {
 	    data.decode(Utils.iv(args[3]), (byte[])args[4]);
 	    srv.inited = true;
@@ -191,7 +197,11 @@ public class LandSurvey extends Window {
 	    if(vz > tz)
 		hn += vz - tz;
 	}
-	zdlbl.settext(String.format("Peak to trough: %.1f m", (max - min) / 10.0));
+	/* Follow-up #4 fix: this used to hardcode "/ 10.0", silently assuming gran is always
+	 * 10f/11f (so gran*tilesz.x == 10) -- an assumption the diagnostic investigation found
+	 * false for at least one live survey (gran observed == 1). Over actual terrain (vz), same
+	 * conversion the target side already uses via metersPerDzUnit. */
+	zdlbl.settext(String.format("Peak to trough: %.2f m", (max - min) * SurveyConstraintValidator.metersPerDzUnit(data.gran)));
 	if(sd >= 0)
 	    wlbl.settext(String.format("Units of soil required: %d", sd));
 	else
@@ -332,16 +342,25 @@ public class LandSurvey extends Window {
 	    diagLines[0].settext("Hover over a vertex to inspect it.");
 	    for(int i = 1; i < diagLines.length; i++)
 		diagLines[i].settext("");
+	    pack(); // re-fit the window now that long diagnostic lines may have shrunk back down
 	    return;
 	}
 	SurveyTerrainSnapshot terrain = terrainSnapshot(map);
 	double limit = SurveySettings.TERRAIN_MAX_SLOPE_METERS;
-	SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(data.varea, data.gran, data.dz, terrain, limit, vc);
+	SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(
+	    data.varea, data.gran, rawGranArg, data.dz, terrain, limit, vc);
 	SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(
 	    data.varea, data.gran, data.dz, terrain, limit);
 	String[] lines = SurveyVertexDiagnostics.formatLines(r, cmp);
 	for(int i = 0; i < diagLines.length; i++)
 	    diagLines[i].settext(lines[i]);
+	/* Follow-up #4 fix: Label.settext() resizes the Label itself (haven.Label#settext calls
+	 * resize()), but nothing previously re-packed the Window around it -- these lines start
+	 * as "" at construction time, so the window's initial pack() sized itself far too narrow
+	 * for the real diagnostic text, which then rendered clipped at the window's edge. pack()
+	 * is cheap when nothing actually changed size (Widget#resize no-ops on an unchanged
+	 * Coord), so calling it every tick the panel is open is fine. */
+	pack();
     }
 
     private void lock(boolean enabled) {

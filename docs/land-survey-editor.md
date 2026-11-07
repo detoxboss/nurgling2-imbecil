@@ -27,7 +27,13 @@ that rule is uncertain.
 **Verified by a manual in-game test** (reported by the requester, not independently reproduced by
 this change): placing soil on one corner of near-level ground raises that vertex by approximately
 0.1 m per unit of soil, and further placement is blocked after roughly 19–20 units — i.e. an
-observed limit around 2.0 m between that corner and its (unraised) neighbors.
+observed limit around 2.0 m between that corner and its (unraised) neighbors. **Caveat added in
+Follow-up #4:** "0.1 m per unit" and "19–20 units" both implicitly assume `gran = 10f/11f`; that
+test never logged its own live `gran`, and Follow-up #4 separately found a live survey with
+`gran == 1` instead (where the same real-world 2.0 m would instead show as 22 dz units at
+≈0.091 m each). The *metres* figure (≈2.0 m) is gran-independent and still the best-supported
+number; the *dz-unit* figure is not, and should not be read as confirming which `gran` the
+original manual test ran under.
 
 **From the cited wiki pages** (`ringofbrodgar.com/wiki/Terraforming`, `.../wiki/Survey`) and forum
 thread: a maximum slope of approximately 2.0 m is described as applying between "connected"
@@ -341,6 +347,86 @@ to flip `CHECK_DIAGONALS` (or implement whatever distance-scaled variant the evi
 supports) in production; if it stops partway between the two, neither model as implemented is
 exactly right and the distance-scaling question needs its own follow-up.
 
+### Follow-up #4: unit/threshold semantics -- live `gran` is not always 10/11
+
+New in-game screenshots from the Follow-up #3 diagnostics panel contradicted this document's and
+the test suite's standing assumption that live `gran` is "always" `10f/11f`. Observed sequence
+(raising one vertex by 1 dz unit at a time, on real sloped terrain, against a northern neighbor
+whose N/NE/NW relationships all tied so Model A and Model B agreed throughout — ruling out the
+Follow-up #3 diagonal hypothesis for *this* symptom specifically):
+
+| | baseline | +1 | +2 | +3 |
+|---|---|---|---|---|
+| target height | 21.73 | 21.82 | 21.91 | 22.00 |
+| northern target diff | 1.82 | 1.91 | 2.00 | 2.09 |
+| A/B permitted raise | 0.18 | 0.09 | 0.00 | -0.09 |
+
+The real terrain's own height at that peak stayed 21.73 throughout — it had already been raised to
+its true, server-enforced maximum before the survey was even opened, which is the original "extra
+0.1-0.2 m of headroom the editor shouldn't be showing" symptom this PR exists to diagnose.
+
+**Root cause: the sequence fits `gran = 1` (raw `mkwidget` `args[2] == 11`), not `gran = 10f/11f`.**
+`target = dz / 11` reproduces every one of the eight numbers above to 2 decimal places from the
+raw fixture `dz = 239, 240, 241, 242` against a flat northern/NE/NW neighbor at `dz = 219`
+(`SurveyVertexDiagnosticsTest#gran1_observedPeakSequenceMatchesScreenshots_modelsAgreeNoDiagonalAdvantage`,
+`SurveyConstraintValidatorTest#gran1_observedPeakSequenceReproducesAtLimitThenOverLimitBanding`).
+Under the assumed `gran = 10f/11f`, the same dz steps would move the target by exactly 0.10 m each,
+not the observed 0.09 m — the screenshots rule that assumption out directly, independent of any
+diagonal reasoning. **This is not a bug in `metersPerDzUnit()` or in the validator's arithmetic**:
+both already take `gran` as a per-call parameter and compute correctly for whatever value they're
+given. The bug was in two places that assumed a specific value instead of using what was passed:
+
+1. A stale doc comment on `SurveyConstraintValidator#metersPerDzUnit` claimed live `gran == 10f/11f`
+   was "verified empirically." That claim is now corrected in place.
+2. A real, independent bug: `LandSurvey#updmap`'s "Peak to trough" status line hardcoded
+   `(max - min) / 10.0`, baking in the same false assumption as a literal constant rather than
+   calling `metersPerDzUnit(data.gran)` like every other readout in this file already does. Fixed
+   to use the shared conversion, so it now stays correct for whatever `gran` a given survey
+   actually has.
+
+**The 2.0 m limit's own provenance is independently traced, not re-derived from the `*11` world-Z
+decode.** `MCache.tilesz.x == 11` and the `* 11` literal in `MCache.Grid`'s z-buffer decode (the
+protocol's own scale factor, not something derived from `tilesz.x`) are two separately-sourced
+facts that happen to share a value; neither one establishes that 2.0 m is the real terraforming
+limit, which still traces only to the wiki citation in `SurveyConstraintValidator`'s class doc
+comment. The manual soil-placement test that seemed to additionally corroborate 2.0 m never
+logged its own live `gran`, so — now that `gran` is known to vary — that test cannot be assumed to
+have been run under `10f/11f` either, and does not independently confirm 2.0 m under whatever
+`gran` it actually used. Treat 2.0 m as the same best-current-guess it always was, not as
+re-verified by this follow-up.
+
+**Both models agreeing here does not clear the diagonal question from Follow-up #3** — it just
+means this particular symptom isn't an example of it (N, NE, and NW all tied at the same
+diff, so there was no diagonal relationship left for Model B to catch that Model A didn't already
+see). Follow-up #3's own open question (whether the server checks diagonals at all, and at what
+threshold) remains exactly as open as it was; checklist item 11 below still covers it.
+
+**What was added:**
+- The per-vertex diagnostics panel (`SurveyVertexDiagnostics`) now also reports: the raw
+  pre-`/11` `mkwidget` `args[2]` value, the derived `gran` and `metersPerDzUnit`, the inspected
+  vertex's raw `dz` integer (when it's inside the survey), the 2.0 m limit expressed in all three
+  units (metres, dz-units, world-Z), a manually-bumped build tag, and — per direction — both the
+  absolute neighbor height and the *signed* difference (vertex minus neighbor), not only the
+  unsigned difference as before.
+- `LandSurvey` now calls `pack()` after every diagnostics update. The panel's `Label`s resize
+  themselves on `settext()` (`haven.Label#settext` already does this), but nothing previously
+  re-fit the containing `Window` around them, so long diagnostic lines rendered clipped at the
+  window's original (near-empty-text) edge. `pack()` is a no-op once the size stabilizes, so
+  calling it every tick the panel is open is cheap.
+- `SurveyConstraintValidator#metersPerDzUnit`'s doc comment no longer claims live `gran` is a known
+  constant.
+- `LandSurvey#updmap`'s "Peak to trough" readout no longer hardcodes `/ 10.0`.
+
+**What this does *not* establish:** which of the two models (edge-only vs. all-corners) the server
+actually enforces, or whether it enforces a flat or distance-scaled diagonal threshold — none of
+that was resolved by this follow-up, since the reported symptom turned out to be fully explained by
+the `gran` mismatch instead. It also does not establish that `gran` is always `1` either, any more
+than the earlier assumption that it's always `10f/11f` was justified — the only safe conclusion is
+that it varies per survey and must always be read from `mkwidget`'s `args[2]`, never assumed. The
+controlled live experiment described in the PR body (recording one accepted soil placement's raw
+height change, the next refused attempt, and repeating after lowering one increment and on another
+patch) has not been run; nothing in this follow-up should be read as having run it.
+
 **Worsening rule:** an edge is a blocking `VIOLATION` iff its candidate difference exceeds
 `max(limit, priorDifference)` — equivalent to "exceeds the limit AND is worse than it already
 was," collapsed into one comparison. This is what lets an existing over-limit cliff be edited
@@ -401,6 +487,20 @@ four corners rather than only its edges, an unknown real-terrain neighbor never 
 known zero, and the panel's whole-survey summary line matching `compareModels()` directly (i.e.
 the diagnostic UI reads the real comparison rather than reimplementing it).
 
+Added in the Follow-up #4 unit/threshold investigation: `metersPerDzUnit_gran1EqualsOneEleventhNotOneTenth`
+in both `SurveyConstraintValidatorTest` and `SurveyVertexDiagnosticsTest` — pure conversion
+arithmetic (`gran = 1` gives `1/11 m` per dz unit, not `1/10`), deliberately kept separate from any
+claim about the server's real limit. Separately, two regression tests reproduce the exact
+Follow-up #4 screenshot sequence under `gran = 1`: `SurveyVertexDiagnosticsTest
+#gran1_observedPeakSequenceMatchesScreenshots_modelsAgreeNoDiagonalAdvantage` checks the
+diagnostics `Report`'s target height, northern/NE/NW diff, and Model A/B permitted-raise figures
+match the screenshots' baseline/+1/+2/+3 numbers to 2 decimal places and that A and B agree
+(diagonals tie, not exceed); `SurveyConstraintValidatorTest
+#gran1_observedPeakSequenceReproducesAtLimitThenOverLimitBanding` checks the same dz fixture
+through `validateAbsolute()` directly, reproducing the AT_LIMIT-then-OVER_LIMIT severity/status
+transition at +2/+3. Both are explicitly commented as assuming the current best-guess 2.0 m limit,
+not as independent confirmation of it. `ant test`: 421/421 (up from 417).
+
 **Not covered by automated tests** (needs the full widget/game harness, or live verification):
 Undo/Redo interaction with a clamped drag end-to-end through `LandSurvey`/`SurveyEditHistory`;
 mode changes while a survey window is already open; multiple simultaneous survey sessions;
@@ -415,6 +515,19 @@ both run clean (see the PR description for the run).
   Even once "some diagonal check exists" is confirmed, whether it's a flat 2.0 m limit on every
   corner pair (as Model B assumes for comparison) or a distance-scaled one is a separate, still
   entirely open question.
+- **`gran` is not a known constant** — Follow-up #4 found a live survey with `gran == 1` (raw
+  `mkwidget` `args[2] == 11`), contradicting this document's own prior assumption that it was
+  always `10f/11f`. Both are now confirmed to be *possible* values; neither is confirmed as *the*
+  value for any survey other than the one each screenshot came from. Every conversion already
+  takes `gran` as a parameter rather than hardcoding it, except the two now-fixed spots noted in
+  Follow-up #4 (a stale doc comment, and `LandSurvey#updmap`'s literal `/ 10.0`) — but any *new*
+  code touching dz/metres conversions must keep reading `data.gran`, never assume a value.
+- **The 2.0 m limit itself remains wiki-sourced only** — Follow-up #4 found that the manual
+  soil-placement test once cited as corroborating it never logged its own live `gran`, so it can
+  no longer be assumed to have run under `10f/11f` either. The controlled live experiment
+  described in that follow-up (recording accepted vs. refused soil placements with their raw
+  height changes) has not been run and would be the way to actually re-confirm 2.0 m independent
+  of the wiki.
 - **No edge-highlighting**, only vertex markers: `Display` gained a third halo-style render pass
   (three flag bits, 16 = over-limit violation / red, 64 = at-limit / amber, 32 = unverifiable /
   blue) that rings a vertex without touching its existing status-dot color, rather than drawing a
@@ -482,3 +595,19 @@ both run clean (see the PR description for the run).
     Diagnostics panel's whole-survey "A viol=.../B viol=..." summary line against what Warn mode's
     own status line and markers report, to confirm the two independent code paths agree on today's
     (edge-only, Model A) production rule.
+13. Open the Diagnostics panel on any survey and read its new "Units:" line. Confirm `raw_arg`,
+    `gran`, and `mpd` are sane for whatever that survey's real `gran` turns out to be (don't assume
+    it matches either `10f/11f` or the `1` observed in Follow-up #4 — that's exactly the point).
+    Confirm the panel no longer clips any line at the window's edge (Follow-up #4's `pack()` fix),
+    and that the "Peak to trough" readout above the buttons still reads a sane metre value on
+    sloped terrain (not silently off by ~10% the way the old hardcoded `/10.0` would be if a
+    survey's `gran` isn't `10f/11f`).
+14. The controlled experiment Follow-up #4 asked for but did not run: on flat, unobstructed
+    terrain, raise a vertex by one soil increment and note the exact accepted height change; keep
+    raising until the server refuses one; note the last accepted height and the refused attempt's
+    message. Repeat after lowering by one increment, and again on a different, unrelated patch.
+    This is what would actually re-confirm (or correct) the 2.0 m limit independent of the wiki.
+15. Reopen a survey previously edited under this PR's old `/10.0`-based "Peak to trough" display
+    (if one exists from before this fix) and confirm the readout changes only if that survey's real
+    `gran` isn't `10f/11f` — on a survey where it is, the fix should produce an identical number to
+    before, not a regression.

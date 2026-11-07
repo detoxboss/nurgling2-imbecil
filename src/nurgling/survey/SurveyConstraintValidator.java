@@ -45,13 +45,22 @@ public final class SurveyConstraintValidator {
      * {@code * 11} factor in MCache.Grid's z-format decoding). Dividing world-Z back out by
      * {@code tilesz.x} recovers the original server-sent value in real metres.
      *
-     * Verified empirically: live {@code gran == 10f/11f}, and a manual soil-placement test
-     * raises a vertex by exactly 0.1 m per dz unit, blocked at ~20 units (~2.0 m) on flat
-     * ground -- {@code 1 / (gran * tilesz.x) == 1 / ((10/11) * 11) == 0.1}, matching exactly.
-     * This also matches the pre-existing (unmodified) "Peak to trough" readout in
-     * LandSurvey#updmap, which has always hardcoded {@code / 10.0} -- that only happens to be
-     * correct because live gran is always 10/11, so {@code gran * tilesz.x == 10} in practice;
-     * this method stays correct even if a server ever sent a different gran.
+     * <p><b>Follow-up #4 correction:</b> an earlier version of this comment asserted live
+     * {@code gran} was "always" {@code 10f/11f} and called that "verified empirically." That was
+     * wrong, or at least not generally true: an in-game diagnostic session (see
+     * docs/land-survey-editor.md, Follow-up #4) logged {@code mkwidget}'s raw {@code args[2]} as
+     * {@code 11} -- i.e. {@code gran == 1}, not {@code 10/11} -- and the observed per-dz-unit
+     * step in that session was {@code 1/11 m ≈ 0.0909 m}, not {@code 0.1 m}. {@code gran} is
+     * sent by the server per survey ({@code LandSurvey#mkwidget}, {@code args[2] / 11}) and must
+     * never be assumed constant across surveys or builds; this method already takes it as a
+     * parameter for exactly that reason, so no arithmetic here was wrong -- only the stale prose
+     * above (and, separately, a real hardcoded-constant bug it describes: see
+     * {@code LandSurvey#updmap}'s "Peak to trough" readout, which hardcoded {@code / 10.0}
+     * instead of calling this method, and has been fixed to do so). The 2.0 m limit itself still
+     * traces only to the wiki citation in this class's doc comment -- the manual soil-placement
+     * test that seemed to corroborate it was run under whatever {@code gran} was live at the
+     * time, which was never logged, so it does not independently confirm 2.0 m under a
+     * <i>different</i> gran. Treat 2.0 m as the best current guess, not as re-verified here.
      */
     public static double metersPerDzUnit(float gran) {
         return 1.0 / (gran * MCache.tilesz.x);

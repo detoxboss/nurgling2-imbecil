@@ -566,6 +566,32 @@ figure) plus an in-game **Diagnostics** toggle in `LandSurvey` reusing the exist
 would actually resolve the open question, and the full new-tests list. `ant test`: 417/417 passing
 (up from 407).
 
+**Follow-up #4 (same PR, pre-merge): unit/threshold semantics -- live `gran` is not always
+10/11.** New screenshots from the Follow-up #3 diagnostics panel contradicted this PR's own
+standing assumption that live `gran` is "always" `10f/11f`: a baseline-to-+3 dz sequence
+(239/240/241/242 against a flat northern/NE/NW neighbor at 219) reproduced observed target
+heights (21.73/21.82/21.91/22.00), diffs (1.82/1.91/2.00/2.09), and A==B permitted-raise figures
+(0.18/0.09/0.00/-0.09) to 2 decimal places **only** under `gran = 1` (raw `mkwidget` `args[2] ==
+11`), not `10f/11f` (which would move the target by exactly 0.10 m per dz step, not the observed
+0.09 m). Model A and Model B agreed throughout this sequence (N/NE/NW all tied), so this
+particular symptom is fully explained by the `gran` mismatch and is **not** an example of the
+Follow-up #3 diagonal gap -- that question remains exactly as open as before. Root cause: two
+places assumed a specific `gran` instead of reading the one actually passed in -- a stale doc
+comment on `metersPerDzUnit` claiming the 10/11 value was "verified empirically" (now corrected),
+and a real bug in `LandSurvey#updmap`'s "Peak to trough" readout, which hardcoded `/ 10.0` instead
+of calling `metersPerDzUnit(data.gran)` like every other readout already does (now fixed). No
+change to `metersPerDzUnit()`'s own arithmetic was needed -- it already took `gran` as a
+parameter. The 2.0 m limit's provenance was traced independently of `MCache`'s own `*11` z-buffer
+decode (a separately-sourced protocol constant that happens to equal `tilesz.x`) and still rests
+only on the wiki citation; the manual soil-placement test once thought to corroborate it never
+logged its own live `gran`, so it no longer can be assumed to confirm 2.0 m specifically under
+`10f/11f`. Added: raw `args[2]`/`gran`/`mpd`/raw-`dz`/build-tag and the limit-in-three-units to the
+per-vertex Diagnostics panel, signed (not just absolute) neighbor diffs, and a `pack()` call after
+every diagnostics update so long lines stop clipping at the window's edge. See
+`docs/land-survey-editor.md`'s "Follow-up #4" section for the full table, worked arithmetic, and
+the controlled live experiment (recording accepted/refused soil placements) that was asked for but
+explicitly **not** run. `ant test`: 421/421 passing (up from 417).
+
 ## Fork `BotRegistry` registrations
 
 **File:** `src/nurgling/actions/bots/registry/BotRegistry.java`

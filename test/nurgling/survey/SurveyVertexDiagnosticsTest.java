@@ -51,7 +51,7 @@ class SurveyVertexDiagnosticsTest {
         Area varea = oneTile();
         int[] dz = {0, 0, 0, 0};
         SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
-        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, dz, terrain, LIMIT, Coord.of(0, 0));
+        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, GRAN * 11, dz, terrain, LIMIT, Coord.of(0, 0));
         assertEquals(0.0, r.actualHeight, 0.001);
         assertEquals(0.0, r.targetHeight, 0.001);
         assertEquals(0.0, r.targetMinusActual(), 0.001);
@@ -75,7 +75,7 @@ class SurveyVertexDiagnosticsTest {
         Area varea = twoByTwoTiles();
         int[] dz = {0, 2, 0, 2, 20, 2, 0, 2, 0}; // center (1,1) = 20 units = 2.0m
         SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
-        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, dz, terrain, LIMIT, Coord.of(1, 1));
+        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, GRAN * 11, dz, terrain, LIMIT, Coord.of(1, 1));
 
         assertEquals(2.0, r.modelBLimitingTarget.diffMeters, 0.01, "a diagonal-to-corner relationship should be Model B's tightest");
         assertTrue(java.util.Arrays.asList("NE", "NW", "SE", "SW").contains(r.modelBLimitingTarget.dir));
@@ -95,7 +95,7 @@ class SurveyVertexDiagnosticsTest {
         Area varea = twoByTwoTiles();
         int[] dz = {0, 2, 0, 2, 20, 2, 0, 2, 0};
         SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
-        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, dz, terrain, LIMIT, Coord.of(1, 1));
+        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, GRAN * 11, dz, terrain, LIMIT, Coord.of(1, 1));
         // tiles[] order is NW, NE, SW, SE (relative to the inspected vertex (1,1)); the "NW" tile
         // (ul=(0,0)) has the spike as its own SE corner and 0m at its other three corners.
         SurveyVertexDiagnostics.TileInfo nw = r.tiles[0];
@@ -118,7 +118,7 @@ class SurveyVertexDiagnosticsTest {
             heights.put(c, 0.0);
         heights.remove(Coord.of(1, 1)); // the SE diagonal from (0,0): real terrain height unknown
         SurveyTerrainSnapshot terrain = SurveyTerrainSnapshot.forTesting(heights, new HashMap<>(), varea.margin(1));
-        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, dz, terrain, LIMIT, Coord.of(0, 0));
+        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN, GRAN * 11, dz, terrain, LIMIT, Coord.of(0, 0));
         assertNull(r.actualDiffByDir.get("SE"));
         // Model B's actual-based limiting relationship still resolves from its other known
         // neighbors, never crashing or silently substituting zero for the missing one.
@@ -138,9 +138,68 @@ class SurveyVertexDiagnosticsTest {
         assertEquals(0, cmp.modelAViolations);
         assertEquals(4, cmp.modelBViolations); // all 4 of the center's symmetric diagonal-to-corner relationships
         String[] lines = SurveyVertexDiagnostics.formatLines(
-            SurveyVertexDiagnostics.compute(varea, GRAN, dz, terrain, LIMIT, Coord.of(1, 1)), cmp);
+            SurveyVertexDiagnostics.compute(varea, GRAN, GRAN * 11, dz, terrain, LIMIT, Coord.of(1, 1)), cmp);
         assertEquals(SurveyVertexDiagnostics.LINE_COUNT, lines.length);
         assertTrue(lines[0].contains("A viol=0"));
         assertTrue(lines[0].contains("B viol=4"));
+    }
+
+    // --- Follow-up #4: unit/threshold semantics -- the observed live gran was 1 (mkwidget
+    // args[2]==11), not this file's usual GRAN=10f/11f constant. Reproduces the exact in-game
+    // screenshot sequence reported: a peak vertex whose N/NE/NW neighbors all tie at the same
+    // diff (so Model A and Model B see the identical limiting relationship and headroom --
+    // enabling diagonals could not have changed anything here), raised one dz unit at a time. ---
+
+    private static final float GRAN_1 = 1f;
+
+    // Pure conversion arithmetic -- no claim about the server's real limit, just that
+    // metersPerDzUnit tracks whatever gran actually is instead of assuming 10/11.
+    @Test
+    void metersPerDzUnit_gran1EqualsOneEleventhNotOneTenth() {
+        assertEquals(1.0 / 11.0, SurveyConstraintValidator.metersPerDzUnit(GRAN_1), 1e-9);
+        // 10f/11f loses float precision before this division even happens, so a 1e-9 delta is
+        // tighter than the float -> double promotion can actually guarantee here.
+        assertEquals(0.1, SurveyConstraintValidator.metersPerDzUnit(10f / 11f), 1e-6);
+    }
+
+    // The exact dz=239/219 peak/northern-neighbor fixture from the screenshots, at the interior
+    // center of a 2x2-tile survey so NE and NW can be given the same dz as N (tying, not
+    // contaminated by survey-boundary edges) while S/E/W/SE/SW stay flat against the peak.
+    // Baseline and +1/+2/+3 on the peak alone reproduce, to 2 decimal places, every number in
+    // the report: target height 21.73/21.82/21.91/22.00, northern (and tied NE/NW) target diff
+    // 1.82/1.91/2.00/2.09, and A==B permitted raise 0.18/0.09/0.00/-0.09. This assumes the
+    // current best-guess 2.0 m limit is correct -- it checks that the diagnostic's own
+    // arithmetic reproduces observed numbers, not that 2.0 m is the real server threshold.
+    @Test
+    void gran1_observedPeakSequenceMatchesScreenshots_modelsAgreeNoDiagonalAdvantage() {
+        Area varea = twoByTwoTiles();
+        Coord peak = Coord.of(1, 1);
+        double[] expectedTarget = {21.73, 21.82, 21.91, 22.00};
+        double[] expectedDiff = {1.82, 1.91, 2.00, 2.09};
+        double[] expectedPermitted = {0.18, 0.09, 0.00, -0.09};
+        int[] peakDz = {239, 240, 241, 242};
+
+        for(int i = 0; i < peakDz.length; i++) {
+            // row-major over (0,0)..(2,2): N=(1,0)=idx1, NE=(2,0)=idx2, NW=(0,0)=idx0 all tied
+            // at dz=219 (the screenshots' northern neighbor); S/E/W/SE/SW held flat against the
+            // peak so they can never become the limiting relationship.
+            int[] dz = {219, 219, 219, peakDz[i], peakDz[i], peakDz[i], peakDz[i], peakDz[i], peakDz[i]};
+            SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+            SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN_1, 11f, dz, terrain, LIMIT, peak);
+
+            assertEquals(expectedTarget[i], r.targetHeight, 0.005, "target height, peak dz=" + peakDz[i]);
+            assertEquals(expectedDiff[i], r.targetDiffByDir.get("N"), 0.005, "N diff, peak dz=" + peakDz[i]);
+            assertEquals(expectedDiff[i], r.targetDiffByDir.get("NE"), 0.005, "NE should tie N, peak dz=" + peakDz[i]);
+            assertEquals(expectedDiff[i], r.targetDiffByDir.get("NW"), 0.005, "NW should tie N, peak dz=" + peakDz[i]);
+            assertEquals(expectedPermitted[i], r.modelAPermittedRaiseMeters, 0.005, "Model A permitted raise, peak dz=" + peakDz[i]);
+            assertEquals(expectedPermitted[i], r.modelBPermittedRaiseMeters, 0.005, "Model B permitted raise, peak dz=" + peakDz[i]);
+            // The reported "Both models have the same limiting relationship" observation:
+            // Model B (all 8 directions) finds nothing worse than the N/NE/NW tie Model A
+            // (cardinals only) already sees -- diagonals have no room to add anything here.
+            assertEquals(r.modelALimitingTarget.diffMeters, r.modelBLimitingTarget.diffMeters, 0.005,
+                         "A and B must agree when the diagonal ties rather than exceeds, peak dz=" + peakDz[i]);
+            assertEquals("N", r.modelALimitingTarget.dir);
+            assertEquals("N", r.modelBLimitingTarget.dir);
+        }
     }
 }
