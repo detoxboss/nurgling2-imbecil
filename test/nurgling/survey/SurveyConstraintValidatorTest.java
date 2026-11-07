@@ -620,4 +620,64 @@ class SurveyConstraintValidatorTest {
             }
         }
     }
+
+    // --- Follow-up #5: dz-native raw-tick candidate model (Model C), see
+    // SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS. A further in-game test (same gran=1
+    // session) raised one vertex's dz in a 2.0m-limit survey against an untouched flat neighbor
+    // and found the real achievable cap was exactly 20 raw dz-ticks (vertex dz=241, neighbor
+    // dz=221) -- NOT the 22 ticks (2.0m / mpd(gran=1)) the existing meters-based Model A/B
+    // predict. These tests cover Model C's own arithmetic only; they do not claim 20 ticks is
+    // the confirmed universal server rule (see the field javadoc). ---
+
+    @Test
+    void rawTickLimitHypothesis_isTwenty() {
+        assertEquals(20, SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS);
+    }
+
+    // The exact dz=241/221 fixture from the newest screenshots: at the baseline (+0), Model C
+    // sees the edge sitting exactly AT its 20-tick hypothesis (not over), while Model A (meters,
+    // gran=1) still reports 0.18m of apparent headroom -- the discrepancy the screenshots
+    // reported. One tick higher (+1, dz=242), Model C already calls it a violation while Model A
+    // still calls it VALID (0.09m headroom) -- Model A would wrongly accept an edit Model C
+    // predicts the server refuses.
+    @Test
+    void gran1_observedCapSequence_modelCDisagreesWithModelA() {
+        // Interior center vertex of a 2x2-tile survey (see twoByTwoTiles in the diagnostics
+        // test): every one of its 8 neighbors is itself inside the survey or flat at 0, so
+        // raising only the center never touches a boundary-vs-outside-terrain comparison and
+        // can't be contaminated by one (unlike a 1x1-tile survey, where every vertex sits on the
+        // boundary). Only the relative tick diff matters here, not the screenshots' absolute dz
+        // values, so this uses 0/peakTicks directly rather than 221/241..244.
+        Area varea = Area.sized(Coord.of(0, 0), Coord.of(3, 3));
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        int[] peakTicks = {20, 21, 22, 23}; // +0 (observed real cap), +1, +2, +3
+        boolean[] modelCOverLimit = {false, true, true, true};
+
+        for(int i = 0; i < peakTicks.length; i++) {
+            int[] dz = {0, 0, 0, 0, peakTicks[i], 0, 0, 0, 0}; // row-major 3x3: index 4 is the center (1,1)
+            SurveyConstraintValidator.ModelComparison cmp = SurveyConstraintValidator.compareModels(varea, GRAN_1, dz, terrain, LIMIT);
+            assertEquals(peakTicks[i], cmp.modelCWorstTicks, "Model C worst raw-tick diff, peak ticks=" + peakTicks[i]);
+            assertEquals(modelCOverLimit[i] ? 4 : 0, cmp.modelCViolations,
+                         "Model C violation count (all 4 cardinal edges from the center), peak ticks=" + peakTicks[i]);
+        }
+    }
+
+    // SurveyVertexDiagnostics.compute (not just compareModels) must agree: at the observed real
+    // cap (+0), Model C's permitted-raise is exactly 0 ticks (no headroom), matching "20 is the
+    // proven limit" directly -- while Model A's permitted-raise is still +0.18m, the false
+    // headroom the screenshots showed.
+    @Test
+    void gran1_observedCap_modelCPermittedRaiseIsZeroTicksAtTheRealLimit() {
+        Area varea = Area.sized(Coord.of(0, 0), Coord.of(3, 3)); // 2x2-tile survey, peak at the interior center
+        Coord peak = Coord.of(1, 1);
+        int[] dz = {221, 221, 221, 241, 241, 241, 241, 241, 241};
+        SurveyTerrainSnapshot terrain = flatTerrain(varea.margin(1), 0);
+        SurveyVertexDiagnostics.Report r = SurveyVertexDiagnostics.compute(varea, GRAN_1, 11f, dz, terrain, LIMIT, peak);
+
+        assertEquals("N", r.modelCLimiting.dir);
+        assertEquals(20, r.modelCLimiting.diffTicks);
+        assertEquals(0, r.modelCPermittedRaiseTicks, "no raw-tick headroom left at the real observed cap");
+        // The false headroom the screenshots showed, for contrast -- same vertex, meters-based model.
+        assertEquals(0.18, r.modelAPermittedRaiseMeters, 0.005);
+    }
 }

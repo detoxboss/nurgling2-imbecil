@@ -74,6 +74,14 @@ public final class SurveyVertexDiagnostics {
         Relationship(String dir, double diffMeters) { this.dir = dir; this.diffMeters = diffMeters; }
     }
 
+    /** Model C counterpart of {@link Relationship}: a raw dz-tick difference instead of a
+     *  metres one (Follow-up #5, see {@link SurveyConstraintValidator#RAW_TICK_LIMIT_HYPOTHESIS}). */
+    public static final class TickRelationship {
+        public final String dir;
+        public final int diffTicks;
+        TickRelationship(String dir, int diffTicks) { this.dir = dir; this.diffTicks = diffTicks; }
+    }
+
     public static final class Report {
         public final Coord vertex;
         public final Double actualHeight, targetHeight;
@@ -107,6 +115,15 @@ public final class SurveyVertexDiagnostics {
         public final float gran, rawGranArg;
         public final double mpd, maxSlopeMeters;
         public final Integer vertexRawDz;
+        /** Model C (Follow-up #5 candidate, see {@link SurveyConstraintValidator#RAW_TICK_LIMIT_HYPOTHESIS}):
+         *  raw dz-tick diffs for the 4 cardinal directions (same topology as Model A), this
+         *  vertex's tightest such relationship, and how many more raw ticks it could be raised
+         *  (holding neighbors fixed) before hitting {@code RAW_TICK_LIMIT_HYPOTHESIS}. Null
+         *  fields mean no neighbor's raw-tick-equivalent was computable (unknown outside
+         *  terrain). */
+        public final Map<String, Integer> rawTickDiffByDir;
+        public final TickRelationship modelCLimiting;
+        public final Integer modelCPermittedRaiseTicks;
 
         Report(Coord vertex, Double actualHeight, Double targetHeight,
                Map<String, Double> actualByDir, Map<String, Double> targetByDir,
@@ -116,7 +133,8 @@ public final class SurveyVertexDiagnostics {
                Relationship modelALimitingTarget, Relationship modelBLimitingTarget,
                Relationship modelALimitingActual, Relationship modelBLimitingActual,
                Double modelAPermittedRaiseMeters, Double modelBPermittedRaiseMeters,
-               float gran, float rawGranArg, double mpd, double maxSlopeMeters, Integer vertexRawDz) {
+               float gran, float rawGranArg, double mpd, double maxSlopeMeters, Integer vertexRawDz,
+               Map<String, Integer> rawTickDiffByDir, TickRelationship modelCLimiting, Integer modelCPermittedRaiseTicks) {
             this.vertex = vertex; this.actualHeight = actualHeight; this.targetHeight = targetHeight;
             this.actualByDir = actualByDir; this.targetByDir = targetByDir;
             this.actualDiffByDir = actualDiffByDir; this.targetDiffByDir = targetDiffByDir;
@@ -128,6 +146,8 @@ public final class SurveyVertexDiagnostics {
             this.modelBPermittedRaiseMeters = modelBPermittedRaiseMeters;
             this.gran = gran; this.rawGranArg = rawGranArg; this.mpd = mpd; this.maxSlopeMeters = maxSlopeMeters;
             this.vertexRawDz = vertexRawDz;
+            this.rawTickDiffByDir = rawTickDiffByDir; this.modelCLimiting = modelCLimiting;
+            this.modelCPermittedRaiseTicks = modelCPermittedRaiseTicks;
         }
 
         public Double targetMinusActual() {
@@ -189,10 +209,22 @@ public final class SurveyVertexDiagnostics {
         Double modelAPermitted = permittedRaise(targetHeight, targetByDir, CARDINALS, maxSlopeMeters);
         Double modelBPermitted = permittedRaise(targetHeight, targetByDir, ALL_DIRS, maxSlopeMeters);
 
+        Integer vTicks = SurveyConstraintValidator.rawTicksAt(varea, dz, mpd, terrain, vc);
+        Map<String, Integer> neighborTicksByDir = new LinkedHashMap<>(), rawTickDiffByDir = new LinkedHashMap<>();
+        for(String d : CARDINALS) {
+            Coord nc = vc.add(DIRS.get(d));
+            Integer nTicks = SurveyConstraintValidator.rawTicksAt(varea, dz, mpd, terrain, nc);
+            neighborTicksByDir.put(d, nTicks);
+            rawTickDiffByDir.put(d, ((vTicks == null) || (nTicks == null)) ? null : Math.abs(vTicks - nTicks));
+        }
+        TickRelationship modelCLimiting = limitingTicks(rawTickDiffByDir);
+        Integer modelCPermitted = permittedRaiseTicks(vTicks, neighborTicksByDir, SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS);
+
         return new Report(vc, actualHeight, targetHeight, actualByDir, targetByDir, actualDiffByDir, targetDiffByDir,
                            actualSignedDiffByDir, targetSignedDiffByDir,
                            tiles, modelALimitingTarget, modelBLimitingTarget, modelALimitingActual, modelBLimitingActual,
-                           modelAPermitted, modelBPermitted, gran, rawGranArg, mpd, maxSlopeMeters, vertexRawDz);
+                           modelAPermitted, modelBPermitted, gran, rawGranArg, mpd, maxSlopeMeters, vertexRawDz,
+                           rawTickDiffByDir, modelCLimiting, modelCPermitted);
     }
 
     private static Relationship limiting(Map<String, Double> diffByDir, String[] dirs) {
@@ -203,6 +235,33 @@ public final class SurveyVertexDiagnostics {
             if((v != null) && (v > best)) { best = v; bestDir = d; }
         }
         return (bestDir == null) ? null : new Relationship(bestDir, best);
+    }
+
+    private static TickRelationship limitingTicks(Map<String, Integer> diffByDir) {
+        String bestDir = null;
+        int best = -1;
+        for(Map.Entry<String, Integer> e : diffByDir.entrySet()) {
+            Integer v = e.getValue();
+            if((v != null) && (v > best)) { best = v; bestDir = e.getKey(); }
+        }
+        return (bestDir == null) ? null : new TickRelationship(bestDir, best);
+    }
+
+    /** Model C counterpart of {@link #permittedRaise}: max raise (raw dz-ticks), holding every
+     *  listed neighbor's tick-equivalent fixed, before that relationship's absolute difference
+     *  would exceed {@code limitTicks}. Negative if already over. Null if {@code vTicks} or
+     *  every listed neighbor's ticks is unknown. */
+    private static Integer permittedRaiseTicks(Integer vTicks, Map<String, Integer> neighborTicksByDir, int limitTicks) {
+        if(vTicks == null)
+            return null;
+        Integer min = null;
+        for(Integer nTicks : neighborTicksByDir.values()) {
+            if(nTicks == null)
+                continue;
+            int allowed = limitTicks - (vTicks - nTicks);
+            min = (min == null) ? allowed : Math.min(min, allowed);
+        }
+        return min;
     }
 
     /** Max raise (metres), holding every listed neighbor's height fixed, before that
@@ -234,6 +293,10 @@ public final class SurveyVertexDiagnostics {
         return (r == null) ? "?" : String.format("%s=%.2fm", r.dir, r.diffMeters);
     }
 
+    private static String fmtTickRel(TickRelationship r) {
+        return (r == null) ? "?" : String.format("%s=%dticks", r.dir, r.diffTicks);
+    }
+
     /** One build-identifying tag, bumped by hand whenever this diagnostic's own data model
      *  changes -- lets a screenshot be matched back to the exact jar that produced it (Follow-up
      *  #4 asked for "build/commit identity" alongside the raw numbers; this file has no runtime
@@ -258,13 +321,14 @@ public final class SurveyVertexDiagnostics {
      * update so long lines are no longer clipped at the window edge) -- always returns exactly
      * {@link #LINE_COUNT} lines.
      */
-    public static final int LINE_COUNT = 17;
+    public static final int LINE_COUNT = 18;
 
     public static String[] formatLines(Report r, SurveyConstraintValidator.ModelComparison whole) {
         String[] lines = new String[LINE_COUNT];
-        lines[0] = String.format("Whole survey: A viol=%d (worst %s)  B viol=%d (worst %s)",
+        lines[0] = String.format("Whole survey: A viol=%d (worst %s)  B viol=%d (worst %s)  C viol=%d (worst %dticks)",
                                   whole.modelAViolations, fmt(whole.modelAWorstMeters),
-                                  whole.modelBViolations, fmt(whole.modelBWorstMeters));
+                                  whole.modelBViolations, fmt(whole.modelBWorstMeters),
+                                  whole.modelCViolations, whole.modelCWorstTicks);
         lines[1] = String.format("Vertex %s: actual=%s target=%s (target-actual=%s)",
                                   r.vertex, fmt(r.actualHeight), fmt(r.targetHeight), fmt(r.targetMinusActual()));
         // Follow-up #4: raw units, so a screenshot's numbers can be hand-checked against the
@@ -296,6 +360,9 @@ public final class SurveyVertexDiagnostics {
                                    fmtRel(r.modelBLimitingTarget), fmtRel(r.modelBLimitingActual));
         lines[16] = String.format("Permitted raise before limit (target-based): A=%s  B=%s",
                                    fmt(r.modelAPermittedRaiseMeters), fmt(r.modelBPermittedRaiseMeters));
+        lines[17] = String.format("Model C (dz-native, HYPOTHESIS limit=%dticks): limiting %s  permitted raise=%s",
+                                   SurveyConstraintValidator.RAW_TICK_LIMIT_HYPOTHESIS, fmtTickRel(r.modelCLimiting),
+                                   (r.modelCPermittedRaiseTicks == null) ? "?" : (r.modelCPermittedRaiseTicks + "ticks"));
         return lines;
     }
 }

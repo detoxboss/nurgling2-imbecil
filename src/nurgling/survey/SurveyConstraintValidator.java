@@ -66,6 +66,32 @@ public final class SurveyConstraintValidator {
         return 1.0 / (gran * MCache.tilesz.x);
     }
 
+    /**
+     * Candidate alternative to the metres-based limit above (Follow-up #5): the hypothesis that
+     * the server actually enforces a fixed count of raw dz-ticks per edge, compared directly,
+     * rather than a fixed metres distance divided by this survey's current {@code gran}-derived
+     * {@link #metersPerDzUnit}.
+     *
+     * <p>Evidence: an in-game test under {@code gran=1} (raw {@code mkwidget args[2]==11}) found
+     * the real achievable edge difference against flat, untouched neighbor terrain was exactly
+     * 20 raw dz-ticks (1.818 m under this gran's mpd) -- two ticks short of the 22 ticks / 2.0 m
+     * this class's existing meters-based {@code maxSlopeMeters} predicts at that gran. If the
+     * historical "2.0 m" wiki figure was itself measured under the long-assumed {@code
+     * gran=10/11} convention, 20 ticks * {@code metersPerDzUnit(10f/11f)} (0.1) also equals
+     * 2.0 m exactly -- the same raw-tick count reconciles both data points under two different
+     * {@code gran} values, something a metres-native limit re-divided by the current gran cannot
+     * do (it predicts a different tick count, 22, at {@code gran=1}).
+     *
+     * <p><b>Not proven.</b> Exactly one direct in-game data point (gran=1); the old 2.0 m figure
+     * was never independently re-measured under a logged {@code gran}, so its reconciliation
+     * with 20 ticks is an assumption, not a second confirmed observation. No explicit "21st
+     * placement refused" log exists yet either. Diagnostic-only: does not replace {@link
+     * #validate}/{@link #validateAbsolute}'s production behavior or {@code maxSlopeMeters} --
+     * surfaced only via {@link #compareModels} (Model C) and {@code SurveyVertexDiagnostics} so
+     * it can be compared against further live testing before anything is enforced on it.
+     */
+    public static final int RAW_TICK_LIMIT_HYPOTHESIS = 20;
+
     private SurveyConstraintValidator() {}
 
     public static final class Edge {
@@ -252,10 +278,21 @@ public final class SurveyConstraintValidator {
     public static final class ModelComparison {
         public final int modelAViolations, modelBViolations;
         public final double modelAWorstMeters, modelBWorstMeters;
+        /** Model C (Follow-up #5 candidate, see {@link #RAW_TICK_LIMIT_HYPOTHESIS}): same edge
+         *  topology as Model A (cardinal-only -- independent of the still-open diagonal
+         *  question), but compared as raw dz-tick differences against {@code
+         *  RAW_TICK_LIMIT_HYPOTHESIS} directly, with no gran/mpd conversion between two in-survey
+         *  endpoints. A boundary edge against undisturbed outside terrain still converts that
+         *  real-metres height into this survey's own current-gran tick-equivalent (outside
+         *  terrain has no raw dz of its own), so this model is only fully gran-invariant for
+         *  edges entirely inside the survey. */
+        public final int modelCViolations, modelCWorstTicks;
 
-        ModelComparison(int modelAViolations, int modelBViolations, double modelAWorstMeters, double modelBWorstMeters) {
+        ModelComparison(int modelAViolations, int modelBViolations, double modelAWorstMeters, double modelBWorstMeters,
+                        int modelCViolations, int modelCWorstTicks) {
             this.modelAViolations = modelAViolations; this.modelBViolations = modelBViolations;
             this.modelAWorstMeters = modelAWorstMeters; this.modelBWorstMeters = modelBWorstMeters;
+            this.modelCViolations = modelCViolations; this.modelCWorstTicks = modelCWorstTicks;
         }
     }
 
@@ -267,6 +304,26 @@ public final class SurveyConstraintValidator {
             if(diff > limit + 1e-9)
                 violations++;
         }
+    }
+
+    private static final class ModelAccumTicks {
+        int violations = 0;
+        int worst = 0;
+        void see(int diffTicks, int limitTicks) {
+            worst = Math.max(worst, diffTicks);
+            if(diffTicks > limitTicks)
+                violations++;
+        }
+    }
+
+    /** Raw dz-tick value at {@code c} for Model C: the survey's own dz entry if {@code c} is
+     *  inside {@code varea}, otherwise the outside terrain's real height converted into this
+     *  survey's current-gran tick-equivalent. Null only if outside terrain height is unknown. */
+    static Integer rawTicksAt(Area varea, int[] dz, double mpd, SurveyTerrainSnapshot terrain, Coord c) {
+        if(varea.contains(c))
+            return dz[varea.ridx(c)];
+        Double h = terrain.terrainHeight(c);
+        return (h == null) ? null : (int)Math.round(h / mpd);
     }
 
     /**
@@ -282,10 +339,12 @@ public final class SurveyConstraintValidator {
                                                    SurveyTerrainSnapshot terrain, double maxSlopeMeters) {
         double mpd = metersPerDzUnit(gran);
         ModelAccum a = new ModelAccum(), b = new ModelAccum();
+        ModelAccumTicks c = new ModelAccumTicks();
 
         for(Edge e : edgesWithin(varea, false)) {
-            double diff = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]) * mpd;
-            a.see(diff, maxSlopeMeters);
+            int diffTicks = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]);
+            a.see(diffTicks * mpd, maxSlopeMeters);
+            c.see(diffTicks, RAW_TICK_LIMIT_HYPOTHESIS);
         }
         for(Edge e : edgesWithin(varea, true)) {
             double diff = Math.abs(dz[varea.ridx(e.a)] - dz[varea.ridx(e.b)]) * mpd;
@@ -305,6 +364,9 @@ public final class SurveyConstraintValidator {
                 if(oh == null)
                     continue;
                 a.see(Math.abs((dz[iv] * mpd) - oh), maxSlopeMeters);
+                Integer ocTicks = rawTicksAt(varea, dz, mpd, terrain, oc);
+                if(ocTicks != null)
+                    c.see(Math.abs(dz[iv] - ocTicks), RAW_TICK_LIMIT_HYPOTHESIS);
             }
             for(Coord off : ALL_OFFSETS) {
                 Coord oc = vc.add(off);
@@ -317,6 +379,6 @@ public final class SurveyConstraintValidator {
             }
         }
 
-        return new ModelComparison(a.violations, b.violations, a.worst, b.worst);
+        return new ModelComparison(a.violations, b.violations, a.worst, b.worst, c.violations, c.worst);
     }
 }
