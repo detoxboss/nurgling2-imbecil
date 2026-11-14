@@ -1218,8 +1218,7 @@ NMiniMap extends MiniMap {
         }
         if((loc == null) || (loc.seg.id != sessloc.seg.id))
             return;
-        if(!holdMove.accept(new Coord2d(loc.tc), 1.0))
-            return;
+        holdMove.accept(new Coord2d(loc.tc));
         if(gui.waypointMovementService != null)
             gui.waypointMovementService.setSteerPaused(true);
         mvclick(gui.map, null, loc, null, 1);
