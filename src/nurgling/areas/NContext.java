@@ -1268,6 +1268,14 @@ public class NContext {
         return lastcoord.getCurrentCoord();
     }
 
+    /** The last recorded position, without navigating there first. Unlike {@link #getLastPosCoord},
+     *  this never blocks and never throws - safe to call from NTask.check(), which the main tick
+     *  loop polls every frame for every pending task; a blocking call there freezes the whole
+     *  client, not just the task's own bot (see Chopper's tree-stump wait). */
+    public Coord2d getLastKnownCoord() {
+        return (lastcoord != null) ? lastcoord.getCurrentCoord() : null;
+    }
+
     public Pair<Coord2d, Coord2d> getRCArea(String marea) throws InterruptedException {
         NArea area = areas.get(marea);
         if(!area.isVisible())

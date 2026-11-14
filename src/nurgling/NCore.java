@@ -672,6 +672,15 @@ public class NCore extends Widget
 
 
 
+    /** How long addTask() will wait on the main tick thread before giving up on a task that never
+     *  gets notified (see the Thread.holdsLock(ui) check below). This never bounds an ordinary bot
+     *  wait - those run on the bot's own worker thread, not this one, and stay fully unbounded no
+     *  matter how long the bot's own travel/action takes. check() is a per-frame poll that should
+     *  return in microseconds, so a few seconds here is already generous for "something that
+     *  should have been instant is stuck" - short on purpose, so a future instance of this bug
+     *  surfaces as a quick, loud, logged failure instead of a multi-second freeze. */
+    private static final long TICK_THREAD_WAIT_TIMEOUT_MS = 3_000;
+
     public void addTask(final NTask task) throws InterruptedException
     {
         // A task whose check() is already satisfied never calls task.wait(), the only place that notices an interrupt - so check it here too.
@@ -688,8 +697,54 @@ public class NCore extends Widget
                 {
                     tasks.add(task);
                 }
+                /* UILoop$Frame.tick() holds synchronized(ui) for this session's entire tick/render
+                 * frame. Thread.holdsLock(ui) is true only when addTask() was reached from inside
+                 * that frame - e.g. a task created from another task's check(), which tickMeasured
+                 * polls on that same thread (see NContext.getLastKnownCoord's javadoc for the
+                 * incident this guards against). A bot's own worker thread never holds this lock,
+                 * so ordinary bot waits are unaffected and stay unbounded. An unbounded wait() here
+                 * would otherwise freeze the whole client - every session, every thread needing
+                 * this lock - with no exception and no log output, because nothing ever throws. */
+                boolean onTickThread = Thread.holdsLock(ui);
                 try {
-                    task.wait();
+                    if (onTickThread) {
+                        long deadline = System.currentTimeMillis() + TICK_THREAD_WAIT_TIMEOUT_MS;
+                        while (!task.check() && !task.criticalExit) {
+                            long remaining = deadline - System.currentTimeMillis();
+                            if (remaining <= 0) {
+                                synchronized (tasks)
+                                {
+                                    tasks.remove(task);
+                                    pending_notify.removeIf(pt -> pt.task == task);
+                                }
+                                task.criticalExit = true;
+                                long waitedMs = System.currentTimeMillis() - task.waitSince;
+                                String msg = "Tick-thread task timeout: " + task.getClass().getName()
+                                        + " (" + task + ") never notified after " + waitedMs
+                                        + "ms (limit " + TICK_THREAD_WAIT_TIMEOUT_MS + "ms). "
+                                        + "Owner thread: " + task.owner
+                                        + ". This means a check() on the main tick thread did "
+                                        + "something blocking instead of returning instantly - the "
+                                        + "stack trace below is this thread's call chain at the "
+                                        + "moment of timeout, showing exactly what check() called "
+                                        + "into and got stuck on.";
+                                // Captured here, not thrown: this thread never left addTask, so its
+                                // current stack IS the full chain from NCore.tickMeasured's poll
+                                // loop down through whichever check() blocked and whatever it
+                                // called - the same information a live jstack would show, but
+                                // persisted automatically instead of requiring one to be taken
+                                // while the client is still hung.
+                                haven.error.FileLogger.logError(msg,
+                                        new Exception("tick-thread task timeout stack capture"));
+                                ui.gui.error("Task timed out on the tick thread (never notified, "
+                                        + TICK_THREAD_WAIT_TIMEOUT_MS + "ms): " + task.getClass());
+                                break;
+                            }
+                            task.wait(remaining);
+                        }
+                    } else {
+                        task.wait();
+                    }
                     if(task.criticalExit)
                     {
                         ui.gui.error("Incorrect final of task " + task.getClass().toString());

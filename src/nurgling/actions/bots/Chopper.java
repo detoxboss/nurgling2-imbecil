@@ -139,11 +139,11 @@ public class Chopper implements Action {
                     NUtils.addTask(new NTask() {
                         @Override
                         public boolean check() {
-                            try {
-                                return Finder.findGob(context.getLastPosCoord(treeArea))!=null;
-                            } catch (InterruptedException e) {
-                                return true;
-                            }
+                            // check() is polled every frame on the main tick thread - never navigate
+                            // here (that blocked the whole client once the path got stuck; see
+                            // NContext.getLastKnownCoord's javadoc). Just look where we already are.
+                            Coord2d pos = context.getLastKnownCoord();
+                            return pos != null && Finder.findGob(pos) != null;
                         }
                     });
                 }
