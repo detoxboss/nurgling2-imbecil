@@ -16,8 +16,8 @@ import haven.Utils;
  * completely different ways.
  */
 public class HoldToMove {
-    /** Minimum time between two move commands. Matches the waypoint drag rate limit. */
-    private static final double INTERVAL = 0.15;
+    /** Minimum time between two move commands. */
+    private static final double INTERVAL = 0.05;
     /** How far the pointer must travel before a press that landed on an object starts steering. */
     private static final int MOVE_THRESHOLD = UI.scale(8);
 
@@ -88,15 +88,13 @@ public class HoldToMove {
     }
 
     /**
-     * Record a resolved sample. Returns false when it sits close enough to the previous
-     * command to not be worth another one; the next sample is paced by INTERVAL either way.
+     * Record a resolved sample. Always accepted - a nearby point can still mean a sharply
+     * different heading (e.g. spinning the camera around a character standing still), so
+     * distance alone isn't a safe reason to drop a resend. Pacing is INTERVAL's job.
      */
-    public boolean accept(Coord2d p, double mindist) {
+    public void accept(Coord2d p) {
         lasttime = Utils.rtime();
-        if((lastsent != null) && (p.dist(lastsent) < mindist))
-            return(false);
         lastsent = p;
-        return(true);
     }
 
     /** True once at least one steering command has gone out. Query before {@link #disarm}. */

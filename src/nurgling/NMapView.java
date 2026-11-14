@@ -478,8 +478,8 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
 
     /**
      * Re-target the character at the ground under the given screen point. The map hit test
-     * is asynchronous, so only one sample is in flight at a time; the rest of the pacing
-     * (rate limit, minimum distance) lives in HoldToMove.
+     * is asynchronous, so only one sample is in flight at a time; the rate limit lives in
+     * HoldToMove.
      */
     private void steerHold(Coord c) {
         if((ui.modflags() != 0) || !holdMove.due())
@@ -493,8 +493,7 @@ public class NMapView extends MapView implements Widget.CursorQuery.Handler
                 holdMove.done();
                 if((holdGrab == null) || !holdMove.steering())
                     return;
-                if(!holdMove.accept(mc, MCache.tilesz.x / 2))
-                    return;
+                holdMove.accept(mc);
                 NGameUI gui = NUtils.getGameUI();
                 if((gui != null) && (gui.waypointMovementService != null))
                     gui.waypointMovementService.setSteerPaused(true);
