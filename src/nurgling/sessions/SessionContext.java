@@ -53,6 +53,16 @@ public class SessionContext {
     /** Current bot name if running (for status display) */
     private volatile String currentBotName = null;
 
+    /** Squad orders waiting for this session's own tick; see nurgling.sessions.squad.SquadExecutor. */
+    public final java.util.concurrent.ConcurrentLinkedQueue<nurgling.sessions.squad.SquadCommand> squadInbox =
+        new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    /** What this session last published about its character; the viewpoint only reads it. */
+    public volatile nurgling.sessions.squad.MemberReport squadReport;
+
+    /** Squad executor state, touched only by this session's tick and squad thread. */
+    public final nurgling.sessions.squad.SquadExecutor.State squadState = new nurgling.sessions.squad.SquadExecutor.State();
+
     /** Dedicated ForkJoinPool for headless tick processing.
      *  Prevents parallel streams in OCache.ctick() from using the common pool,
      *  which would cause cross-session task interference with the UI thread.
@@ -239,6 +249,7 @@ public class SessionContext {
         }
 
         headless = true;
+        keepMeshes(false);
 
         // Clear path line visualization - prevents frozen lines when switching back
         NGameUI gui = getGameUI();
@@ -298,6 +309,8 @@ public class SessionContext {
         }
 
         headless = false;
+        // After the headless thread has stopped, so its last tick can't drop meshes the visible session now needs
+        keepMeshes(true);
 
         // Signal background message loop to exit
         if (session != null) {
@@ -324,6 +337,15 @@ public class SessionContext {
                 }
             }
         }
+    }
+
+    /**
+     * A session in the background is never drawn, so its map keeps no terrain meshes (MCache.meshes): they were about
+     * 250 MB a session, and bots don't read them. The map is the session's, not a game UI's, so this holds across characters.
+     */
+    private void keepMeshes(boolean on) {
+        if (session != null && session.glob != null)
+            session.glob.map.meshes(on);
     }
 
     /**

@@ -98,6 +98,19 @@ public class NGameUI extends GameUI
     public java.util.List<haven.Coord2d> activeBotDetourTrail = null;
     // Current detour target position, rendered as the trail's active node; set/cleared alongside activeBotDetourTrail.
     public haven.Coord2d activeBotDetourTarget = null;
+    // Where a bot is sailing/walking now (River Explorer): drawn in the world and on the minimap; null when idle. Replaced whole, never mutated.
+    public volatile BotCourse activeBotCourse = null;
+
+    /** A bot's way ahead, in session world coords: near = the planned course from here (followed closely), far = rough
+     *  waypoints after it up to the target (drawn dashed, minimap only). */
+    public static final class BotCourse {
+        public final java.util.List<haven.Coord2d> near, far;
+
+        public BotCourse(java.util.List<haven.Coord2d> near, java.util.List<haven.Coord2d> far) {
+            this.near = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(near));
+            this.far = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(far));
+        }
+    }
 
     /** Prospecting results waiting to be paired up with their window; see NProspecting. */
     public final NProspecting.Pending prospecting = new NProspecting.Pending();
@@ -184,6 +197,13 @@ public class NGameUI extends GameUI
         // The wrapper shows its content by default; keep a disabled compass hidden
         if(!compass.enabled())
             compass.hide();
+        // Squad panel: hides itself without a squad; first placement is on the right, below the minimap area
+        nurgling.sessions.squad.SquadPanel squadPanel = new nurgling.sessions.squad.SquadPanel();
+        boolean squadPlaced = NDragProp.get(nurgling.sessions.squad.SquadPanel.DRAG_NAME).c != Coord.z;
+        NDraggableWidget squadWdg = add(new NDraggableWidget(squadPanel, nurgling.sessions.squad.SquadPanel.DRAG_NAME,
+                                                             squadPanel.sz.add(NDraggableWidget.delta)));
+        if(!squadPlaced)
+            squadWdg.target_c = new Coord(sz.x - squadWdg.sz.x - UI.scale(20), UI.scale(220));
         itemsForSearch = new NSearchItem();
         // Replace Cal with NCal to keep calendar customizations in nurgling package
         Widget oldCalendarWidget = null;
@@ -369,6 +389,7 @@ public class NGameUI extends GameUI
     @Override
     public void dispose() {
         focusGuard.reset();
+        nurgling.plugins.NPluginManager.onGameUIDisposed(this);
         if(atlas != null) atlas.flush();
         if(todoStore != null)
             todoStore.flushFile();
@@ -638,7 +659,7 @@ public class NGameUI extends GameUI
 
             if (maininv != null && !((NInventory) maininv).mainInvInstalled)
             {
-                ((NInventory) maininv).installMainInv();
+                ((NInventory) maininv).installMainInv(this);
             }
 
             // Check if this is the inventory being added
@@ -1449,6 +1470,14 @@ public class NGameUI extends GameUI
         }
     }
 
+    /** Adds {@code :squad probe}; see nurgling.sessions.squad.SquadProbe. */
+    @Override
+    public Map<String, Console.Command> findcmds() {
+        Map<String, Console.Command> cmds = new TreeMap<>(super.findcmds());
+        cmds.put("squad", (cons, args) -> nurgling.sessions.squad.SquadProbe.run(this, args));
+        return cmds;
+    }
+
     @Override
     public boolean globtype(GlobKeyEvent ev) {
         /* Combat Reactor stays first: it needs to claim a combat key before anything else can
@@ -1481,6 +1510,11 @@ public class NGameUI extends GameUI
             return true;
         }
         nurgling.sessions.SessionManager sm = nurgling.sessions.SessionManager.getInstance();
+
+        if (nurgling.sessions.squad.SquadView.kb_mode.key().match(ev.awt)) {
+            sm.squad().setCommander(!sm.squad().commander());
+            return true;
+        }
 
         // Check session switching keybindings
         if (nurgling.sessions.SessionTabBar.kb_session_prev.key().match(ev.awt)) {

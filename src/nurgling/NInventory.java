@@ -974,7 +974,7 @@ public class NInventory extends Inventory
         }
     }
 
-    public void installMainInv() {
+    public void installMainInv(NGameUI gui) {
         Window wnd = getparent(Window.class);
         NWindowDeco deco = (wnd != null && wnd.deco instanceof NWindowDeco) ? (NWindowDeco) wnd.deco : null;
 
@@ -1046,7 +1046,7 @@ public class NInventory extends Inventory
         setupRightPanel();
 
         // --- Search panel (below inventory, initially hidden) ---
-        searchwdg = new nurgling.widgets.NSearchWidget(new Coord(sz));
+        searchwdg = new nurgling.widgets.NSearchWidget(new Coord(sz), gui);
         searchwdg.resize(sz);
         searchwdg.visible = false;
         parent.add(searchwdg, new Coord(0, sz.y + UI.scale(5)));

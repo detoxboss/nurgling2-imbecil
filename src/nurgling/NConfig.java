@@ -130,7 +130,8 @@ public class NConfig
         smokeprop,
         worldexplorerprop,
         shoretracerprop,
-        questNotified, lpassistent, fishingsettings,
+        riverexplorerprop,
+        questNotified, lpassistent, fishingsettings, boatfishingsettings,
         serverNode, serverUser, serverPass, postgresMaxConnections, ndbenable, shareHearthSecret, autoHearthSecret, sharePosition, showPeerPositions, todoNotify, dbGrantRole, dbStatsOverlay, mapShareMarkers, harvestautorefill, cleanupQContainers, autoEquipTravellersSacks, qualityGrindSeedingPatter, postgres, sqlite, dbFilePath, simplecrops,
         temsmarktime, exploredAreaEnable, chunkNavOverlay, minimapTogglesShown, player_box, player_fov, temsmarkdist, tempmark, tempmarkIgnoreDist, gridbox, gridWallColor, gridDiagonals, gridDiagonalColor, useGlobalPf, useHFinGlobalPF, boxFillColor, boxEdgeColor, boxLineWidth, ropeAfterFeeding, ropeAfterTaiming, eatingConf, deersprop,dropConf, printpfmap, showPlayerCoords, fonts,
         areaRankPresets,  // Map of areaId -> Map of animalType -> presetName
@@ -209,11 +210,18 @@ public class NConfig
         disableCloudShadows,
         darkenDeepOcean,
         disableDrugEffects,
+        showFishNodes,
+        fishNodeLink,
         disableEasterEggs,
         easterEggSeen,
         simpleInspect,
         showSpeedometer,
         showPathLine,
+        squadPathfind,
+        squadStopBots,
+        squadFormation,
+        squadGroups,
+        squadAutoView,
         decoupledRender,
         pathLineWidth,
         pathLineColor,
@@ -546,6 +554,11 @@ public class NConfig
         conf.put(Key.highlightRockTiles, true);
         conf.put(Key.showSpeedometer, false);
         conf.put(Key.showPathLine, false);
+        conf.put(Key.squadPathfind, true);
+        conf.put(Key.squadStopBots, false);
+        conf.put(Key.squadFormation, "GRID");
+        conf.put(Key.squadGroups, "");
+        conf.put(Key.squadAutoView, true);
         conf.put(Key.decoupledRender, false);
         conf.put(Key.pathLineWidth, 4);
         conf.put(Key.pathLineColor, new Color(255, 255, 0));  // Yellow
@@ -679,6 +692,8 @@ public class NConfig
         conf.put(Key.disableCloudShadows, false);
         conf.put(Key.darkenDeepOcean, false);
         conf.put(Key.disableDrugEffects, true);  // Default to disabled for better performance
+        conf.put(Key.showFishNodes, false);
+        conf.put(Key.fishNodeLink, 14);  // Splash points this close (tiles) belong to one fish node
         conf.put(Key.disableEasterEggs, false);
         conf.put(Key.easterEggSeen, false);
         
@@ -1361,6 +1376,9 @@ public class NConfig
                             case "NShoreTracer":
                                 res.add(new nurgling.conf.NShoreTracerProp(obj));
                                 break;
+                            case "NRiverExplorer":
+                                res.add(new nurgling.conf.NRiverExplorerProp(obj));
+                                break;
                             case "NMiningOverlayMemory":
                                 res.add(new NMiningOverlayMemory(obj));
                                 break;
@@ -1372,6 +1390,9 @@ public class NConfig
                                 break;
                             case "NFishingSettings":
                                 res.add(new NFishingSettings(obj));
+                                break;
+                            case "NBoatFishingSettings":
+                                res.add(new nurgling.conf.NBoatFishingSettings(obj));
                                 break;
                             case "NCarrierProp":
                                 res.add(new NCarrierProp(obj));
@@ -2011,6 +2032,7 @@ public class NConfig
         res.add(NPathVisualizer.PathCategory.GPF);
         res.add(NPathVisualizer.PathCategory.QUEUED);
         res.add(NPathVisualizer.PathCategory.PF);
+        res.add(NPathVisualizer.PathCategory.BOT_COURSE);
         return res;
     }
 

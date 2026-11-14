@@ -389,7 +389,7 @@ public class MapView extends PView implements DTarget, Console.Directory {
 
 	@Override
 	public nurgling.sessions.CameraState captureState() {
-	    return new nurgling.sessions.CameraState("FreeCam", tdist, tangl, cc);
+	    return new nurgling.sessions.CameraState("FreeCam", tdist, tangl, cc, telev);
 	}
 
 	@Override
@@ -402,6 +402,10 @@ public class MapView extends PView implements DTarget, Console.Directory {
 	    if ("FreeCam".equals(state.cameraType)) {
 		this.tdist = state.zoom;
 		this.dist = state.zoom;
+		if (!Float.isNaN(state.elevation)) {
+		    this.telev = state.elevation;
+		    this.elev = state.elevation;
+		}
 		// Skip position sync - let camera reset to current player position
 	    }
 	}
@@ -816,6 +820,13 @@ public class MapView extends PView implements DTarget, Console.Directory {
 	    public void tick() {
 		if(slot == null)
 		    return;
+		/* nurgling: a background session keeps no meshes (MCache.meshes);
+		 * let go of every cut so they can be freed. */
+		if(!map.meshes()) {
+		    clear();
+		    this.lastload = null;
+		    return;
+		}
 		Loading curload = null;
 		for(Coord cc : area) {
 		    try {
@@ -854,6 +865,12 @@ public class MapView extends PView implements DTarget, Console.Directory {
 
 	    public void removed(RenderTree.Slot slot) {
 		super.removed(slot);
+		cuts.clear();
+	    }
+
+	    void clear() {
+		for(Pair<T, RenderTree.Slot> cut : cuts.values())
+		    cut.b.remove();
 		cuts.clear();
 	    }
 	}
@@ -2137,6 +2154,10 @@ public class MapView extends PView implements DTarget, Console.Directory {
 		    try(nurgling.diagnostics.MovementTrace.Stage part = nurgling.diagnostics.MovementTrace.stage(ui, "terrain-picking")) {
 			clickmap.tick();
 		    }
+		    /* nurgling: in a background session the grids above have just
+		     * let go of their cuts; free the meshes they held. */
+		    if(!glob.map.meshes())
+			glob.map.dropmeshes();
 		}
 	}
 
@@ -2934,6 +2955,22 @@ public class MapView extends PView implements DTarget, Console.Directory {
 				d = 5;
 			dist = d;
 			return(true);
+		}
+
+		@Override
+		public nurgling.sessions.CameraState captureState() {
+			return new nurgling.sessions.CameraState("RSTCam", dist, angl, null, elev);
+		}
+
+		@Override
+		public void applyState(nurgling.sessions.CameraState state) {
+			if (state == null) return;
+			this.angl = state.rotation;
+			if ("RSTCam".equals(state.cameraType)) {
+				this.dist = state.zoom;
+				if (!Float.isNaN(state.elevation))
+					this.elev = state.elevation;
+			}
 		}
 	}
 	static {camtypes.put("RTS", RSTCam.class);}

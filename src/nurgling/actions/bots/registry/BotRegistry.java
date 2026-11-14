@@ -149,6 +149,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("leaf_zone", BotDescriptor.BotType.RESOURCES, "bot.leaf_zone.title", "bot.leaf_zone.desc", true, true, CollectLeafZone.class, "leaf_zone", false));
         bots.add(new BotDescriptor("lp_gatherer", BotDescriptor.BotType.RESOURCES, "bot.lp_gatherer.title", "bot.lp_gatherer.desc", true, true, LpGatherer.class, "lp_gatherer", false));
         bots.add(new BotDescriptor("fisher", BotDescriptor.BotType.RESOURCES, "bot.fisher.title", "bot.fisher.desc", false, true, Fishing.class, "fisher", true));
+        bots.add(new BotDescriptor("boatfisher", BotDescriptor.BotType.RESOURCES, "bot.boatfisher.title", "bot.boatfisher.desc", false, true, nurgling.actions.bots.boatfishing.BoatFisher.class, "boatfisher", false));
         bots.add(new BotDescriptor("plower", BotDescriptor.BotType.RESOURCES, "bot.plower.title", "bot.plower.desc", false, true, Plower.class, "plower", true));
         bots.add(new BotDescriptor("plant_trees", BotDescriptor.BotType.RESOURCES, "bot.plant_trees.title", "bot.plant_trees.desc", false, true, PlantTrees.class, "treePlanter", false));
         bots.add(new BotDescriptor("blueprint_tree_planter", BotDescriptor.BotType.RESOURCES, "bot.blueprint_tree_planter.title", "bot.blueprint_tree_planter.desc", false, true, BlueprintTreePlanter.class, "treegardener", false));
@@ -210,6 +211,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("white_onion", BotDescriptor.BotType.FARMING, "bot.white_onion.title", "bot.white_onion.desc", true, true, WhiteOnionFarmer.class, "white_onion", false));
         bots.add(new BotDescriptor("leek", BotDescriptor.BotType.FARMING, "Leek Farmer", "Automatically harvests and replants leek.", true, true, nurgling.actions.bots.farmers.LeekFarmer.class, "leek", false));
         bots.add(new BotDescriptor("radish", BotDescriptor.BotType.FARMING, "bot.radish.title", "bot.radish.desc", true, true, RadishFarmer.class, "radish", false));
+        bots.add(new BotDescriptor("champignon", BotDescriptor.BotType.FARMING, "bot.champignon.title", "bot.champignon.desc", true, true, nurgling.actions.bots.farmers.ChampignonFarmer.class, "champignon", false));
         bots.add(new BotDescriptor("garlic", BotDescriptor.BotType.FARMING, "Garlic Farmer", "Automatically harvests and replants garlic.", true, true, nurgling.actions.bots.farmers.GarlicFarmer.class, "garlic", false));
         bots.add(new BotDescriptor("hemp", BotDescriptor.BotType.FARMING, "Hemp Farmer", "Automatically harvests and replants hemp.", true, true, nurgling.actions.bots.farmers.HempFarmer.class, "hemp", false));
         bots.add(new BotDescriptor("flax", BotDescriptor.BotType.FARMING, "Flax Farmer", "Automatically harvests and replants flax.", true, true, nurgling.actions.bots.farmers.FlaxFarmer.class, "flax", false));
@@ -263,6 +265,7 @@ public class BotRegistry {
         bots.add(new BotDescriptor("white_onionq", BotDescriptor.BotType.FARMING_QUALITY, "bot.white_onionq.title", "bot.white_onionq.desc", true, true, WhiteOnionFarmerQ.class, "white_onionq", false));
         bots.add(new BotDescriptor("leekq", BotDescriptor.BotType.FARMING_QUALITY, "Leek Farmer Quality", "Automatically harvests and replants leek in X*Y cell patches.", true, true, LeekFarmerQ.class, "leekq", false));
         bots.add(new BotDescriptor("radishq", BotDescriptor.BotType.FARMING_QUALITY, "bot.radishq.title", "bot.radishq.desc", true, true, RadishFarmerQ.class, "radishq", false));
+        bots.add(new BotDescriptor("champignonq", BotDescriptor.BotType.FARMING_QUALITY, "bot.champignonq.title", "bot.champignonq.desc", true, true, ChampignonFarmerQ.class, "champignonq", false));
         bots.add(new BotDescriptor("garlicq", BotDescriptor.BotType.FARMING_QUALITY, "Garlic Farmer Quality", "Automatically harvests and replants garlic in X*Y cell patches.", true, true, GarlicFarmerQ.class, "garlicq", false));
         bots.add(new BotDescriptor("hempq", BotDescriptor.BotType.FARMING_QUALITY, "Hemp Farmer Quality", "Automatically harvests and replants hemp in X*Y cell patches.", true, true, HempFarmerQ.class, "hempq", false));
         bots.add(new BotDescriptor("flaxq", BotDescriptor.BotType.FARMING_QUALITY, "Flax Farmer Quality", "Automatically harvests and replants flax in X*Y cell patches.", true, true, FlaxFarmerQ.class, "flaxq", false));
@@ -297,6 +300,7 @@ public class BotRegistry {
         // Ocean Explorer (2026-11-05 sync) - see docs/fork-customization-ledger.md. Reuses the
         // "worldexplorer" icon for appearance only; `id` (not iconPath) is NButton's dedup key.
         bots.add(new BotDescriptor("shoretracer", BotDescriptor.BotType.UTILS, "bot.shoretracer.title", "bot.shoretracer.desc", false, true, ShoreTracer.class, "worldexplorer", true));
+        bots.add(new BotDescriptor("riverexplorer", BotDescriptor.BotType.UTILS, "bot.riverexplorer.title", "bot.riverexplorer.desc", false, true, RiverExplorer.class, "riverexplorer", true));
         bots.add(new BotDescriptor("lift", BotDescriptor.BotType.UTILS, "Transfer Liftable (Select Zone)", "Lifts items - always prompts for input zone selection.", false, true, TransferLiftable.class, "lift", false));
         bots.add(new BotDescriptor("lift_global", BotDescriptor.BotType.UTILS, "Transfer Liftable (Global Zone)", "Lifts items using global zones with chunk navigation.", true, true, TransferLiftableGlobal.class, "liftzone", false));
         bots.add(new BotDescriptor("loading", BotDescriptor.BotType.UTILS, "Transfer To Vehicle", "Loads vehicle.", false, true, TransferToVeh.class, "loading", false));
@@ -379,7 +383,7 @@ public class BotRegistry {
         // folder's trailing "Other" group, so a new bot is never lost.
         group("trees", "choper", "pblocks", "pboards", "bark", "bough", "leaf", "leaf_zone", "plant_trees", "blueprint_tree_planter", "boughbee");
         group("stone", "chipper", "clay", "masterminer", "tunneling", "plower");
-        group("gathering", "forager", "lp_gatherer", "fisher", "tickbot");
+        group("gathering", "forager", "lp_gatherer", "fisher", "boatfisher", "tickbot");
 
         group("metal", "smelter", "steel", "fineryforge");
         group("food", "backer", "dryedfish", "fishroast", "pickling", "grapejuicer", "smoking", "gelatin");
@@ -391,12 +395,12 @@ public class BotRegistry {
         group("aggro", "reagro", "attacknearcurs", "attacknear", "attacknearborka", "attackall", "quickbarrage");
 
         group("crops", "turnip", "carrot", "beetroot", "red_onion", "yellow_onion", "white_onion", "leek", "radish", "garlic",
-                "barley", "millet", "wheat", "hemp", "flax", "lettuce", "green_kale", "pumpkin", "watermelon", "poppy", "pipeweed", "stringgrass");
+                "barley", "millet", "wheat", "hemp", "flax", "lettuce", "green_kale", "pumpkin", "watermelon", "poppy", "pipeweed", "stringgrass", "champignon");
         group("trellis", "grape", "hops", "peppercorn", "pea", "cucumber");
         group("wild", "wildkale", "wildonion", "wildtuber", "wildgourd", "wildflower");
         group("cheese", "curdingtub", "cheese", "cheese_conveyor");
         group("crops", "turnipq", "carrotq", "beetrootq", "red_onionq", "yellow_onionq", "white_onionq", "leekq", "radishq", "garlicq",
-                "barleyq", "milletq", "wheatq", "hempq", "flaxq", "lettuceq", "green_kaleq", "pumpkinq", "watermelonq", "poppyq", "pipeweedq");
+                "barleyq", "milletq", "wheatq", "hempq", "flaxq", "lettuceq", "green_kaleq", "pumpkinq", "watermelonq", "poppyq", "pipeweedq", "champignonq");
 
         group("herds", "cows", "goats", "sheeps", "pigs", "horses", "reindeers");
         group("small_animals", "chicken", "duck", "rabbit");
@@ -406,7 +410,7 @@ public class BotRegistry {
         group("land", "pave_areas", "leveler", "flag", "zoneminer", "soil", "dropsoil", "destroy", "destroytrellisplants");
         group("character", "eater", "drinker", "filwater", "filwaterzone", "shieldsword", "travellerssack", "dream_catcher", "bugs", "studytable", "studytable_nearest", "fire");
         group("feeding", "clover", "swill_collector", "swill_to_trough", "swill_piles_to_troughs");
-        group("checks", "water_cheker", "clay_cheker", "qzone", "measure_length", "calculators", "worldexplorer", "shoretracer", "autoflaction");
+        group("checks", "water_cheker", "clay_cheker", "qzone", "measure_length", "calculators", "worldexplorer", "shoretracer", "riverexplorer", "autoflaction");
 
         group("storage", "chest", "lchest", "cupboard", "crate", "barrel", "stone_casket", "cellar");
         group("workstations", "kiln", "tarkilnb", "smoke_shed", "ttub", "dframe", "htable", "cheese_rack");

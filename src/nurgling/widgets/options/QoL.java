@@ -50,6 +50,9 @@ public class QoL extends Panel {
     private CheckBox showVillageClaims;
     private CheckBox showRealmOverlays;
     private CheckBox disableDrugEffects;
+    private CheckBox showFishNodes;
+    private HSlider fishNodeLinkSlider;
+    private Label fishNodeLinkLabel;
     private CheckBox disableEasterEggs;
     private CheckBox simpleInspect;
     private CheckBox alwaysObfuscate;
@@ -354,7 +357,20 @@ public class QoL extends Panel {
         rightPrev = disableMenugridKeys = rightColumn.add(new CheckBox(L10n.get("qol.disable_menugrid")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = verboseCal = rightColumn.add(new CheckBox(L10n.get("qol.verbose_cal")), rightPrev.pos("bl").adds(0, 5));
         rightPrev = disableDrugEffects = rightColumn.add(new CheckBox(L10n.get("qol.disable_drugs")), rightPrev.pos("bl").adds(0, 5));
-        rightPrev = randomAreaColor = rightColumn.add(new CheckBox(L10n.get("qol.random_area_color")), rightPrev.pos("bl").adds(0, 5));
+        rightPrev = showFishNodes = rightColumn.add(new CheckBox(L10n.get("qol.show_fish_nodes")), rightPrev.pos("bl").adds(0, 5));
+        showFishNodes.settip(L10n.get("qol.show_fish_nodes_tip"));
+        rightPrev = rightColumn.add(new Label(L10n.get("qol.fish_node_link")), rightPrev.pos("bl").adds(10, 5));
+        {
+            fishNodeLinkLabel = new Label("14");
+            fishNodeLinkSlider = new HSlider(UI.scale(150), 4, 40, 14) {
+                public void changed() {
+                    fishNodeLinkLabel.settext(String.valueOf(this.val));
+                }
+            };
+            rightColumn.addhlp(rightPrev.pos("bl").adds(0, 2), UI.scale(5), fishNodeLinkSlider, fishNodeLinkLabel);
+            rightPrev = fishNodeLinkSlider;
+        }
+        rightPrev = randomAreaColor = rightColumn.add(new CheckBox(L10n.get("qol.random_area_color")), rightPrev.pos("bl").adds(-10, 8));
         rightPrev = syncCamera = rightColumn.add(new CheckBox("Sync camera across sessions"), rightPrev.pos("bl").adds(0, 5));
         rightPrev = keyboardFocusGuard = rightColumn.add(new CheckBox(L10n.get("qol.keyboard_focus_guard")), rightPrev.pos("bl").adds(0, 5));
         keyboardFocusGuard.settip(L10n.get("qol.keyboard_focus_guard_tip"));
@@ -466,6 +482,11 @@ public class QoL extends Panel {
         showVillageClaims.a = getBool(NConfig.Key.minimapVilol);
         showRealmOverlays.a = getBool(NConfig.Key.minimapRealmol);
         disableDrugEffects.a = getBool(NConfig.Key.disableDrugEffects);
+        showFishNodes.a = getBool(NConfig.Key.showFishNodes);
+        Object fishNodeLinkPref = NConfig.get(NConfig.Key.fishNodeLink);
+        int fishNodeLinkValue = (fishNodeLinkPref instanceof Number) ? ((Number) fishNodeLinkPref).intValue() : 14;
+        fishNodeLinkSlider.val = fishNodeLinkValue;
+        fishNodeLinkLabel.settext(String.valueOf(fishNodeLinkValue));
         alwaysObfuscate.a = getBool(NConfig.Key.alwaysObfuscate);
         randomAreaColor.a = getBool(NConfig.Key.randomAreaColor);
         treeScaleDisableZoomHide.a = getBool(NConfig.Key.treeScaleDisableZoomHide);
@@ -689,6 +710,8 @@ public class QoL extends Panel {
         NConfig.set(NConfig.Key.simpleInspect, simpleInspect.a);
         NConfig.set(NConfig.Key.verboseCal, verboseCal.a);
         NConfig.set(NConfig.Key.disableDrugEffects, disableDrugEffects.a);
+        NConfig.set(NConfig.Key.showFishNodes, showFishNodes.a);
+        NConfig.set(NConfig.Key.fishNodeLink, fishNodeLinkSlider.val);
         NConfig.set(NConfig.Key.alwaysObfuscate, alwaysObfuscate.a);
         NConfig.set(NConfig.Key.randomAreaColor, randomAreaColor.a);
         NConfig.set(NConfig.Key.treeScaleDisableZoomHide, treeScaleDisableZoomHide.a);
