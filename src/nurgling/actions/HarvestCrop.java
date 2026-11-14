@@ -25,6 +25,14 @@ public class HarvestCrop implements Action {
     final NAlias crop;
     boolean isQualityGrid = false;
 
+    // When set (quality farmers with a per-field minimum harvest stage), only plants at or
+    // above this stage are harvested; younger plants are left standing to keep growing.
+    Integer minStage = null;
+
+    // Container-stored crops (champignons): the store the harvest goes to, reached by global
+    // navigation. Null for every other farmer, whose paths are unchanged.
+    AreaContainerStore store = null;
+
     public HarvestCrop(NArea field, NArea seed, NArea trough, NAlias crop) {
         this.field = field;
         this.seed = seed;
@@ -42,10 +50,38 @@ public class HarvestCrop implements Action {
         this.isQualityGrid = isQualityGrid;
     }
 
+    // Quality-grid harvest that respects the field's minimum harvest stage: plants below it
+    // are left growing (partial harvest), so the grid refills them on the next cycle.
+    public HarvestCrop(NArea field, NArea seed, NArea trough, NAlias crop, boolean isQualityGrid, NArea.Specialisation spec) {
+        this(field,seed,trough,crop,isQualityGrid);
+        if (field != null && spec != null) {
+            NArea.Specialisation fs = field.getSpecialisation(spec);
+            if (fs != null)
+                this.minStage = fs.minHarvestStage;
+        }
+    }
+
+    // Regular harvest of a container-stored crop (champignons), honouring the field's harvest
+    // stage. There are no barrels or troughs: everything goes to the store, and the stock
+    // needed to replant the harvested tiles is kept in the inventory at the end.
+    public HarvestCrop(NArea field, AreaContainerStore store, NAlias crop, NArea.Specialisation spec) {
+        this(field, null, null, crop);
+        this.store = store;
+        if (field != null && spec != null) {
+            NArea.Specialisation fs = field.getSpecialisation(spec);
+            if (fs != null)
+                this.minStage = fs.minHarvestStage;
+        }
+    }
+
+    private boolean stageAllowed(int stage) {
+        return minStage == null || stage >= minStage;
+    }
+
     @Override
     public Results run(NGameUI gui) throws InterruptedException {
 
-        ArrayList<Gob> barrels = Finder.findGobs(seed, new NAlias("barrel"));
+        ArrayList<Gob> barrels = seed == null ? new ArrayList<>() : Finder.findGobs(seed, new NAlias("barrel"));
 
         // The trough area is optional (farmers register it via Validator's opt list), so trougha
         // is null whenever none is configured or one is out of findSpec()'s range. Everything
@@ -168,6 +204,8 @@ public class HarvestCrop implements Action {
         Gob plant;
         plant = null;
         for (CropRegistry.CropStage cropStage : CropRegistry.HARVESTABLE.getOrDefault(crop, Collections.emptyList())) {
+            if (!stageAllowed(cropStage.stage))
+                continue;
             plant = Finder.findGob(plantGobEndpoint.div(MCache.tilesz).floor(), crop, cropStage.stage);
             if(plant != null) {
                 break;
@@ -206,6 +244,8 @@ public class HarvestCrop implements Action {
         ArrayList<Gob> plants;
         List<CropRegistry.CropStage> cropStages = CropRegistry.HARVESTABLE.getOrDefault(crop, Collections.emptyList());
         for (CropRegistry.CropStage cropStage : cropStages) {
+            if (!stageAllowed(cropStage.stage))
+                continue;
             ArrayList<Gob> plantsToHarvest;
             while (!(plantsToHarvest = Finder.findGobs(area, crop, cropStage.stage)).isEmpty()) {
                 dropOffSeed(gui, barrelInfo.keySet(), troughs, cistern);
@@ -263,6 +303,7 @@ public class HarvestCrop implements Action {
         List<WItem> barrelItems = new ArrayList<>();
         List<WItem> stockpileItems = new ArrayList<>();
         List<WItem> unplantableItems = new ArrayList<>();
+        List<WItem> containerItems = new ArrayList<>();
 
         String name = "";
         for (WItem item : gui.getInventory().getItems()) {
@@ -271,13 +312,26 @@ public class HarvestCrop implements Action {
             if (stage == null) continue;
             if (stage.storageBehavior == CropRegistry.StorageBehavior.BARREL) barrelItems.add(item);
             else if (stage.storageBehavior == CropRegistry.StorageBehavior.STOCKPILE) stockpileItems.add(item);
+            else if (stage.storageBehavior == CropRegistry.StorageBehavior.CONTAINER) containerItems.add(item);
             if (!stage.plantable) unplantableItems.add(item);
         }
 
         if(!isQualityGrid) {
-            // In case item ends up in hand - drop it.
+            // In case item ends up in hand - drop it. A container-stored harvest can't be
+            // picked back up into a pile, so it goes back to the inventory instead.
             if(NUtils.getGameUI().vhand!=null) {
-                NUtils.drop(NUtils.getGameUI().vhand);
+                if (store != null)
+                    NUtils.dropToInv();
+                else
+                    NUtils.drop(NUtils.getGameUI().vhand);
+            }
+
+            if (store != null && !containerItems.isEmpty()) {
+                List<NAlias> kinds = CropRegistry.getPlantingMaterials(crop, CropRegistry.StorageBehavior.CONTAINER);
+                if (!barrelOnlyIfInventoryFull)
+                    store.deposit(gui, kinds, freeSoilTiles());
+                else if (gui.getInventory().getFreeSpace() < 3)
+                    store.deposit(gui, kinds, 0);
             }
 
             // 1. Always drop stockpile items
@@ -301,6 +355,11 @@ public class HarvestCrop implements Action {
                 }
             }
         } else {
+            // Nothing harvested this pass (partial harvest can leave a field with only
+            // immature plants): skip the container trip entirely rather than walking over
+            // to open and close it for no items.
+            if (barrelItems.isEmpty() && stockpileItems.isEmpty() && unplantableItems.isEmpty() && containerItems.isEmpty())
+                return;
             // The seed container holds planting material only: a product that can't be
             // planted (radishes) is dropped as on a regular field, and the bot sweeps it
             // into its pile afterwards.
@@ -324,6 +383,7 @@ public class HarvestCrop implements Action {
                 List<WItem> allItems = new ArrayList<>();
                 allItems.addAll(barrelItems);
                 allItems.addAll(stockpileItems);
+                allItems.addAll(containerItems);
 
                 Set<String> processed = new HashSet<>();
 
@@ -340,6 +400,12 @@ public class HarvestCrop implements Action {
 
     }
 
+    // Tiles of the field's soil with nothing growing on them: what the replant will need.
+    private int freeSoilTiles() throws InterruptedException {
+        int soil = field.getTiles(new NAlias(CropRegistry.getSoilTile(crop))).size();
+        return Math.max(0, soil - Finder.findGobs(field, crop).size());
+    }
+
     private boolean hasAnyCropStage(NArea field, NAlias crop) throws InterruptedException {
         List<CropRegistry.CropStage> cropStages = CropRegistry.HARVESTABLE.getOrDefault(crop, Collections.emptyList());
 
@@ -347,6 +413,8 @@ public class HarvestCrop implements Action {
             return false;
 
         for (CropRegistry.CropStage cs : cropStages) {
+            if (!stageAllowed(cs.stage))
+                continue;
             if (!Finder.findGobs(field, crop, cs.stage).isEmpty())
                 return true;
         }

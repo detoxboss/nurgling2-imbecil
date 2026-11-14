@@ -323,6 +323,7 @@ NMiniMap extends MiniMap {
         drawQueuedWaypoints(g);  // Draw waypoint visualization
         drawForagerRecordingPath(g);  // Draw forager path being recorded
         drawBotDetourTrail(g);   // Draw Forager's live off-path gob-collection detour trail
+        drawBotCourse(g);        // Draw River Explorer's course and the way on to its target
         drawLayers(g);           // Plugin layers (see addLayer)
         drawMarkerLine(g);       // Draw line to selected marker
         drawPings(g);            // Draw chat map pings on top of everything else
@@ -772,6 +773,42 @@ NMiniMap extends MiniMap {
         }
     }
 
+    /** Draws a bot's way ahead (NGameUI.activeBotCourse): the planned course solid from the player, then the rough way on to
+     *  the target dashed, ending in a ring on the target. */
+    protected void drawBotCourse(GOut g) {
+        NGameUI gui = NUtils.getGameUI();
+        NGameUI.BotCourse course = (gui == null) ? null : gui.activeBotCourse;
+        Gob player = NUtils.player();
+        if(course == null || player == null || sessloc == null || dloc == null) return;
+        Coord hsz = sz.div(2);
+        java.util.function.Function<Coord2d, Coord> scr = p -> sessloc.tc.add(p.floor(MCache.tilesz)).sub(dloc.tc).div(scalef()).add(hsz);
+        Coord prev = scr.apply(player.rc);
+        g.chcolor(10, 14, 16, 160);
+        Coord sh = prev;
+        for(Coord2d p : course.near) {
+            Coord c = scr.apply(p);
+            Coord2d[] cl = clipLineToRect(new Coord2d(sh), new Coord2d(c), new Coord2d(sz));
+            if(cl != null) g.line(cl[0].round(), cl[1].round(), 4);
+            sh = c;
+        }
+        g.chcolor(255, 196, 40, 255);
+        for(Coord2d p : course.near) {
+            Coord c = scr.apply(p);
+            Coord2d[] cl = clipLineToRect(new Coord2d(prev), new Coord2d(c), new Coord2d(sz));
+            if(cl != null) g.line(cl[0].round(), cl[1].round(), 2);
+            prev = c;
+        }
+        double phase = (System.currentTimeMillis() % 1200) / 1200.0 * UI.scale(12);
+        for(Coord2d p : course.far) {
+            Coord c = scr.apply(p);
+            dashLine(g, prev, c, -phase, 2);
+            prev = c;
+        }
+        if(!course.far.isEmpty() && prev.x >= 0 && prev.y >= 0 && prev.x < sz.x && prev.y < sz.y)
+            ringOutline(g, prev, UI.scale(6), 2);
+        g.chcolor();
+    }
+
     /** Draws Forager's live off-path detour trail in yellow (the recorded path itself draws in green, see {@link #drawForagerRecordingPath}). */
     protected void drawBotDetourTrail(GOut g) {
         NGameUI gui = NUtils.getGameUI();
@@ -815,14 +852,7 @@ NMiniMap extends MiniMap {
         NGameUI gui = NUtils.getGameUI();
         if(gui == null || sessloc == null || dloc == null) return;
 
-        // Find a PathRecordable window (Forager or TrufflePigHunter)
-        nurgling.widgets.bots.PathRecordable pathWnd = null;
-        for(Widget wdg = gui.lchild; wdg != null; wdg = wdg.prev) {
-            if(wdg instanceof nurgling.widgets.bots.PathRecordable) {
-                pathWnd = (nurgling.widgets.bots.PathRecordable) wdg;
-                break;
-            }
-        }
+        nurgling.widgets.bots.PathRecordable pathWnd = nurgling.widgets.bots.PathRecordable.find(gui);
 
         // Get current path: from bot settings window, or from active bot execution
         nurgling.routes.ForagerPath recordingPath = null;
@@ -3173,6 +3203,9 @@ NMiniMap extends MiniMap {
 
     @Override
     public boolean mousedown(MouseDownEvent ev) {
+        // Commander mode: a right-click is a squad move, ahead of every other right-click meaning here.
+        if(ev.b == 3 && nurgling.sessions.squad.SquadView.minimapClick(this, xlate(ev.c), ev.b))
+            return true;
         // Alt+Shift+LMB pings the clicked spot to the selected chat channel. Plain
         // alt+LMB is left for waypoint queueing - it means "walk here next" here, on the
         // map window and in the world alike (NMapWnd.mouseup, NMiniMapWnd.clickloc,
@@ -3193,14 +3226,7 @@ NMiniMap extends MiniMap {
         if(ev.b == 1 && !ui.modmeta && !ui.modshift && !ui.modctrl && dloc != null && sessloc != null) {
             NGameUI gui = NUtils.getGameUI();
             if(gui != null) {
-                // Find a PathRecordable window (Forager or TrufflePigHunter)
-                nurgling.widgets.bots.PathRecordable pathWnd = null;
-                for(Widget wdg = gui.lchild; wdg != null; wdg = wdg.prev) {
-                    if(wdg instanceof nurgling.widgets.bots.PathRecordable) {
-                        pathWnd = (nurgling.widgets.bots.PathRecordable) wdg;
-                        break;
-                    }
-                }
+                nurgling.widgets.bots.PathRecordable pathWnd = nurgling.widgets.bots.PathRecordable.find(gui);
 
                 // If recording, consume the event to prevent player movement
                 if(pathWnd != null && pathWnd.isRecording()) {
@@ -3261,14 +3287,7 @@ NMiniMap extends MiniMap {
         if(ev.b == 1 && !ui.modmeta && !ui.modshift && !ui.modctrl && dloc != null && sessloc != null) {
             NGameUI gui = NUtils.getGameUI();
             if(gui != null) {
-                // Find a PathRecordable window (Forager or TrufflePigHunter)
-                nurgling.widgets.bots.PathRecordable pathWnd = null;
-                for(Widget wdg = gui.lchild; wdg != null; wdg = wdg.prev) {
-                    if(wdg instanceof nurgling.widgets.bots.PathRecordable) {
-                        pathWnd = (nurgling.widgets.bots.PathRecordable) wdg;
-                        break;
-                    }
-                }
+                nurgling.widgets.bots.PathRecordable pathWnd = nurgling.widgets.bots.PathRecordable.find(gui);
 
                 if(pathWnd != null && pathWnd.isRecording()) {
                     try {

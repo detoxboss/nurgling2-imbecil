@@ -191,18 +191,26 @@ not read this session except where excerpted above). Confirmed design:
   getChunkNavManager()`) documented right next to it — a deliberate, self-documented transition in
   progress, not an oversight.
 
-**Correction (upstream sync 2026-11-14, Phase 1 analysis):** upstream's "Multi-session memory:
-share the chunk graph per world, no terrain meshes in background sessions" change
-(`e3281877d`, not yet merged as of this note) finishes that transition rather than continuing it:
-`ChunkNavManager.getInstance()` is removed outright (not merely deprecated), `initialize(String
-genus)` becomes `initialize(String genus, NUI ui)`, and a new `ChunkNavStore` (227 new lines)
-takes over as the shared-per-world holder the no-UI-access callers now go through instead. The
-singleton-accessor description above and the "deliberate transition in progress" framing describe
-the merge-base state (`bef61328`), not current upstream. Treat this bullet as **historical** once
-this sync lands; it is not yet historical relative to this repository's `master` as of this
-writing. Re-verify callers of the removed `getInstance()` (the `MCache`-callback paths this
-section names) against `ChunkNavStore`'s actual acquisition API once merged — not done as part of
-this note, which only confirms the API-shape delta from source.
+**Correction (upstream sync 2026-11-14, Phase 1 analysis; re-corrected in Phase 2):** upstream's
+"Multi-session memory: share the chunk graph per world, no terrain meshes in background sessions"
+change (`e3281877d`, not yet merged as of this note) removes `ChunkNavManager.getInstance()`
+outright (not merely deprecated) and changes `initialize(String genus)` to `initialize(String
+genus, NUI ui)`. The singleton-accessor description above and the "deliberate transition in
+progress" framing describe the merge-base state (`bef61328`), not current upstream.
+
+The Phase 1 version of this note went further and claimed the no-UI-access callers this bullet
+names "now go through" a new `ChunkNavStore` instead — **that claim is unsupported and is
+withdrawn.** `git grep` for `ChunkNavManager.getInstance` across the merge-base tree finds exactly
+one hit: the method's own declaration (`ChunkNavManager.java:103`). No caller anywhere, at
+merge-base or in this delta — the accessor this section describes as "retained specifically for
+code paths without UI access" had no actual callers to retain it for by the time it was removed.
+`ChunkNavStore` (the new 227-line file) is package-private (`final class ChunkNavStore`, no
+access modifier, in `nurgling.navigation`) and is used only internally by `ChunkNavManager` itself
+— it is an implementation detail of the manager, not a replacement API surface any former
+`getInstance()` caller, real or hypothetical, migrates to.
+
+Treat this bullet as **historical** once this sync lands; it is not yet historical relative to
+this repository's `master` as of this writing.
 
 ### 4c. Supporting classes — DISCOVERED only in session 1 (method-signature/javadoc mapping); **traced in full in session 2, see §13**
 

@@ -78,8 +78,9 @@ class SyncRegistryInventoryTest {
         }
         // 198 live at the merge base + 6 fork + 3 upstream (2026-10-30 sync) + 1 fork (shoretracer,
         // 2026-11-05 sync, split from the shared "worldexplorer" id when upstream rewrote it as Ocean
-        // Explorer). BotRegistry also holds one commented-out bots.add line (testzonepatroller), which
-        // a text count would include.
-        assertEquals(208, n);
+        // Explorer) + 4 upstream (2026-11-14 sync: riverexplorer, boat fisher, Champignon Farmer,
+        // Champignon Farmer Quality). BotRegistry also holds one commented-out bots.add line
+        // (testzonepatroller), which a text count would include.
+        assertEquals(212, n);
     }
 }

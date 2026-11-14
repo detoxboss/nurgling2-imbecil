@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Config-key union after the 2026-10-30 upstream sync. (The 75% Auto-drink default itself is not
+ * Config-key union after the 2026-11-14 upstream sync. (The 75% Auto-drink default itself is not
  * asserted here: constructing NConfig loads font resources the test classpath does not have.)
  */
 class NConfigSyncKeysTest {
@@ -27,8 +27,10 @@ class NConfigSyncKeysTest {
         // Tracer split - see docs/fork-customization-ledger.md), + 30 fork keys from the Land Survey
         // editor overhaul (nurgling.survey.SurveySettings - see docs/fork-customization-ledger.md),
         // + 1 fork key from the Phase 2 terrain constraint engine (surveyTerrainConstraintMode -
-        // see nurgling.survey.SurveyConstraintValidator).
-        assertEquals(354, names.size());
+        // see nurgling.survey.SurveyConstraintValidator) = 354, + 9 upstream keys from the
+        // 2026-11-14 sync (riverexplorerprop, boatfishingsettings, showFishNodes, fishNodeLink,
+        // squadPathfind, squadStopBots, squadFormation, squadGroups, squadAutoView).
+        assertEquals(363, names.size());
         for (String fork : new String[] {"gobInstanceConf", "kinGroupLabels", "villageGroupLabels",
                 "lpassistantbotprop", "autoDrinkThreshold", "showPlayerCoords", "stackSizeLearning",
                 "combatReactorEnabled", "combatReactorDefenseThreshold", "equipBonusesExpanded",
