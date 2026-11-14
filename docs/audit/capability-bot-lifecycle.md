@@ -136,6 +136,42 @@ around line 272 for a concrete example of code already built on this). For bots 
 the lack of a self-timeout is the operational risk this finding should be read as — not "a crash
 waiting to happen," but "a hang nothing but a person can end."
 
+**Correction (live incident, 2026-11-14): "a hang nothing but a person can end" understates the
+risk — it can be the whole client, not just the one bot.** This section's own trace already
+establishes that `NCore.tickMeasured`'s poll loop calls every pending task's `check()` once per
+tick (session 1's framework-contracts section), but doesn't connect that to *which* thread runs
+that loop: `haven.UILoop$Frame.tick()` holds `synchronized(ui)` (the session's `NUI` instance) for
+the entire frame, and `ui.tick()` — which reaches `NCore.tickMeasured`'s task-poll loop — runs
+inside that lock. A live hang was diagnosed via `jstack`: `Chopper`'s anonymous task's `check()`
+called `NContext.getLastPosCoord()`, which (misleadingly, for a method that reads like a getter)
+navigated first, which blocked inside `PathFinder`/`ChunkNavExecutor` when the path became
+physically obstructed, which called `NCore.addTask()` **from inside `check()`, which the main
+tick thread was already executing while holding the `NUI` lock**. The resulting `task.wait()` was
+unbounded exactly as this section describes — but because it ran on the thread holding that lock,
+every other thread needing it (asset loader threads, etc.) piled up `BLOCKED` behind it, freezing
+the entire client, every session, with no exception and no log output, because nothing ever threw.
+A `check()` blocking is not supposed to be possible by contract (it's a per-frame poll, expected to
+return in microseconds) — this was a single isolated violation (`Chopper.java`, fixed directly:
+`NTask.check()` must never call anything that can block or navigate), not a pattern found elsewhere
+in the ~208-bot registry (a full scope search of every named and anonymous `NTask.check()`
+implementation found no other offender).
+
+Separately, as defense-in-depth against a *future* instance of the same mistake,
+`NCore.addTask()`'s `task.wait()` is no longer "genuinely unbounded... regardless of `infinite`"
+in one specific case: when `Thread.holdsLock(ui)` is true (i.e. `addTask` was reached from inside
+the main tick thread's locked frame — the exact condition that escalated this incident to a
+whole-client freeze), the wait is bounded to `NCore.TICK_THREAD_WAIT_TIMEOUT_MS` (3s) and fails the
+task loudly via the existing `criticalExit`/`TaskCriticalExitException` path instead of hanging.
+This is a narrow, structural carve-out, not a general timeout: `Thread.holdsLock(ui)` is false for
+every ordinary bot call (bots run on their own `BotExecutor`-spawned worker thread, which never
+holds this lock), so the 137-of-142-unbounded-tasks finding above is otherwise unchanged — a bot
+walking for an hour to reach a resource is completely unaffected, no matter how long that takes.
+On timeout, `haven.error.FileLogger.logError()` now persists the task's class, how long it waited,
+and a captured stack trace of the stuck thread's exact call chain at the moment of timeout (the
+same information a live `jstack` would show, but automatic and persisted, rather than requiring one
+to be taken while the client is still hung) — closing the "no log output" half of this incident for
+any future recurrence, known or not-yet-found.
+
 **Confirms, rather than contradicts, session 1's framing:** this doesn't change the
 137/5 count or claim the pattern is a bug; it traces the actual mechanism so "unbounded" has a precise,
 verified meaning (safe to cancel, unsafe to leave unattended) instead of being a guess about what
